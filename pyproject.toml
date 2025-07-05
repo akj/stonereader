@@ -1,0 +1,19 @@
+[project]
+name = "stonereader"
+version = "0.1.0"
+description = "An accessible interface to view Hearthstone cards, decks, and replays."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "hearthstone>=9.15.8",
+    "hearthstone-data>=221175.1",
+    "pip",
+    "setuptools>=80.9.0",
+    "wxpython>=4.2.3",
+]
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.402",
+    "ruff>=0.11.10",
+]
