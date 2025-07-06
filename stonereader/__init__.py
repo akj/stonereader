@@ -6,6 +6,7 @@ with enhanced accessibility features for screen readers.
 """
 
 # Import main components for easier access
+from .app import main
 from .models import Card, Deck, CardDatabase, Hero, GameState
 from .presenters import (
     CardBrowserPresenter,
@@ -15,6 +16,7 @@ from .presenters import (
 from .views import MainWindow, CardBrowserPanel, DeckViewPanel, ReplayViewerPanel
 
 __all__ = [
+    "main",
     "Card",
     "Deck",
     "CardDatabase",
