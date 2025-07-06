@@ -73,27 +73,27 @@ class Card:
         """Generate screen reader friendly text for this card"""
         if verbosity == "brief":
             return f"{self.name}, {self.cost} mana"
-        
+
         parts = [f"{self.name}, {self.cost} mana cost"]
-        
+
         if self.attack is not None and self.health is not None:
             parts.append(f"{self.attack} attack, {self.health} health")
         elif self.attack is not None:
             parts.append(f"{self.attack} attack")
         elif self.health is not None:
             parts.append(f"{self.health} health")
-            
+
         if self.durability is not None:
             parts.append(f"{self.durability} durability")
-            
+
         parts.append(f"{self.card_type.lower()}")
-        
+
         if self.card_class != "NEUTRAL":
             parts.append(f"{self.card_class.lower()} class")
-            
+
         if verbosity == "detailed" and self.text:
             parts.append(f"Text: {self.text}")
-            
+
         return ", ".join(parts)
 
 
@@ -133,19 +133,13 @@ class Deck:
     @property
     def total_dust_cost(self) -> int:
         """Returns total dust cost to craft all cards in deck"""
-        dust_costs = {
-            "COMMON": 40,
-            "RARE": 100,
-            "EPIC": 400,
-            "LEGENDARY": 1600
-        }
-        
+        dust_costs = {"COMMON": 40, "RARE": 100, "EPIC": 400, "LEGENDARY": 1600}
+
         total_dust = 0
         for card, count in self.cards:
             dust_per_card = dust_costs.get(card.rarity, 0)
             total_dust += dust_per_card * count
         return total_dust
-
 
     @classmethod
     def from_deckstring(
@@ -167,7 +161,7 @@ class Deck:
                 cards.append((card, count))
             else:
                 missing_cards.append(dbf_id)
-                
+
         if missing_cards:
             raise ValueError(f"Missing cards with DBF IDs: {missing_cards}")
 
