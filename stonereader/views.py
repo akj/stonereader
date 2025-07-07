@@ -92,8 +92,8 @@ class MainWindow(wx.Frame):
             info.SetName("StoneReader")
             info.SetVersion("1.0")
             info.SetDescription("Accessible Hearthstone deck and card browser")
-            info.SetWebSite("https://github.com/your-repo/stonereader")
-            info.AddDeveloper("Your Name")
+            info.SetWebSite("https://github.com/akj/stonereader")
+            info.AddDeveloper("Andrew Johnson")
             wx.adv.AboutBox(info)
         except ImportError:
             wx.MessageBox(
@@ -152,6 +152,7 @@ class CardBrowserPanel(wx.Panel):
             filter_panel,
             choices=[
                 "All",
+                "Death Knight",
                 "Demon Hunter",
                 "Druid",
                 "Hunter",
