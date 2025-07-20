@@ -25,11 +25,8 @@ class CardBrowserPresenter:
         """Get card by name"""
         return self.card_db.get_card_by_name(name)
 
-    def format_for_speech(self, card: models.Card, detail_level: str = "medium") -> str:
-        """Formats card information for speech output"""
-        if detail_level == "brief":
-            return f"{card.name}, {card.cost} mana"
-
+    def format_card_details(self, card: models.Card) -> str:
+        """Formats complete card information for display"""
         # Build basic stats
         stats = []
         if card.attack is not None:
@@ -56,15 +53,7 @@ class CardBrowserPresenter:
             if card.has_tag(tag_name):
                 abilities.append(ability_name)
 
-        if detail_level == "medium":
-            parts = [f"{card.name}, {card.cost} mana {card.card_type.lower()}"]
-            if stats:
-                parts.append(", ".join(stats))
-            if abilities:
-                parts.append(f"with {', '.join(abilities)}")
-            return " ".join(parts)
-
-        # Full verbosity
+        # Build complete card details
         parts = [
             f"{card.name}",
             f"{card.cost} mana {card.card_type.lower()}",
@@ -108,26 +97,52 @@ class DeckManagerPresenter:
         # we don't need to enforce standard construction rules
         return []
 
-    def format_deck_for_speech(
-        self, deck: models.Deck, detail_level: str = "medium"
-    ) -> str:
-        """Formats deck information for speech output"""
-        if detail_level == "brief":
-            return f"{deck.name}, {deck.total_cards()} cards"
+    def format_card_details(self, card: models.Card) -> str:
+        """Formats complete card information for display"""
+        # Build basic stats
+        stats = []
+        if card.attack is not None:
+            stats.append(f"{card.attack} attack")
+        if card.health is not None:
+            stats.append(f"{card.health} health")
+        if card.durability is not None:
+            stats.append(f"{card.durability} durability")
 
-        total = deck.total_cards()
-        avg_cost = deck.average_cost()
-
-        if detail_level == "medium":
-            return f"{deck.name}, {deck.hero_class} {deck.format} deck with {total} cards, average cost {avg_cost:.1f}"
-
-        # Full verbosity
-        parts = [
-            f"{deck.name}",
-            f"{deck.hero_class} {deck.format} deck",
-            f"{total} cards total",
-            f"Average mana cost: {avg_cost:.1f}",
+        # Build abilities list using tag access
+        abilities = []
+        ability_tags = [
+            ("TAUNT", "taunt"),
+            ("CHARGE", "charge"),
+            ("RUSH", "rush"),
+            ("DIVINE_SHIELD", "divine shield"),
+            ("LIFESTEAL", "lifesteal"),
+            ("POISONOUS", "poisonous"),
+            ("STEALTH", "stealth"),
+            ("WINDFURY", "windfury"),
         ]
+
+        for tag_name, ability_name in ability_tags:
+            if card.has_tag(tag_name):
+                abilities.append(ability_name)
+
+        # Build complete card details
+        parts = [
+            f"{card.name}",
+            f"{card.cost} mana {card.card_type.lower()}",
+            f"{card.rarity.lower()} {card.card_class.lower()}",
+        ]
+
+        if stats:
+            parts.append(", ".join(stats))
+
+        if abilities:
+            parts.append(f"Abilities: {', '.join(abilities)}")
+
+        if card.text:
+            parts.append(f"Effect: {card.text}")
+
+        if card.card_set:
+            parts.append(f"From {card.card_set}")
 
         return ". ".join(parts) + "."
 

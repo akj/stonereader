@@ -20,6 +20,7 @@ class StoneReaderApp(wx.App):
         super().__init__(False)
         self.card_db: Optional[CardDatabase] = None
         self.main_window: Optional[MainWindow] = None
+        self.card_browser_presenter: Optional[CardBrowserPresenter] = None
 
     def OnInit(self):
         """Initialize the application"""
@@ -41,12 +42,12 @@ class StoneReaderApp(wx.App):
             self.main_window = MainWindow()
 
             # Initialize presenters
-            card_browser_presenter = CardBrowserPresenter(self.card_db)
+            self.card_browser_presenter = CardBrowserPresenter(self.card_db)
             deck_manager_presenter = DeckManagerPresenter(self.card_db)
 
             # Hook up presenters to views
             if self.main_window.card_browser:
-                self.main_window.card_browser.set_presenter(card_browser_presenter)
+                self.main_window.card_browser.set_presenter(self.card_browser_presenter)
             if self.main_window.deck_viewer:
                 self.main_window.deck_viewer.set_presenter(deck_manager_presenter)
 
@@ -93,7 +94,10 @@ class StoneReaderApp(wx.App):
     def _on_card_activated(self, card):
         """Handle card activation (double-click) in browser"""
         # Could show detailed card info in a dialog
-        info = card.to_speech_text("detailed")
+        if self.card_browser_presenter:
+            info = self.card_browser_presenter.format_card_details(card)
+        else:
+            info = f"{card.name}, {card.cost} mana {card.card_type.lower()}"
         wx.MessageBox(info, f"Card Details: {card.name}", wx.OK | wx.ICON_INFORMATION)
 
     def _on_deck_imported(self, deck):

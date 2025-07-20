@@ -96,6 +96,8 @@ class MainWindow(wx.Frame):
             info.AddDeveloper("Andrew Johnson")
             wx.adv.AboutBox(info)
         except ImportError:
+            import wx
+
             wx.MessageBox(
                 "StoneReader v1.0\nAccessible Hearthstone deck and card browser",
                 "About",
@@ -336,8 +338,8 @@ class CardBrowserPanel(wx.Panel):
         parent = self.GetParent()
         while parent and not hasattr(parent, "set_status"):
             parent = parent.GetParent()
-        if parent:
-            parent.set_status(f"Found {len(cards)} cards")
+        if parent and hasattr(parent, "set_status"):
+            parent.set_status(f"Found {len(cards)} cards")  # type: ignore
 
     def on_card_list_selected(self, event):
         """Handle card selection in results list"""
@@ -367,7 +369,7 @@ class CardBrowserPanel(wx.Panel):
         if not self.presenter:
             return
 
-        details = self.presenter.format_for_speech(card, "full")
+        details = self.presenter.format_card_details(card)
         self.card_details.SetValue(details)
 
     def focus_search(self):
@@ -550,8 +552,8 @@ class DeckViewPanel(wx.Panel):
             parent = self.GetParent()
             while parent and not hasattr(parent, "set_status"):
                 parent = parent.GetParent()
-            if parent:
-                parent.set_status(f"Imported deck: {deck.name}")
+            if parent and hasattr(parent, "set_status"):
+                parent.set_status(f"Imported deck: {deck.name}")  # type: ignore
 
         except Exception as e:
             wx.MessageBox(
@@ -690,7 +692,7 @@ class DeckViewPanel(wx.Panel):
         if not self.presenter:
             return
 
-        details = card.to_speech_text("detailed")
+        details = self.presenter.format_card_details(card)
         self.card_details.SetValue(details)
 
     def clear_deck(self):

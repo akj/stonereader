@@ -69,33 +69,6 @@ class Card:
             tags=tags_dict,
         )
 
-    def to_speech_text(self, verbosity: str = "normal") -> str:
-        """Generate screen reader friendly text for this card"""
-        if verbosity == "brief":
-            return f"{self.name}, {self.cost} mana"
-
-        parts = [f"{self.name}, {self.cost} mana cost"]
-
-        if self.attack is not None and self.health is not None:
-            parts.append(f"{self.attack} attack, {self.health} health")
-        elif self.attack is not None:
-            parts.append(f"{self.attack} attack")
-        elif self.health is not None:
-            parts.append(f"{self.health} health")
-
-        if self.durability is not None:
-            parts.append(f"{self.durability} durability")
-
-        parts.append(f"{self.card_type.lower()}")
-
-        if self.card_class != "NEUTRAL":
-            parts.append(f"{self.card_class.lower()} class")
-
-        if verbosity == "detailed" and self.text:
-            parts.append(f"Text: {self.text}")
-
-        return ", ".join(parts)
-
 
 @dataclass(frozen=True)
 class Deck:
