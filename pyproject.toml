@@ -5,6 +5,7 @@ description = "An accessible interface to view Hearthstone cards, decks, and rep
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "accessible-output2>=0.17",
     "hearthstone>=9.15.8",
     "hearthstone-data>=221175.1",
     "pip",
@@ -14,6 +15,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "pytest>=8.0",
     "pyright>=1.1.402",
     "ruff>=0.11.10",
 ]
