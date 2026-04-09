@@ -15,9 +15,10 @@ if TYPE_CHECKING:
 
 
 class _CardListCtrl(wx.ListCtrl):
-    """Virtual ListCtrl displaying card results as a visual companion.
+    """Virtual ListCtrl displaying card results.
 
-    Never focused — NVDA will not announce selection changes.
+    Visible to NVDA object navigation but kept out of Tab order via
+    AcceptsFocus() so keyboard navigation stays on the presenter key map.
     """
 
     def __init__(self, parent: wx.Window) -> None:
@@ -27,6 +28,9 @@ class _CardListCtrl(wx.ListCtrl):
         )
         self.AppendColumn("Card", width=400)
         self._cards: list[Card] = []
+
+    def AcceptsFocus(self) -> bool:  # noqa: N802 — wx override
+        return False
 
     def set_cards(self, cards: list[Card]) -> None:
         self._cards = cards
@@ -64,7 +68,6 @@ class CardBrowserPanel(wx.Panel):
         results_label = wx.StaticText(self, label="Card results:")
         sizer.Add(results_label, 0, wx.ALL, 4)
         self._list_ctrl = _CardListCtrl(self)
-        self._list_ctrl.Disable()  # visual only — keep out of tab order for NVDA/JAWS
         sizer.Add(self._list_ctrl, 1, wx.EXPAND | wx.ALL, 4)
 
         self.SetSizer(sizer)

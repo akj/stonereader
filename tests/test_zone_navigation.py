@@ -100,12 +100,12 @@ def test_detail_lines_navigates_card_details():
     p._items["zone_a"] = [card]
     p._init_navigation(["zone_a"])
     p.navigate_to_zone("zone_a", "Zone A")
-    # First Down reads first detail line (name)
-    p.read_detail_lines(card, direction=1)
-    assert "Fireball" in speech.last_speech
-    # Second Down reads next line (cost)
+    # navigate_to_zone announced the name; first Down skips to cost
     p.read_detail_lines(card, direction=1)
     assert "4 mana" in speech.last_speech
+    # Second Down reads card text
+    p.read_detail_lines(card, direction=1)
+    assert "Deal 6 damage." in speech.last_speech
 
 
 def test_diminishing_orienting_messages():

@@ -166,7 +166,7 @@ def test_down_arrow_reads_first_detail_line():
     key_map = presenter.get_key_map()
     key_map["down"]()
 
-    # First detail line is the card name
+    # No prior navigation announced the name, so first detail line is name
     assert "Arcane Intellect" in speech.last_speech
 
 
@@ -180,6 +180,19 @@ def test_down_arrow_twice_reads_cost():
     key_map["down"]()
 
     assert "3 mana" in speech.last_speech
+
+
+def test_down_after_navigate_skips_name():
+    """After left/right announces the name, down reads cost (not name again)."""
+    card_db = make_card_db(ALL_CARDS)
+    speech = MockSpeechService()
+    presenter = CardBrowserPresenter(speech, card_db)
+
+    key_map = presenter.get_key_map()
+    key_map["right"]()  # announces "Fireball, 2 of 4"
+    key_map["down"]()   # should skip name, read cost
+
+    assert "4 mana" in speech.last_speech
 
 
 def test_up_arrow_moves_back_through_details():

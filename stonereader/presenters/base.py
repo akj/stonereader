@@ -50,19 +50,19 @@ class ZoneNavigationMixin:
         raise NotImplementedError
 
     def _format_item_speech(self, item: Any, position: int, total: int) -> str:
-        prefix = f"{position} of {total}: "
+        suffix = f", {position} of {total}"
         if item is None:
-            return prefix + "Unknown card"
+            return "Unknown card" + suffix
         if isinstance(item, tuple) and len(item) == 2:
             card, count = item
             name = getattr(card, "name", str(card))
-            return prefix + f"{name} x{count}"
+            return f"{name} x{count}" + suffix
         name = getattr(item, "name", str(item))
-        return prefix + name
+        return name + suffix
 
     def navigate_to_zone(self, zone_name: str, zone_label: str) -> None:
         self._current_zone = zone_name
-        self._detail_cursor = -1
+        self._detail_cursor = 0
         self._orienting_counts.clear()
         items = self.get_zone_items(zone_name)
         if not items:
@@ -78,7 +78,7 @@ class ZoneNavigationMixin:
         self, zone_name: str, zone_label: str, content: str
     ) -> None:
         self._current_zone = zone_name
-        self._detail_cursor = -1
+        self._detail_cursor = 0
         self._orienting_counts.clear()
         self._speech.speak(f"{zone_label}: {content}")
 
@@ -91,7 +91,7 @@ class ZoneNavigationMixin:
         cursor = self._zone_cursors.get(zone, 0) + delta
         cursor = max(0, min(cursor, len(items) - 1))
         self._zone_cursors[zone] = cursor
-        self._detail_cursor = -1
+        self._detail_cursor = 0
         self._speech.speak(
             self._format_item_speech(items[cursor], cursor + 1, len(items))
         )
@@ -104,7 +104,7 @@ class ZoneNavigationMixin:
             return
         cursor = max(0, min(pos - 1, len(items) - 1))
         self._zone_cursors[zone] = cursor
-        self._detail_cursor = -1
+        self._detail_cursor = 0
         self._speech.speak(
             self._format_item_speech(items[cursor], cursor + 1, len(items))
         )
