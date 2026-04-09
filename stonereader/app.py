@@ -96,5 +96,18 @@ class StoneReaderApp(wx.App):
 
     def OnInit(self) -> bool:
         self._frame = MainWindow()
+
+        # Card Library tab
+        from stonereader.models.card import CardDatabase
+        from stonereader.presenters.card_browser import CardBrowserPresenter
+        from stonereader.views.card_browser import CardBrowserPanel
+
+        card_db = CardDatabase.load()
+        card_presenter = CardBrowserPresenter(self._frame.speech, card_db)
+        card_panel = CardBrowserPanel(
+            self._frame.notebook, card_presenter, self._frame.input_layer
+        )
+        self._frame.add_tab(card_panel, "Card Library", card_presenter, card_panel)
+
         self._frame.Show()
         return True
