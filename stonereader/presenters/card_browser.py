@@ -9,6 +9,9 @@ from stonereader.presenters.base import BasePresenter, ZoneNavigationMixin
 from stonereader.speech_service import SpeechService
 
 
+_RESULTS_ZONE = "results"
+
+
 class CardBrowserPresenter(ZoneNavigationMixin, BasePresenter):
     """Manages search state and navigation for the Card Library tab."""
 
@@ -18,18 +21,18 @@ class CardBrowserPresenter(ZoneNavigationMixin, BasePresenter):
         self._results: list[Card] = sorted(
             card_db.collectible_cards, key=lambda c: c.name
         )
-        self._init_navigation(["results"])
+        self._init_navigation([_RESULTS_ZONE])
         self._on_state_changed: Callable[[list[Card], int], None] | None = None
 
     def get_zone_items(self, zone_name: str) -> Sequence[Any]:
-        if zone_name == "results":
+        if zone_name == _RESULTS_ZONE:
             return self._results
         return []
 
     def search(self, query: str) -> None:
         """Run a search and announce the result count."""
         self._results = self._card_db.search_cards(query)
-        self._zone_cursors["results"] = 0
+        self._zone_cursors[_RESULTS_ZONE] = 0
         self._detail_cursor = -1
         count = len(self._results)
         if count == 0:
@@ -47,7 +50,7 @@ class CardBrowserPresenter(ZoneNavigationMixin, BasePresenter):
 
     def _notify_view(self) -> None:
         if self._on_state_changed is not None:
-            cursor = self._zone_cursors.get("results", 0)
+            cursor = self._zone_cursors.get(_RESULTS_ZONE, 0)
             self._on_state_changed(self._results, cursor)
 
     def get_key_map(self) -> dict[str, Callable[[], None]]:

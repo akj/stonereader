@@ -20,7 +20,7 @@ def make_card(
 ) -> Card:
     return Card(
         id=f"TEST_{name.upper().replace(' ', '_')}",
-        dbf_id=0,
+        dbf_id=hash(name) & 0xFFFF,
         name=name,
         cost=cost,
         attack=attack,
