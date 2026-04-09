@@ -38,7 +38,7 @@ class Card:
         tags_dict: Dict[str, Any] = {}
         if hasattr(cardxml_card, "tags") and cardxml_card.tags:
             for tag_enum, value in cardxml_card.tags.items():
-                tag_name = str(tag_enum).split(".")[-1]
+                tag_name = tag_enum.name if hasattr(tag_enum, "name") else str(tag_enum)
                 tags_dict[tag_name] = value
 
         return cls(
@@ -49,12 +49,12 @@ class Card:
             attack=cardxml_card.atk if cardxml_card.atk else None,
             health=cardxml_card.health if cardxml_card.health else None,
             text=cardxml_card.description or "",
-            rarity=str(cardxml_card.rarity) if cardxml_card.rarity else "COMMON",
+            rarity=cardxml_card.rarity.name if cardxml_card.rarity else "COMMON",
             card_class=(
-                str(cardxml_card.card_class) if cardxml_card.card_class else "NEUTRAL"
+                cardxml_card.card_class.name if cardxml_card.card_class else "NEUTRAL"
             ),
-            card_type=str(cardxml_card.type) if cardxml_card.type else "MINION",
-            card_set=str(cardxml_card.card_set) if cardxml_card.card_set else "",
+            card_type=cardxml_card.type.name if cardxml_card.type else "MINION",
+            card_set=cardxml_card.card_set.name if cardxml_card.card_set else "",
             collectible=bool(cardxml_card.collectible),
             durability=cardxml_card.durability if cardxml_card.durability else None,
             tags=tags_dict,
