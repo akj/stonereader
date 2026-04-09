@@ -87,10 +87,11 @@ class CardBrowserPanel(wx.Panel):
         self.SetFocus()
         frame = self.GetTopLevelParent()
         count = len(self._presenter.get_zone_items("results"))
-        if count:
-            frame.SetStatusText(f"{count} results")
-        else:
-            frame.SetStatusText("No results")
+        if isinstance(frame, wx.Frame):
+            if count:
+                frame.SetStatusText(f"{count} results")
+            else:
+                frame.SetStatusText("No results")
 
     def _on_state_changed(self, results: list[Card], cursor: int) -> None:
         self._list_ctrl.set_cards(results)
