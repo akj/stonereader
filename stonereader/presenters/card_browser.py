@@ -1,0 +1,54 @@
+"""Card Library presenter — search and browse the card database."""
+
+from __future__ import annotations
+
+from typing import Any, Callable, Sequence
+
+from stonereader.models.card import Card, CardDatabase
+from stonereader.presenters.base import BasePresenter, ZoneNavigationMixin
+from stonereader.speech_service import SpeechService
+
+
+class CardBrowserPresenter(ZoneNavigationMixin, BasePresenter):
+    """Manages search state and navigation for the Card Library tab."""
+
+    def __init__(self, speech: SpeechService, card_db: CardDatabase) -> None:
+        super().__init__(speech)
+        self._card_db = card_db
+        self._results: list[Card] = sorted(
+            card_db.collectible_cards, key=lambda c: c.name
+        )
+        self._init_navigation(["results"])
+        self._on_state_changed: Callable[[list[Card], int], None] | None = None
+
+    def get_zone_items(self, zone_name: str) -> Sequence[Any]:
+        if zone_name == "results":
+            return self._results
+        return []
+
+    def search(self, query: str) -> None:
+        """Run a search and announce the result count."""
+        self._results = self._card_db.search_cards(query)
+        self._zone_cursors["results"] = 0
+        self._detail_cursor = -1
+        count = len(self._results)
+        if count == 0:
+            self._speech.speak("No results")
+        elif count == 1:
+            self._speech.speak("1 result")
+        else:
+            self._speech.speak(f"{count} results")
+        self._notify_view()
+
+    def set_on_state_changed(
+        self, callback: Callable[[list[Card], int], None]
+    ) -> None:
+        self._on_state_changed = callback
+
+    def _notify_view(self) -> None:
+        if self._on_state_changed is not None:
+            cursor = self._zone_cursors.get("results", 0)
+            self._on_state_changed(self._results, cursor)
+
+    def get_key_map(self) -> dict[str, Callable[[], None]]:
+        return {}
