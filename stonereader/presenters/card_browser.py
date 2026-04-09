@@ -23,6 +23,7 @@ class CardBrowserPresenter(ZoneNavigationMixin, BasePresenter):
         )
         self._init_navigation([_RESULTS_ZONE])
         self._on_state_changed: Callable[[list[Card], int], None] | None = None
+        self._on_status_changed: Callable[[str], None] | None = None
 
     def get_zone_items(self, zone_name: str) -> Sequence[Any]:
         if zone_name == _RESULTS_ZONE:
@@ -36,17 +37,23 @@ class CardBrowserPresenter(ZoneNavigationMixin, BasePresenter):
         self._detail_cursor = -1
         count = len(self._results)
         if count == 0:
-            self._speech.speak("No results")
+            status = "No results"
         elif count == 1:
-            self._speech.speak("1 result")
+            status = "1 result"
         else:
-            self._speech.speak(f"{count} results")
+            status = f"{count} results"
+        self._speech.speak(status)
+        if self._on_status_changed is not None:
+            self._on_status_changed(status)
         self._notify_view()
 
     def set_on_state_changed(
         self, callback: Callable[[list[Card], int], None]
     ) -> None:
         self._on_state_changed = callback
+
+    def set_on_status_changed(self, callback: Callable[[str], None]) -> None:
+        self._on_status_changed = callback
 
     def _notify_view(self) -> None:
         if self._on_state_changed is not None:

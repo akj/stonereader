@@ -286,6 +286,30 @@ def test_view_callback_fires_on_end():
     assert received == [(4, 3)]
 
 
+def test_status_callback_fires_on_search():
+    card_db = make_card_db(ALL_CARDS)
+    speech = MockSpeechService()
+    presenter = CardBrowserPresenter(speech, card_db)
+
+    statuses: list[str] = []
+    presenter.set_on_status_changed(lambda text: statuses.append(text))
+    presenter.search("fire")
+
+    assert statuses == ["1 result"]
+
+
+def test_status_callback_no_results():
+    card_db = make_card_db(ALL_CARDS)
+    speech = MockSpeechService()
+    presenter = CardBrowserPresenter(speech, card_db)
+
+    statuses: list[str] = []
+    presenter.set_on_status_changed(lambda text: statuses.append(text))
+    presenter.search("xyz_no_match")
+
+    assert statuses == ["No results"]
+
+
 def test_copy_current_card_name_returns_name():
     card_db = make_card_db(ALL_CARDS)
     speech = MockSpeechService()

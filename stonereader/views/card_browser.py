@@ -64,12 +64,14 @@ class CardBrowserPanel(wx.Panel):
         results_label = wx.StaticText(self, label="Card results:")
         sizer.Add(results_label, 0, wx.ALL, 4)
         self._list_ctrl = _CardListCtrl(self)
+        self._list_ctrl.Disable()  # visual only — keep out of tab order for NVDA/JAWS
         sizer.Add(self._list_ctrl, 1, wx.EXPAND | wx.ALL, 4)
 
         self.SetSizer(sizer)
 
-        # Wire view callback
+        # Wire presenter callbacks
         presenter.set_on_state_changed(self._on_state_changed)
+        presenter.set_on_status_changed(self._on_status_changed)
 
         # Context menu
         self.Bind(wx.EVT_CONTEXT_MENU, self._on_context_menu)
@@ -84,14 +86,12 @@ class CardBrowserPanel(wx.Panel):
     def _on_search(self, event: wx.CommandEvent) -> None:
         query = self._search_ctrl.GetValue()
         self._presenter.search(query)
-        self.SetFocus()
+        wx.CallAfter(self.SetFocus)
+
+    def _on_status_changed(self, text: str) -> None:
         frame = self.GetTopLevelParent()
-        count = len(self._presenter.get_zone_items("results"))
         if isinstance(frame, wx.Frame):
-            if count:
-                frame.SetStatusText(f"{count} results")
-            else:
-                frame.SetStatusText("No results")
+            frame.SetStatusText(text)
 
     def _on_state_changed(self, results: list[Card], cursor: int) -> None:
         self._list_ctrl.set_cards(results)
