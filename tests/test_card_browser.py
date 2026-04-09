@@ -111,3 +111,106 @@ def test_initial_results_are_all_collectible_cards():
     # Sorted by name
     assert items[0].name == "Arcane Intellect"
     assert items[1].name == "Fireball"
+
+
+def test_key_map_has_navigation_keys():
+    card_db = make_card_db(ALL_CARDS)
+    speech = MockSpeechService()
+    presenter = CardBrowserPresenter(speech, card_db)
+
+    key_map = presenter.get_key_map()
+
+    assert "left" in key_map
+    assert "right" in key_map
+    assert "up" in key_map
+    assert "down" in key_map
+    assert "home" in key_map
+    assert "end" in key_map
+
+
+def test_right_arrow_announces_next_card():
+    card_db = make_card_db(ALL_CARDS)
+    speech = MockSpeechService()
+    presenter = CardBrowserPresenter(speech, card_db)
+
+    key_map = presenter.get_key_map()
+    key_map["right"]()
+
+    # Initial cursor is 0 (Arcane Intellect), right goes to 1 (Fireball)
+    assert "Fireball" in speech.last_speech
+    assert "2 of 4" in speech.last_speech
+
+
+def test_left_arrow_at_start_stays_at_first():
+    card_db = make_card_db(ALL_CARDS)
+    speech = MockSpeechService()
+    presenter = CardBrowserPresenter(speech, card_db)
+
+    key_map = presenter.get_key_map()
+    key_map["left"]()
+
+    assert "Arcane Intellect" in speech.last_speech
+    assert "1 of 4" in speech.last_speech
+
+
+def test_down_arrow_reads_first_detail_line():
+    card_db = make_card_db(ALL_CARDS)
+    speech = MockSpeechService()
+    presenter = CardBrowserPresenter(speech, card_db)
+
+    key_map = presenter.get_key_map()
+    key_map["down"]()
+
+    # First detail line is the card name
+    assert "Arcane Intellect" in speech.last_speech
+
+
+def test_down_arrow_twice_reads_cost():
+    card_db = make_card_db(ALL_CARDS)
+    speech = MockSpeechService()
+    presenter = CardBrowserPresenter(speech, card_db)
+
+    key_map = presenter.get_key_map()
+    key_map["down"]()
+    key_map["down"]()
+
+    assert "3 mana" in speech.last_speech
+
+
+def test_up_arrow_moves_back_through_details():
+    card_db = make_card_db(ALL_CARDS)
+    speech = MockSpeechService()
+    presenter = CardBrowserPresenter(speech, card_db)
+
+    key_map = presenter.get_key_map()
+    key_map["down"]()  # name
+    key_map["down"]()  # cost
+    key_map["up"]()    # back to name
+
+    assert "Arcane Intellect" in speech.last_speech
+
+
+def test_home_jumps_to_first():
+    card_db = make_card_db(ALL_CARDS)
+    speech = MockSpeechService()
+    presenter = CardBrowserPresenter(speech, card_db)
+
+    key_map = presenter.get_key_map()
+    key_map["right"]()
+    key_map["right"]()
+    key_map["home"]()
+
+    assert "Arcane Intellect" in speech.last_speech
+    assert "1 of 4" in speech.last_speech
+
+
+def test_end_jumps_to_last():
+    card_db = make_card_db(ALL_CARDS)
+    speech = MockSpeechService()
+    presenter = CardBrowserPresenter(speech, card_db)
+
+    key_map = presenter.get_key_map()
+    key_map["end"]()
+
+    assert "Wolfrider" in speech.last_speech
+    assert "4 of 4" in speech.last_speech

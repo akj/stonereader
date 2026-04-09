@@ -54,4 +54,21 @@ class CardBrowserPresenter(ZoneNavigationMixin, BasePresenter):
             self._on_state_changed(self._results, cursor)
 
     def get_key_map(self) -> dict[str, Callable[[], None]]:
-        return {}
+        return {
+            "left": lambda: self.move_in_zone(-1),
+            "right": lambda: self.move_in_zone(1),
+            "down": self._read_detail_down,
+            "up": self._read_detail_up,
+            "home": self.jump_to_first,
+            "end": self.jump_to_last,
+        }
+
+    def _read_detail_down(self) -> None:
+        item = self._current_item()
+        if item is not None:
+            self.read_detail_lines(item, direction=1)
+
+    def _read_detail_up(self) -> None:
+        item = self._current_item()
+        if item is not None:
+            self.read_detail_lines(item, direction=-1)
