@@ -1,5 +1,3 @@
-import sqlite3
-
 from stonereader.db import get_connection, init_db, get_schema_version
 
 
