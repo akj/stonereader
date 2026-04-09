@@ -1,6 +1,6 @@
 from typing import Dict
 from hearthstone import cardxml, deckstrings
-import models
+from stonereader import models
 
 class CardBrowserPresenter:
     """Handles card search and browsing logic"""
