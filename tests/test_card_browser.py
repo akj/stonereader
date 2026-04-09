@@ -7,6 +7,9 @@ from stonereader.models.card import Card, CardDatabase
 from stonereader.presenters.card_browser import CardBrowserPresenter
 
 
+_next_dbf_id = 0
+
+
 def make_card(
     name: str = "Test Card",
     cost: int = 1,
@@ -18,9 +21,11 @@ def make_card(
     rarity: str = "COMMON",
     card_set: str = "CORE",
 ) -> Card:
+    global _next_dbf_id
+    _next_dbf_id += 1
     return Card(
         id=f"TEST_{name.upper().replace(' ', '_')}",
-        dbf_id=hash(name) & 0xFFFF,
+        dbf_id=_next_dbf_id,
         name=name,
         cost=cost,
         attack=attack,
@@ -246,6 +251,39 @@ def test_view_callback_fires_on_navigation():
     presenter.move_in_zone(1)  # right
 
     assert received == [(4, 1)]
+
+
+def test_view_callback_fires_on_home():
+    card_db = make_card_db(ALL_CARDS)
+    speech = MockSpeechService()
+    presenter = CardBrowserPresenter(speech, card_db)
+
+    presenter.move_in_zone(1)  # move to index 1
+    received: list[tuple[int, int]] = []
+
+    def on_state_changed(results: list[Card], cursor: int) -> None:
+        received.append((len(results), cursor))
+
+    presenter.set_on_state_changed(on_state_changed)
+    presenter.jump_to_first()
+
+    assert received == [(4, 0)]
+
+
+def test_view_callback_fires_on_end():
+    card_db = make_card_db(ALL_CARDS)
+    speech = MockSpeechService()
+    presenter = CardBrowserPresenter(speech, card_db)
+
+    received: list[tuple[int, int]] = []
+
+    def on_state_changed(results: list[Card], cursor: int) -> None:
+        received.append((len(results), cursor))
+
+    presenter.set_on_state_changed(on_state_changed)
+    presenter.jump_to_last()
+
+    assert received == [(4, 3)]
 
 
 def test_copy_current_card_name_returns_name():

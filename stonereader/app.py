@@ -72,12 +72,17 @@ class MainWindow(wx.Frame):
         self._tab_presenters.append(presenter)
         self._tab_focus_targets.append(focus_target)
         self._tab_names.append(name)
+        if len(self._tab_presenters) == 1:
+            get_map = getattr(presenter, "get_key_map", None)
+            key_map = get_map() if get_map is not None else {}
+            self._input_layer.activate_view(name, key_map)
 
     def _on_page_changed(self, event: wx.BookCtrlEvent) -> None:
         page = event.GetSelection()
         if 0 <= page < len(self._tab_presenters):
             presenter = self._tab_presenters[page]
-            key_map = presenter.get_key_map() if hasattr(presenter, "get_key_map") else {}
+            get_map = getattr(presenter, "get_key_map", None)
+            key_map = get_map() if get_map is not None else {}
             self._input_layer.activate_view(self._tab_names[page], key_map)
             target = self._tab_focus_targets[page]
             wx.CallAfter(target.SetFocus)

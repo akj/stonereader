@@ -57,6 +57,14 @@ class CardBrowserPresenter(ZoneNavigationMixin, BasePresenter):
         super().move_in_zone(delta)
         self._notify_view()
 
+    def jump_to_first(self) -> None:
+        super().jump_to_first()
+        self._notify_view()
+
+    def jump_to_last(self) -> None:
+        super().jump_to_last()
+        self._notify_view()
+
     def copy_current_card_name(self) -> str | None:
         """Return current card name and announce copy. View handles clipboard."""
         item = self._current_item()
