@@ -53,6 +53,21 @@ class CardBrowserPresenter(ZoneNavigationMixin, BasePresenter):
             cursor = self._zone_cursors.get(_RESULTS_ZONE, 0)
             self._on_state_changed(self._results, cursor)
 
+    def move_in_zone(self, delta: int) -> None:
+        super().move_in_zone(delta)
+        self._notify_view()
+
+    def copy_current_card_name(self) -> str | None:
+        """Return current card name and announce copy. View handles clipboard."""
+        item = self._current_item()
+        if item is None:
+            return None
+        card = self._extract_card(item)
+        if card is None:
+            return None
+        self.announce(f"Copied {card.name}")
+        return card.name
+
     def get_key_map(self) -> dict[str, Callable[[], None]]:
         return {
             "left": lambda: self.move_in_zone(-1),

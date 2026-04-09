@@ -214,3 +214,56 @@ def test_end_jumps_to_last():
 
     assert "Wolfrider" in speech.last_speech
     assert "4 of 4" in speech.last_speech
+
+
+def test_view_callback_fires_on_search():
+    card_db = make_card_db(ALL_CARDS)
+    speech = MockSpeechService()
+    presenter = CardBrowserPresenter(speech, card_db)
+
+    received: list[tuple[int, int]] = []
+
+    def on_state_changed(results: list[Card], cursor: int) -> None:
+        received.append((len(results), cursor))
+
+    presenter.set_on_state_changed(on_state_changed)
+    presenter.search("fire")
+
+    assert received == [(1, 0)]
+
+
+def test_view_callback_fires_on_navigation():
+    card_db = make_card_db(ALL_CARDS)
+    speech = MockSpeechService()
+    presenter = CardBrowserPresenter(speech, card_db)
+
+    received: list[tuple[int, int]] = []
+
+    def on_state_changed(results: list[Card], cursor: int) -> None:
+        received.append((len(results), cursor))
+
+    presenter.set_on_state_changed(on_state_changed)
+    presenter.move_in_zone(1)  # right
+
+    assert received == [(4, 1)]
+
+
+def test_copy_current_card_name_returns_name():
+    card_db = make_card_db(ALL_CARDS)
+    speech = MockSpeechService()
+    presenter = CardBrowserPresenter(speech, card_db)
+
+    name = presenter.copy_current_card_name()
+
+    assert name == "Arcane Intellect"
+    assert "Copied Arcane Intellect" in speech.last_speech
+
+
+def test_copy_with_no_results_returns_none():
+    card_db = make_card_db([])
+    speech = MockSpeechService()
+    presenter = CardBrowserPresenter(speech, card_db)
+
+    name = presenter.copy_current_card_name()
+
+    assert name is None
