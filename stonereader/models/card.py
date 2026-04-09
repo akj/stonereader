@@ -1,7 +1,20 @@
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from hearthstone.cardxml import load
+
+
+def _strip_tags(text: str) -> str:
+    """Strip HTML tags, game markup, and normalize whitespace in card text."""
+    text = re.sub(r"<[^>]+>", "", text)
+    text = text.replace("\\n", " ").replace("\n", " ")
+    # Remove spell damage scaling markers ($)
+    text = text.replace("$", "")
+    # Replace underscore joiners with spaces
+    text = text.replace("_", " ")
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
 
 
 @dataclass(frozen=True)
@@ -21,6 +34,12 @@ class Card:
     card_set: str = ""
     collectible: bool = True
     durability: Optional[int] = None
+    spell_school: str = ""
+    flavor_text: str = ""
+    artist: str = ""
+    rune_blood: int = 0
+    rune_frost: int = 0
+    rune_unholy: int = 0
     tags: Dict[str, Any] = field(default_factory=dict)
 
     def has_tag(self, tag_name: str) -> bool:
@@ -35,11 +54,24 @@ class Card:
 
     @classmethod
     def from_cardxml(cls, cardxml_card: Any) -> "Card":
+        from hearthstone.enums import GameTag
+
         tags_dict: Dict[str, Any] = {}
+        rune_blood = 0
+        rune_frost = 0
+        rune_unholy = 0
         if hasattr(cardxml_card, "tags") and cardxml_card.tags:
             for tag_enum, value in cardxml_card.tags.items():
                 tag_name = tag_enum.name if hasattr(tag_enum, "name") else str(tag_enum)
                 tags_dict[tag_name] = value
+            rune_blood = cardxml_card.tags.get(GameTag.COST_BLOOD, 0)
+            rune_frost = cardxml_card.tags.get(GameTag.COST_FROST, 0)
+            rune_unholy = cardxml_card.tags.get(GameTag.COST_UNHOLY, 0)
+
+        spell_school = ""
+        if getattr(cardxml_card, "spell_school", None):
+            ss = cardxml_card.spell_school
+            spell_school = ss.name if hasattr(ss, "name") else str(ss)
 
         return cls(
             id=cardxml_card.id,
@@ -48,7 +80,7 @@ class Card:
             cost=cardxml_card.cost or 0,
             attack=cardxml_card.atk if cardxml_card.atk else None,
             health=cardxml_card.health if cardxml_card.health else None,
-            text=cardxml_card.description or "",
+            text=_strip_tags(cardxml_card.description or ""),
             rarity=cardxml_card.rarity.name if cardxml_card.rarity else "COMMON",
             card_class=(
                 cardxml_card.card_class.name if cardxml_card.card_class else "NEUTRAL"
@@ -57,6 +89,12 @@ class Card:
             card_set=cardxml_card.card_set.name if cardxml_card.card_set else "",
             collectible=bool(cardxml_card.collectible),
             durability=cardxml_card.durability if cardxml_card.durability else None,
+            spell_school=spell_school,
+            flavor_text=getattr(cardxml_card, "flavortext", "") or "",
+            artist=getattr(cardxml_card, "artist", "") or "",
+            rune_blood=rune_blood,
+            rune_frost=rune_frost,
+            rune_unholy=rune_unholy,
             tags=tags_dict,
         )
 
@@ -67,29 +105,56 @@ class Card:
     def detail_lines(self) -> list[str]:
         """Return ordered detail lines for Up/Down inspection.
 
-        Order: name, cost, attack/health (if applicable), type, class,
-        text, set, rarity, durability (if applicable).
+        Order matches HearthstoneAccess convention:
+        name, cost, runes (DK), stats, text, spell school, type,
+        rarity, set, flavor, artist.
         """
         lines = [
             self.name,
             f"{self.cost} mana",
         ]
-        if self.attack is not None and self.health is not None:
+        # Runes (Death Knight only)
+        runes: list[str] = []
+        if self.rune_blood:
+            runes.append(f"{self.rune_blood} blood")
+        if self.rune_frost:
+            runes.append(f"{self.rune_frost} frost")
+        if self.rune_unholy:
+            runes.append(f"{self.rune_unholy} unholy")
+        if runes:
+            lines.append(", ".join(runes))
+        # Stats — varies by card type
+        if self.card_type == "WEAPON":
+            # Weapons: health field holds durability
+            if self.attack is not None and self.health is not None:
+                lines.append(f"{self.attack} attack, {self.health} durability")
+            elif self.attack is not None:
+                lines.append(f"{self.attack} attack")
+        elif self.attack is not None and self.health is not None:
             lines.append(f"{self.attack} attack, {self.health} health")
         elif self.attack is not None:
             lines.append(f"{self.attack} attack")
         elif self.health is not None:
             lines.append(f"{self.health} health")
-        lines.append(self.card_type.lower())
-        if self.card_class != "NEUTRAL":
-            lines.append(f"{self.card_class.lower()} class")
+        # Card text
         if self.text:
             lines.append(self.text)
-        if self.card_set:
-            lines.append(f"Set: {self.card_set}")
+        # Spell school
+        if self.spell_school:
+            lines.append(self.spell_school.lower())
+        # Type
+        lines.append(self.card_type.lower())
+        # Rarity
         lines.append(self.rarity.lower())
-        if self.durability is not None:
-            lines.append(f"{self.durability} durability")
+        # Set
+        if self.card_set:
+            lines.append(self.card_set)
+        # Flavor text
+        if self.flavor_text:
+            lines.append(self.flavor_text)
+        # Artist
+        if self.artist:
+            lines.append(self.artist)
         return lines
 
 
