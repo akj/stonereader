@@ -9,7 +9,7 @@ from stonereader.models.deck import DeckSummary
 
 _SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS schema_version (
-    version INTEGER NOT NULL
+    version INTEGER PRIMARY KEY
 );
 
 CREATE TABLE IF NOT EXISTS decks (
@@ -60,7 +60,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     if version >= 1:
         return
     conn.executescript(_SCHEMA_V1)
-    conn.execute("INSERT INTO schema_version (version) VALUES (?)", (1,))
+    conn.execute("INSERT OR REPLACE INTO schema_version (version) VALUES (?)", (1,))
     conn.commit()
 
 
