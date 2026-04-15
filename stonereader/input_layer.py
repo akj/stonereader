@@ -30,6 +30,7 @@ _KEY_NAMES: Dict[int, str] = {
     wx.WXK_HOME: "home",
     wx.WXK_END: "end",
     wx.WXK_SPACE: "space",
+    wx.WXK_DELETE: "delete",
 }
 
 

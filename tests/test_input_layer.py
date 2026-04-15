@@ -114,3 +114,19 @@ def test_activate_view_exits_text_mode():
     layer.activate_view("v1", {})
     assert layer._text_mode is False
     frame.Destroy()
+
+
+def test_key_spec_delete():
+    event = _make_key_event(wx.WXK_DELETE)
+    assert _key_spec_from_event(event) == "delete"
+
+
+def test_input_layer_delete_key_dispatches():
+    frame = wx.Frame(None)
+    layer = InputLayer(frame)
+    called = []
+    layer.activate_view("test", {"delete": lambda: called.append("delete")})
+    event = _make_key_event(wx.WXK_DELETE)
+    layer._on_char_hook(event)
+    assert called == ["delete"]
+    frame.Destroy()
