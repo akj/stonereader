@@ -202,10 +202,7 @@ class MainWindow(wx.Frame):
                 if isinstance(import_panel, ImportDeckPanel):
                     import_panel.pre_fill_deckstring(text)
                     wx.CallAfter(import_panel.name_ctrl.SetFocus)
-            # Clear clipboard after successful detection
-            if wx.TheClipboard.Open():
-                wx.TheClipboard.Clear()
-                wx.TheClipboard.Close()
+            # Don't clear clipboard -- _last_clipboard_deckstring prevents re-prompt
 
     def _on_quit(self, event: wx.CommandEvent) -> None:
         self.Close()
