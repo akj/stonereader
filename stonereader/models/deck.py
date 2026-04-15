@@ -1,3 +1,5 @@
+"""Hearthstone deck models -- Deck (resolved cards) and DeckSummary (lightweight list display)."""
+
 from dataclasses import dataclass
 from typing import Dict, List, Tuple
 
