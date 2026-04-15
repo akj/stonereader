@@ -92,37 +92,37 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DECK-01 | — | Pending |
-| DECK-02 | — | Pending |
-| DECK-03 | — | Pending |
-| DECK-04 | — | Pending |
-| DECK-05 | — | Pending |
-| LOG-01 | — | Pending |
-| LOG-02 | — | Pending |
-| LOG-03 | — | Pending |
-| LOG-04 | — | Pending |
-| LOG-05 | — | Pending |
-| LIVE-01 | — | Pending |
-| LIVE-02 | — | Pending |
-| LIVE-03 | — | Pending |
-| LIVE-04 | — | Pending |
-| LIVE-05 | — | Pending |
-| LIVE-06 | — | Pending |
-| LIVE-07 | — | Pending |
-| LIVE-08 | — | Pending |
-| LIVE-09 | — | Pending |
-| REPLAY-01 | — | Pending |
-| REPLAY-02 | — | Pending |
-| REPLAY-03 | — | Pending |
-| REPLAY-04 | — | Pending |
-| REPLAY-05 | — | Pending |
-| REPLAY-06 | — | Pending |
+| DECK-01 | Phase 1 | Pending |
+| DECK-02 | Phase 1 | Pending |
+| DECK-03 | Phase 1 | Pending |
+| DECK-04 | Phase 1 | Pending |
+| DECK-05 | Phase 1 | Pending |
+| LOG-01 | Phase 2 | Pending |
+| LOG-02 | Phase 2 | Pending |
+| LOG-03 | Phase 2 | Pending |
+| LOG-04 | Phase 2 | Pending |
+| LOG-05 | Phase 2 | Pending |
+| LIVE-01 | Phase 3 | Pending |
+| LIVE-02 | Phase 3 | Pending |
+| LIVE-03 | Phase 3 | Pending |
+| LIVE-04 | Phase 3 | Pending |
+| LIVE-05 | Phase 3 | Pending |
+| LIVE-06 | Phase 3 | Pending |
+| LIVE-07 | Phase 3 | Pending |
+| LIVE-08 | Phase 3 | Pending |
+| LIVE-09 | Phase 3 | Pending |
+| REPLAY-01 | Phase 4 | Pending |
+| REPLAY-02 | Phase 4 | Pending |
+| REPLAY-03 | Phase 4 | Pending |
+| REPLAY-04 | Phase 4 | Pending |
+| REPLAY-05 | Phase 4 | Pending |
+| REPLAY-06 | Phase 4 | Pending |
 
 **Coverage:**
 - v1 requirements: 25 total
-- Mapped to phases: 0
-- Unmapped: 25
+- Mapped to phases: 25
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-15*
-*Last updated: 2026-04-15 after initial definition*
+*Last updated: 2026-04-14 after roadmap creation*
