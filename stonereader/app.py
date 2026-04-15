@@ -288,6 +288,8 @@ class StoneReaderApp(wx.App):
                 old_panel = nav._panels["Deck Contents"]
                 nav._sizer.Detach(old_panel)
                 old_panel.Destroy()
+                # Remove stale stack entries to prevent ghost navigation
+                nav._stack = [n for n in nav._stack if n != "Deck Contents"]
             nav.register_panel(
                 "Deck Contents", contents_panel, contents_presenter, contents_panel
             )
