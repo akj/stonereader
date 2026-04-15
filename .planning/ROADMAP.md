@@ -32,7 +32,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans:** 4 plans
 
 Plans:
-- [ ] 01-01-PLAN.md -- Foundation: DeckSummary model, db CRUD, InputLayer WXK_DELETE
+- [x] 01-01-PLAN.md -- Foundation: DeckSummary model, db CRUD, InputLayer WXK_DELETE
 - [ ] 01-02-PLAN.md -- Home screen and deck contents presenters/views
 - [ ] 01-03-PLAN.md -- Deck manager and import presenters/views
 - [ ] 01-04-PLAN.md -- NavigationController, app shell refactor, clipboard auto-detect, integration checkpoint
