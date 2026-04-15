@@ -89,6 +89,33 @@ class NavigationController:
         self._input_layer.activate_view(current, key_map)
         wx.CallAfter(self._focus_targets[current].SetFocus)
 
+    def replace_panel(
+        self,
+        name: str,
+        panel: wx.Panel,
+        presenter: object,
+        focus_target: wx.Window,
+    ) -> None:
+        """Replace an existing panel, destroying the old one.
+
+        If *name* is not yet registered, behaves like register_panel().
+        Cleans up the old panel's sizer entry and removes stale stack
+        entries to prevent ghost navigation.
+        """
+        if name in self._panels:
+            old_panel = self._panels[name]
+            self._sizer.Detach(old_panel)
+            old_panel.Destroy()
+            self._stack = [n for n in self._stack if n != name]
+            del self._panels[name]
+            del self._presenters[name]
+            del self._focus_targets[name]
+        self.register_panel(name, panel, presenter, focus_target)
+
+    def get_presenter(self, name: str) -> object | None:
+        """Return the presenter for a named panel, or None."""
+        return self._presenters.get(name)
+
     @property
     def current_panel_name(self) -> str | None:
         """Return the name of the currently visible panel."""
@@ -124,11 +151,14 @@ class MainWindow(wx.Frame):
         self._suppress_clipboard_check = True  # Suppress during initial launch
 
         # Accelerator table for standard shortcuts
+        self._find_id = wx.NewIdRef()
         accel_entries = [
             wx.AcceleratorEntry(wx.ACCEL_CTRL, ord("Q"), wx.ID_EXIT),
+            wx.AcceleratorEntry(wx.ACCEL_CTRL, ord("F"), self._find_id),
         ]
         self.SetAcceleratorTable(wx.AcceleratorTable(accel_entries))
         self.Bind(wx.EVT_MENU, self._on_quit, id=wx.ID_EXIT)
+        self.Bind(wx.EVT_MENU, self._on_find, id=self._find_id)
         self.Bind(wx.EVT_CLOSE, self._on_close)
         self.Bind(wx.EVT_ACTIVATE, self._on_activate)
 
@@ -147,6 +177,15 @@ class MainWindow(wx.Frame):
     @property
     def nav(self) -> NavigationController:
         return self._nav
+
+    def _on_find(self, event: wx.CommandEvent) -> None:
+        """Handle Ctrl+F -- delegate to current panel's presenter if it supports search."""
+        current = self._nav.current_panel_name
+        if current is not None:
+            presenter = self._nav.get_presenter(current)
+            open_search = getattr(presenter, "open_search", None)
+            if open_search is not None:
+                open_search()
 
     def _on_activate(self, event: wx.ActivateEvent) -> None:
         """Check clipboard for deckstring when app gains focus (D-06)."""
@@ -235,13 +274,15 @@ class StoneReaderApp(wx.App):
         home_panel = HomePanel(self._frame, home_presenter)
         nav.register_panel("Home", home_panel, home_presenter, home_panel.list_box)
 
-        # --- Card Library ---
-        from stonereader.presenters.card_browser import CardBrowserPresenter
-        from stonereader.views.card_browser import CardBrowserPanel
+        # --- Card Library (category menu) ---
+        from stonereader.presenters.card_library import CardLibraryPresenter
+        from stonereader.views.card_library import CardLibraryPanel
 
-        card_presenter = CardBrowserPresenter(speech, card_db)
-        card_panel = CardBrowserPanel(self._frame, card_presenter, input_layer)
-        nav.register_panel("Card Library", card_panel, card_presenter, card_panel)
+        library_presenter = CardLibraryPresenter(speech)
+        library_panel = CardLibraryPanel(self._frame, library_presenter)
+        nav.register_panel(
+            "Card Library", library_panel, library_presenter, library_panel.list_box
+        )
 
         # --- Deck Manager ---
         from stonereader.presenters.deck_manager import DeckManagerPresenter
@@ -271,27 +312,36 @@ class StoneReaderApp(wx.App):
         # Home screen selection -> show panel
         home_presenter.set_on_select(lambda name: nav.show_panel(name))
 
+        # Card Library category selection -> create and show card browser
+        def _on_category_select(category_name: str) -> None:
+            from stonereader.presenters.card_browser import CardBrowserPresenter
+            from stonereader.presenters.card_library import CATEGORY_TO_FILTER
+            from stonereader.views.card_browser import CardBrowserPanel
+
+            card_class_filter = CATEGORY_TO_FILTER.get(category_name)
+
+            browser_presenter = CardBrowserPresenter(
+                speech, card_db, category_name, card_class_filter
+            )
+            browser_panel = CardBrowserPanel(self._frame, browser_presenter)
+            nav.replace_panel(
+                "Card Browser", browser_panel, browser_presenter, browser_panel
+            )
+            nav.show_panel("Card Browser")
+            browser_presenter.announce_entry()
+
+        library_presenter.set_on_select(_on_category_select)
+
         # Deck Manager -> open deck contents
         def _on_open_deck(deck: object) -> None:
             from stonereader.presenters.deck_contents import DeckContentsPresenter
             from stonereader.views.deck_contents import DeckContentsPanel
 
-            # Create fresh presenter and panel for this specific deck
             contents_presenter = DeckContentsPresenter(speech, deck)  # type: ignore[arg-type]
             contents_panel = DeckContentsPanel(self._frame, contents_presenter)
-
-            # Re-register the deck contents panel (destroy old if exists)
-            if "Deck Contents" in nav._panels:
-                old_panel = nav._panels["Deck Contents"]
-                nav._sizer.Detach(old_panel)
-                old_panel.Destroy()
-                # Remove stale stack entries to prevent ghost navigation
-                nav._stack = [n for n in nav._stack if n != "Deck Contents"]
-            nav.register_panel(
+            nav.replace_panel(
                 "Deck Contents", contents_panel, contents_presenter, contents_panel
             )
-
-            # Show it and announce deck header
             nav.show_panel("Deck Contents")
             contents_presenter.announce_deck_header()
 

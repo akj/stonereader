@@ -1,4 +1,4 @@
-"""Card Library presenter — search and browse the card database."""
+"""Card Browser presenter -- browse and search cards within a category."""
 
 from __future__ import annotations
 
@@ -8,22 +8,33 @@ from stonereader.models.card import Card, CardDatabase
 from stonereader.presenters.base import BasePresenter, ZoneNavigationMixin
 from stonereader.speech_service import SpeechService
 
-
 _RESULTS_ZONE = "results"
 
 
 class CardBrowserPresenter(ZoneNavigationMixin, BasePresenter):
-    """Manages search state and navigation for the Card Library tab."""
+    """Manages card navigation and search for a filtered card list.
 
-    def __init__(self, speech: SpeechService, card_db: CardDatabase) -> None:
+    Receives a category_label and optional card_class filter. All collectible
+    cards matching the filter are loaded initially. The search() method further
+    narrows results by name/text query.
+    """
+
+    def __init__(
+        self,
+        speech: SpeechService,
+        card_db: CardDatabase,
+        category_label: str = "All Cards",
+        card_class_filter: str | None = None,
+    ) -> None:
         super().__init__(speech)
         self._card_db = card_db
-        self._results: list[Card] = sorted(
-            card_db.collectible_cards, key=lambda c: c.name
-        )
+        self._category_label = category_label
+        self._filters = {"card_class": card_class_filter} if card_class_filter else None
+        self._results: list[Card] = self._card_db.search_cards(filters=self._filters)
         self._init_navigation([_RESULTS_ZONE])
         self._on_state_changed: Callable[[list[Card], int], None] | None = None
         self._on_status_changed: Callable[[str], None] | None = None
+        self._on_request_search: Callable[[], str | None] | None = None
 
     def get_zone_items(self, zone_name: str) -> Sequence[Any]:
         if zone_name == _RESULTS_ZONE:
@@ -31,8 +42,8 @@ class CardBrowserPresenter(ZoneNavigationMixin, BasePresenter):
         return []
 
     def search(self, query: str) -> None:
-        """Run a search and announce the result count."""
-        self._results = self._card_db.search_cards(query)
+        """Run a search within the current category and announce the result count."""
+        self._results = self._card_db.search_cards(query, self._filters)
         self._zone_cursors[_RESULTS_ZONE] = 0
         self._detail_cursor = -1
         count = len(self._results)
@@ -47,13 +58,34 @@ class CardBrowserPresenter(ZoneNavigationMixin, BasePresenter):
             self._on_status_changed(status)
         self._notify_view()
 
-    def set_on_state_changed(
-        self, callback: Callable[[list[Card], int], None]
-    ) -> None:
+    def announce_entry(self) -> None:
+        """Announce on entering the card browser for this category."""
+        count = len(self._results)
+        cursor = self._zone_cursors.get(_RESULTS_ZONE, 0)
+        if not self._results:
+            self._speech.speak(f"{self._category_label}: no cards")
+            return
+        item = self._results[cursor]
+        self._speech.speak(
+            f"{self._category_label}, {self._format_item_speech(item, cursor + 1, count)}"
+        )
+
+    def set_on_state_changed(self, callback: Callable[[list[Card], int], None]) -> None:
         self._on_state_changed = callback
 
     def set_on_status_changed(self, callback: Callable[[str], None]) -> None:
         self._on_status_changed = callback
+
+    def set_on_request_search(self, callback: Callable[[], str | None]) -> None:
+        """Set callback that shows search dialog and returns query or None."""
+        self._on_request_search = callback
+
+    def open_search(self) -> None:
+        """Trigger the search dialog via the view callback."""
+        if self._on_request_search is not None:
+            query = self._on_request_search()
+            if query is not None:
+                self.search(query)
 
     def _notify_view(self) -> None:
         if self._on_state_changed is not None:

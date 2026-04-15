@@ -187,3 +187,57 @@ def test_deep_navigation_stack():
     assert nav.current_panel_name == "Home"
     assert panel_a.IsShown()
     frame.Destroy()
+
+
+def test_replace_panel_destroys_old():
+    nav, frame, _ = _make_controller()
+    panel_old = wx.Panel(frame)
+    panel_new = wx.Panel(frame)
+    presenter_old = _StubPresenter("old")
+    presenter_new = _StubPresenter("new")
+    nav.register_panel("Slot", panel_old, presenter_old, panel_old)
+    nav.replace_panel("Slot", panel_new, presenter_new, panel_new)
+    assert nav._panels["Slot"] is panel_new
+    assert nav._presenters["Slot"] is presenter_new
+    frame.Destroy()
+
+
+def test_replace_panel_cleans_stack():
+    nav, frame, _ = _make_controller()
+    panel_home = wx.Panel(frame)
+    panel_old = wx.Panel(frame)
+    panel_new = wx.Panel(frame)
+    nav.register_panel("Home", panel_home, _StubPresenter("home"), panel_home)
+    nav.register_panel("Sub", panel_old, _StubPresenter("old"), panel_old)
+    nav.show_panel("Home")
+    nav.show_panel("Sub")
+    assert "Sub" in nav._stack
+    nav.replace_panel("Sub", panel_new, _StubPresenter("new"), panel_new)
+    assert "Sub" not in nav._stack
+    frame.Destroy()
+
+
+def test_replace_panel_unregistered_name():
+    """replace_panel on a new name behaves like register_panel."""
+    nav, frame, _ = _make_controller()
+    panel = wx.Panel(frame)
+    presenter = _StubPresenter("fresh")
+    nav.replace_panel("Fresh", panel, presenter, panel)
+    assert "Fresh" in nav._panels
+    assert not panel.IsShown()
+    frame.Destroy()
+
+
+def test_get_presenter_returns_registered():
+    nav, frame, _ = _make_controller()
+    panel = wx.Panel(frame)
+    presenter = _StubPresenter("test")
+    nav.register_panel("Test", panel, presenter, panel)
+    assert nav.get_presenter("Test") is presenter
+    frame.Destroy()
+
+
+def test_get_presenter_returns_none_for_unknown():
+    nav, frame, _ = _make_controller()
+    assert nav.get_presenter("Unknown") is None
+    frame.Destroy()

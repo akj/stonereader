@@ -55,8 +55,12 @@ def make_card_db(cards: list[Card]) -> CardDatabase:
 
 
 FIREBALL = make_card(name="Fireball", cost=4, text="Deal 6 damage.", card_class="MAGE")
-FROSTBOLT = make_card(name="Frostbolt", cost=2, text="Deal 3 damage. Freeze.", card_class="MAGE")
-ARCANE = make_card(name="Arcane Intellect", cost=3, text="Draw 2 cards.", card_class="MAGE")
+FROSTBOLT = make_card(
+    name="Frostbolt", cost=2, text="Deal 3 damage. Freeze.", card_class="MAGE"
+)
+ARCANE = make_card(
+    name="Arcane Intellect", cost=3, text="Draw 2 cards.", card_class="MAGE"
+)
 WOLFRIDER = make_card(name="Wolfrider", cost=3, attack=3, health=1, text="Charge")
 
 ALL_CARDS = [FIREBALL, FROSTBOLT, ARCANE, WOLFRIDER]
@@ -190,7 +194,7 @@ def test_down_after_navigate_skips_name():
 
     key_map = presenter.get_key_map()
     key_map["right"]()  # announces "Fireball, 2 of 4"
-    key_map["down"]()   # should skip name, read cost
+    key_map["down"]()  # should skip name, read cost
 
     assert "4 mana" in speech.last_speech
 
@@ -203,7 +207,7 @@ def test_up_arrow_moves_back_through_details():
     key_map = presenter.get_key_map()
     key_map["down"]()  # name
     key_map["down"]()  # cost
-    key_map["up"]()    # back to name
+    key_map["up"]()  # back to name
 
     assert "Arcane Intellect" in speech.last_speech
 
@@ -342,3 +346,86 @@ def test_copy_with_no_results_returns_none():
     name = presenter.copy_current_card_name()
 
     assert name is None
+
+
+def test_card_class_filter_limits_results():
+    card_db = make_card_db(ALL_CARDS)
+    speech = MockSpeechService()
+    presenter = CardBrowserPresenter(speech, card_db, "Mage", card_class_filter="MAGE")
+
+    items = presenter.get_zone_items("results")
+
+    assert len(items) == 3  # Fireball, Frostbolt, Arcane Intellect
+    assert all(c.card_class == "MAGE" for c in items)
+
+
+def test_search_within_filtered_category():
+    card_db = make_card_db(ALL_CARDS)
+    speech = MockSpeechService()
+    presenter = CardBrowserPresenter(speech, card_db, "Mage", card_class_filter="MAGE")
+
+    presenter.search("fire")
+
+    assert "1 result" in speech.last_speech
+    items = presenter.get_zone_items("results")
+    assert len(items) == 1
+    assert items[0].name == "Fireball"
+
+
+def test_empty_search_restores_full_category():
+    card_db = make_card_db(ALL_CARDS)
+    speech = MockSpeechService()
+    presenter = CardBrowserPresenter(speech, card_db, "Mage", card_class_filter="MAGE")
+
+    presenter.search("fire")
+    presenter.search("")  # empty search restores all
+
+    items = presenter.get_zone_items("results")
+    assert len(items) == 3
+
+
+def test_announce_entry_speaks_category_and_first_card():
+    card_db = make_card_db(ALL_CARDS)
+    speech = MockSpeechService()
+    presenter = CardBrowserPresenter(speech, card_db, "Mage", card_class_filter="MAGE")
+
+    presenter.announce_entry()
+
+    assert "Mage" in speech.last_speech
+    assert "Arcane Intellect" in speech.last_speech
+    assert "1 of 3" in speech.last_speech
+
+
+def test_announce_entry_empty_category():
+    card_db = make_card_db(ALL_CARDS)
+    speech = MockSpeechService()
+    presenter = CardBrowserPresenter(
+        speech, card_db, "Paladin", card_class_filter="PALADIN"
+    )
+
+    presenter.announce_entry()
+
+    assert "Paladin: no cards" in speech.last_speech
+
+
+def test_open_search_calls_callback_and_searches():
+    card_db = make_card_db(ALL_CARDS)
+    speech = MockSpeechService()
+    presenter = CardBrowserPresenter(speech, card_db)
+
+    presenter.set_on_request_search(lambda: "fire")
+    presenter.open_search()
+
+    assert "1 result" in speech.last_speech
+
+
+def test_open_search_none_does_not_search():
+    card_db = make_card_db(ALL_CARDS)
+    speech = MockSpeechService()
+    presenter = CardBrowserPresenter(speech, card_db)
+
+    presenter.set_on_request_search(lambda: None)
+    presenter.open_search()
+
+    # No search performed, so no speech about results
+    assert len(speech.spoken) == 0

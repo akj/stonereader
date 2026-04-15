@@ -1,4 +1,4 @@
-"""Card Library view — search TextCtrl and visual-only ListCtrl companion."""
+"""Card Browser view -- card list with search dialog for a category."""
 
 from __future__ import annotations
 
@@ -6,10 +6,7 @@ from typing import TYPE_CHECKING
 
 import wx
 
-from stonereader.views.base import make_labeled_text_ctrl
-
 if TYPE_CHECKING:
-    from stonereader.input_layer import InputLayer
     from stonereader.models.card import Card
     from stonereader.presenters.card_browser import CardBrowserPresenter
 
@@ -29,7 +26,7 @@ class _CardListCtrl(wx.ListCtrl):
         self.AppendColumn("Card", width=400)
         self._cards: list[Card] = []
 
-    def AcceptsFocus(self) -> bool:  # noqa: N802 — wx override
+    def AcceptsFocus(self) -> bool:  # noqa: N802 -- wx override
         return False
 
     def set_cards(self, cards: list[Card]) -> None:
@@ -37,35 +34,28 @@ class _CardListCtrl(wx.ListCtrl):
         self.SetItemCount(len(cards))
         self.Refresh()
 
-    def OnGetItemText(self, item: int, column: int) -> str:
+    def OnGetItemText(self, item: int, column: int) -> str:  # noqa: N802 -- wx override
         if item >= len(self._cards):
             return ""
         card = self._cards[item]
-        return f"{card.name} — {card.cost} mana — {card.card_type}"
+        return f"{card.name} -- {card.cost} mana -- {card.card_type}"
 
 
 class CardBrowserPanel(wx.Panel):
-    """Card Library tab panel."""
+    """Card Browser panel showing filtered card list with search."""
 
     def __init__(
         self,
         parent: wx.Window,
         presenter: CardBrowserPresenter,
-        input_layer: InputLayer,
     ) -> None:
         super().__init__(parent, style=wx.WANTS_CHARS)
         self._presenter = presenter
 
         sizer = wx.BoxSizer(wx.VERTICAL)
 
-        # Search TextCtrl — label placed immediately before for MSAA
-        self._search_ctrl = make_labeled_text_ctrl(
-            self, sizer, "Search cards:", input_layer, style=wx.TE_PROCESS_ENTER
-        )
-        self._search_ctrl.Bind(wx.EVT_TEXT_ENTER, self._on_search)
-
-        # Visual companion ListCtrl — label for MSAA, never focused by user
-        results_label = wx.StaticText(self, label="Card results:")
+        # MSAA label for card list
+        results_label = wx.StaticText(self, label="Cards:")
         sizer.Add(results_label, 0, wx.ALL, 4)
         self._list_ctrl = _CardListCtrl(self)
         sizer.Add(self._list_ctrl, 1, wx.EXPAND | wx.ALL, 4)
@@ -75,6 +65,7 @@ class CardBrowserPanel(wx.Panel):
         # Wire presenter callbacks
         presenter.set_on_state_changed(self._on_state_changed)
         presenter.set_on_status_changed(self._on_status_changed)
+        presenter.set_on_request_search(self._on_request_search)
 
         # Context menu
         self.Bind(wx.EVT_CONTEXT_MENU, self._on_context_menu)
@@ -82,24 +73,29 @@ class CardBrowserPanel(wx.Panel):
         # Initial visual state
         self._list_ctrl.set_cards(list(presenter.get_zone_items("results")))
 
-    @property
-    def search_ctrl(self) -> wx.TextCtrl:
-        return self._search_ctrl
-
-    def _on_search(self, event: wx.CommandEvent) -> None:
-        query = self._search_ctrl.GetValue()
-        self._presenter.search(query)
-        wx.CallAfter(self.SetFocus)
+    def _on_state_changed(self, results: list[Card], cursor: int) -> None:
+        self._list_ctrl.set_cards(results)
+        if results:
+            self._list_ctrl.Select(cursor)
 
     def _on_status_changed(self, text: str) -> None:
         frame = self.GetTopLevelParent()
         if isinstance(frame, wx.Frame):
             frame.SetStatusText(text)
 
-    def _on_state_changed(self, results: list[Card], cursor: int) -> None:
-        self._list_ctrl.set_cards(results)
-        if results:
-            self._list_ctrl.Select(cursor)
+    def _on_request_search(self) -> str | None:
+        """Show a search dialog and return the query, or None if cancelled."""
+        dialog = wx.TextEntryDialog(
+            self,
+            "Search cards by name or text:",
+            "Find Cards",
+        )
+        result = dialog.ShowModal()
+        query = dialog.GetValue()
+        dialog.Destroy()
+        if result == wx.ID_OK:
+            return query
+        return None
 
     def _on_context_menu(self, event: wx.ContextMenuEvent) -> None:
         menu = wx.Menu()
