@@ -74,7 +74,7 @@ class ImportDeckPresenter(BasePresenter):
                     "code from Hearthstone and try again."
                 )
             return False
-        except (TypeError, Exception):
+        except TypeError:
             self._show_error(
                 "Invalid deck code. Check that you copied the full "
                 "code from Hearthstone and try again."

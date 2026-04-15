@@ -120,7 +120,7 @@ class DeckManagerPresenter(ZoneNavigationMixin, BasePresenter):
             deck = Deck.from_deckstring(
                 item.deckstring, self._card_db, item.name
             )
-        except (ValueError, TypeError, Exception):
+        except (ValueError, TypeError):
             self._speech.speak("Could not load deck cards")
             return
         if self._on_open_deck is not None:

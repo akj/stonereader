@@ -178,7 +178,7 @@ class MainWindow(wx.Frame):
                 from hearthstone.deckstrings import parse_deckstring
 
                 parse_deckstring(text)
-            except (ValueError, TypeError, Exception):
+            except (ValueError, TypeError):
                 return
         finally:
             wx.TheClipboard.Close()
