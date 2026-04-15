@@ -5,6 +5,8 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+from stonereader.models.deck import DeckSummary
+
 _SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER NOT NULL
@@ -59,4 +61,45 @@ def init_db(conn: sqlite3.Connection) -> None:
         return
     conn.executescript(_SCHEMA_V1)
     conn.execute("INSERT INTO schema_version (version) VALUES (?)", (1,))
+    conn.commit()
+
+
+def save_deck(
+    conn: sqlite3.Connection,
+    name: str,
+    hero_class: str,
+    format_name: str,
+    deckstring: str,
+) -> int:
+    """Insert a deck and return its id."""
+    cursor = conn.execute(
+        "INSERT INTO decks (name, hero_class, format, deckstring) VALUES (?, ?, ?, ?)",
+        (name, hero_class, format_name, deckstring),
+    )
+    conn.commit()
+    return cursor.lastrowid  # type: ignore[return-value]
+
+
+def get_all_decks(conn: sqlite3.Connection) -> list[DeckSummary]:
+    """Return all decks ordered by newest first (D-09)."""
+    rows = conn.execute(
+        "SELECT id, name, hero_class, format, deckstring, created_at "
+        "FROM decks ORDER BY created_at DESC, id DESC"
+    ).fetchall()
+    return [
+        DeckSummary(
+            deck_id=row["id"],
+            name=row["name"],
+            hero_class=row["hero_class"],
+            format=row["format"],
+            deckstring=row["deckstring"],
+            created_at=str(row["created_at"]),
+        )
+        for row in rows
+    ]
+
+
+def delete_deck(conn: sqlite3.Connection, deck_id: int) -> None:
+    """Delete a deck by id."""
+    conn.execute("DELETE FROM decks WHERE id = ?", (deck_id,))
     conn.commit()

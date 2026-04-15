@@ -1,4 +1,4 @@
-from stonereader.db import get_connection, init_db, get_schema_version
+from stonereader.db import get_connection, init_db, get_schema_version, save_deck, get_all_decks, delete_deck
 
 
 def test_init_db_creates_tables(tmp_path):
@@ -57,4 +57,60 @@ def test_games_table_schema(tmp_path):
     )
     row = conn.execute("SELECT * FROM games").fetchone()
     assert row is not None
+    conn.close()
+
+
+def test_save_deck_returns_id(tmp_path):
+    db_path = tmp_path / "test.db"
+    conn = get_connection(str(db_path))
+    init_db(conn)
+    deck_id = save_deck(conn, "Test Deck", "MAGE", "Standard", "AAECAf0EAA==")
+    assert isinstance(deck_id, int)
+    assert deck_id > 0
+    conn.close()
+
+
+def test_get_all_decks_returns_summaries(tmp_path):
+    db_path = tmp_path / "test.db"
+    conn = get_connection(str(db_path))
+    init_db(conn)
+    save_deck(conn, "Deck A", "MAGE", "Standard", "AAECAf0EAA==")
+    save_deck(conn, "Deck B", "PALADIN", "Wild", "AAECAZ8FAA==")
+    decks = get_all_decks(conn)
+    assert len(decks) == 2
+    assert decks[0].name == "Deck B"  # newest first (D-09)
+    assert decks[1].name == "Deck A"
+    assert decks[0].hero_class == "PALADIN"
+    assert decks[0].format == "Wild"
+    conn.close()
+
+
+def test_get_all_decks_empty(tmp_path):
+    db_path = tmp_path / "test.db"
+    conn = get_connection(str(db_path))
+    init_db(conn)
+    decks = get_all_decks(conn)
+    assert decks == []
+    conn.close()
+
+
+def test_delete_deck_removes_row(tmp_path):
+    db_path = tmp_path / "test.db"
+    conn = get_connection(str(db_path))
+    init_db(conn)
+    deck_id = save_deck(conn, "Doomed Deck", "WARRIOR", "Standard", "AAECAQcA")
+    delete_deck(conn, deck_id)
+    decks = get_all_decks(conn)
+    assert len(decks) == 0
+    conn.close()
+
+
+def test_deck_summary_has_created_at(tmp_path):
+    db_path = tmp_path / "test.db"
+    conn = get_connection(str(db_path))
+    init_db(conn)
+    save_deck(conn, "Timestamped", "ROGUE", "Standard", "AAECAaIHAA==")
+    decks = get_all_decks(conn)
+    assert decks[0].created_at is not None
+    assert len(decks[0].created_at) > 0
     conn.close()

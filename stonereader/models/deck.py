@@ -76,3 +76,15 @@ class Deck:
             hero_class=hero_class,
             deckstring=deckstring,
         )
+
+
+@dataclass(frozen=True)
+class DeckSummary:
+    """Lightweight deck info for list display — no resolved cards."""
+
+    deck_id: int
+    name: str
+    hero_class: str
+    format: str
+    deckstring: str
+    created_at: str
