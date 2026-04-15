@@ -1,10 +1,11 @@
 ---
 phase: 1
 slug: deck-management
-status: draft
+status: approved
 shadcn_initialized: false
 preset: none
 created: 2026-04-15
+reviewed_at: 2026-04-15
 ---
 
 # Phase 1 -- UI Design Contract
@@ -84,8 +85,8 @@ Not applicable. This is a screen reader application. The wxPython window uses OS
 | Home menu item: Import Deck | "Import Deck" |
 | Import screen: deckstring label | "Deck code:" |
 | Import screen: name label | "Deck name:" |
-| Import screen: submit button | "Import" |
-| Import screen: cancel button | "Cancel" |
+| Import screen: submit button | "Import Deck" |
+| Import screen: cancel button | "Back to Home" |
 | Clipboard auto-detect dialog title | "Deck Found on Clipboard" |
 | Clipboard auto-detect dialog body | "A deck code was found on your clipboard. Import it?" |
 | Clipboard auto-detect: confirm | "Yes" (wx.YES) |
@@ -134,8 +135,8 @@ MainWindow (wx.Frame, 800x600)
   +-- ImportDeckPanel (wx.Panel) -- new, shown on selection
         +-- wx.StaticText "Deck code:" + wx.TextCtrl (via make_labeled_text_ctrl)
         +-- wx.StaticText "Deck name:" + wx.TextCtrl (via make_labeled_text_ctrl)
-        +-- wx.Button "Import"
-        +-- wx.Button "Cancel"
+        +-- wx.Button "Import Deck"
+        +-- wx.Button "Back to Home"
 ```
 
 ### Panel Visibility Pattern
@@ -213,13 +214,13 @@ Zone: "cards" (single zone)
 
 | Key | Action |
 |-----|--------|
-| Tab | Move between fields (deckstring -> name -> Import button -> Cancel button) |
-| Enter (in TextCtrl) | Submit import (same as pressing Import button) |
-| Enter (on Import button) | Validate and import deck |
-| Enter (on Cancel button) | Return to home screen |
-| Escape / Backspace | Cancel and return to home screen |
+| Tab | Move between fields (deckstring -> name -> Import Deck button -> Back to Home button) |
+| Enter (in TextCtrl) | Submit import (same as pressing Import Deck button) |
+| Enter (on Import Deck button) | Validate and import deck |
+| Enter (on Back to Home button) | Return to home screen |
+| Escape / Backspace | Return to home screen |
 
-Text mode activates when TextCtrl fields are focused (via bind_text_mode). All hotkeys suppressed during text input. Standard Tab order: deckstring field, name field, Import button, Cancel button.
+Text mode activates when TextCtrl fields are focused (via bind_text_mode). All hotkeys suppressed during text input. Standard Tab order: deckstring field, name field, Import Deck button, Back to Home button.
 
 ---
 
@@ -269,8 +270,8 @@ Source: D-06 from CONTEXT.md. Deckstring detection regex: starts with base64-lik
 | Card list ListCtrl | wx.StaticText sibling before ListCtrl | "Cards:" |
 | Deckstring TextCtrl | make_labeled_text_ctrl() | "Deck code:" |
 | Deck name TextCtrl | make_labeled_text_ctrl() | "Deck name:" |
-| Import button | wx.Button label | "Import" |
-| Cancel button | wx.Button label | "Cancel" |
+| Import Deck button | wx.Button label | "Import Deck" |
+| Back to Home button | wx.Button label | "Back to Home" |
 
 All labels placed as wx.StaticText immediately before their associated control in the sizer, following the existing MSAA sibling-order pattern from views/base.py.
 
