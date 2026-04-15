@@ -162,12 +162,12 @@ class DeckManagerPresenter(ZoneNavigationMixin, BasePresenter):
     def export_current_deckstring(self) -> str | None:
         """Return deckstring of current deck for clipboard copy (D-15).
 
-        Announces 'Deck code copied to clipboard'. View handles clipboard.
+        View handles clipboard write; announcement deferred to
+        _export_to_clipboard so it only fires after the write succeeds.
         """
         item = self._current_item()
         if item is None or not isinstance(item, DeckSummary):
             return None
-        self._speech.speak("Deck code copied to clipboard")
         return item.deckstring
 
     def announce_entry(self) -> None:
@@ -200,3 +200,4 @@ class DeckManagerPresenter(ZoneNavigationMixin, BasePresenter):
         deckstring = self.export_current_deckstring()
         if deckstring is not None and self._export_callback is not None:
             self._export_callback(deckstring)
+            self._speech.speak("Deck code copied to clipboard")

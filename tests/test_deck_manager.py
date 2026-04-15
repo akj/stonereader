@@ -149,6 +149,19 @@ def test_export_deckstring_returns_string(tmp_path):
     presenter = DeckManagerPresenter(speech, conn, _make_card_db())
     result = presenter.export_current_deckstring()
     assert result == "AAECAf0EAA=="
+    conn.close()
+
+
+def test_export_to_clipboard_announces_after_callback(tmp_path):
+    """Speech fires after clipboard callback, not before (WR-01)."""
+    conn = _make_db(tmp_path)
+    save_deck(conn, "Export Test", "MAGE", "Standard", "AAECAf0EAA==")
+    speech = MockSpeechService()
+    presenter = DeckManagerPresenter(speech, conn, _make_card_db())
+    exported = []
+    presenter.set_on_export(lambda ds: exported.append(ds))
+    presenter._export_to_clipboard()
+    assert exported == ["AAECAf0EAA=="]
     assert "Deck code copied to clipboard" in speech.last_speech
     conn.close()
 
