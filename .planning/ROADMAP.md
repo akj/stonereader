@@ -29,7 +29,14 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. User can select a deck and navigate its card list with detail inspection (down arrow reads card details)
   4. User can delete a deck and is prompted for confirmation before removal
   5. User can copy a deck's deckstring to clipboard for sharing
-**Plans**: TBD
+**Plans:** 4 plans
+
+Plans:
+- [ ] 01-01-PLAN.md -- Foundation: DeckSummary model, db CRUD, InputLayer WXK_DELETE
+- [ ] 01-02-PLAN.md -- Home screen and deck contents presenters/views
+- [ ] 01-03-PLAN.md -- Deck manager and import presenters/views
+- [ ] 01-04-PLAN.md -- NavigationController, app shell refactor, clipboard auto-detect, integration checkpoint
+
 **UI hint**: yes
 
 ### Phase 2: Log Infrastructure
@@ -77,7 +84,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Deck Management | 0/0 | Not started | - |
+| 1. Deck Management | 0/4 | Planning complete | - |
 | 2. Log Infrastructure | 0/0 | Not started | - |
 | 3. Live Game Tracking | 0/0 | Not started | - |
 | 4. Replay Viewer | 0/0 | Not started | - |
