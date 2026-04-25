@@ -1,8 +1,8 @@
 ---
 phase: 01-deck-management
-reviewed: 2026-04-15T12:00:00Z
+reviewed: 2026-04-25
 depth: standard
-files_reviewed: 20
+files_reviewed: 17
 files_reviewed_list:
   - stonereader/app.py
   - stonereader/db.py
@@ -10,246 +10,157 @@ files_reviewed_list:
   - stonereader/models/__init__.py
   - stonereader/models/deck.py
   - stonereader/presenters/deck_contents.py
-  - stonereader/presenters/deck_manager.py
   - stonereader/presenters/home.py
   - stonereader/presenters/import_deck.py
   - stonereader/views/deck_contents.py
-  - stonereader/views/deck_manager.py
   - stonereader/views/home.py
-  - stonereader/views/import_deck.py
   - tests/test_db.py
+  - tests/test_deck.py
   - tests/test_deck_contents.py
-  - tests/test_deck_manager.py
   - tests/test_home.py
   - tests/test_import_deck.py
   - tests/test_input_layer.py
   - tests/test_navigation.py
 findings:
-  critical: 1
-  warning: 5
-  info: 4
-  total: 10
+  critical: 0
+  warning: 4
+  info: 7
+  total: 11
 status: issues_found
+reviewer: gsd-code-reviewer
+supersedes: 2026-04-15 review (re-run after gap-closure plans 01-05/06/07)
 ---
 
 # Phase 01: Code Review Report
 
-**Reviewed:** 2026-04-15T12:00:00Z
+**Reviewed:** 2026-04-25 (re-run after 01-05/06/07 gap-closure)
 **Depth:** standard
-**Files Reviewed:** 20
+**Files Reviewed:** 17
 **Status:** issues_found
 
 ## Summary
 
-Phase 01 (Deck Management) adds a home screen, deck manager, deck contents viewer, deck import flow, clipboard auto-detection, and a NavigationController that replaces wx.Notebook with panel-swap navigation. The code is generally well-structured, follows the established MVP pattern with frozen dataclasses, and maintains good separation of concerns. Tests are thorough and cover the key behaviors.
+Recently-changed files concentrate around graceful-degrade deckstring import (DECK-01), the transient-panel concept in `NavigationController`, and `restore_focus()` for the clipboard-No path. Implementations are solid: `MissingCardsError` correctly subclasses `ValueError`, the placeholder-card pattern is preserved through speech, transient panel logic is well-tested, and `restore_focus()` correctly uses `wx.CallAfter`. No security issues, no critical bugs, no SQL injection (all DB calls parameterized).
 
-Key concerns: one SQL injection-adjacent issue in the schema version table (no uniqueness constraint allowing duplicate version rows on concurrent init), a navigation stack leak where repeatedly opening decks accumulates hidden panels in the sizer, and a premature clipboard announcement in the export flow that fires before the clipboard write actually happens.
-
-## Critical Issues
-
-### CR-01: Navigation stack grows unboundedly when opening deck contents
-
-**File:** `stonereader/app.py:287-296`
-**Issue:** Every time the user opens a deck via Enter in the Deck Manager, `_on_open_deck` creates a fresh `DeckContentsPanel` and calls `nav.register_panel("Deck Contents", ...)`. The old panel is detached and destroyed, but `register_panel` re-adds the name to `_panels`, `_presenters`, and `_focus_targets` -- which is fine. However, `show_panel` on line 296 appends `"Deck Contents"` to `self._stack` every time. If the user opens deck A, goes back, opens deck B, goes back, opens deck C, the stack becomes `["Home", "Deck Manager", "Deck Contents", "Deck Contents", "Deck Contents"]` (with the earlier entries still present). Each `go_back()` will then try to show the "Deck Contents" panel name (whose underlying panel has already been destroyed), leading to either a stale reference crash or repeated "Deck Contents" entries the user must escape through one at a time.
-
-**Fix:**
-Before calling `nav.show_panel("Deck Contents")`, pop any existing "Deck Contents" entries from the stack, or better yet, add a method to NavigationController that replaces/reuses a panel rather than re-pushing:
-
-```python
-def _on_open_deck(deck: object) -> None:
-    from stonereader.presenters.deck_contents import DeckContentsPresenter
-    from stonereader.views.deck_contents import DeckContentsPanel
-
-    contents_presenter = DeckContentsPresenter(speech, deck)  # type: ignore[arg-type]
-    contents_panel = DeckContentsPanel(self._frame, contents_presenter)
-
-    if "Deck Contents" in nav._panels:
-        old_panel = nav._panels["Deck Contents"]
-        nav._sizer.Detach(old_panel)
-        old_panel.Destroy()
-        # Also remove stale stack entries to prevent ghost navigation
-        nav._stack = [name for name in nav._stack if name != "Deck Contents"]
-    nav.register_panel(
-        "Deck Contents", contents_panel, contents_presenter, contents_panel
-    )
-    nav.show_panel("Deck Contents")
-    contents_presenter.announce_deck_header()
-```
-
-Alternatively, add a `replace_panel` method to `NavigationController` that handles this cleanly without reaching into private attributes.
+The most material issue is encapsulation: `MainWindow._check_clipboard_for_deckstring` reaches into `NavigationController._panels` (a private attribute). Secondary issues: `HomePanel`'s `wx.ListBox` not synced with the presenter cursor (UX inconsistency vs `DeckContentsPanel`), and quality smells (duplicated `except` blocks, fragile string-prefix discriminator for placeholder cards).
 
 ## Warnings
 
-### WR-01: Export announces "copied" before clipboard write occurs
+### WR-01: NavigationController encapsulation violation in clipboard auto-import
 
-**File:** `stonereader/presenters/deck_manager.py:162-171`
-**Issue:** `export_current_deckstring()` calls `self._speech.speak("Deck code copied to clipboard")` on line 170, then returns the deckstring. The actual clipboard write happens in the view's `_on_export` callback (called by `_export_to_clipboard` on line 201-202). If the clipboard write fails (e.g., `wx.TheClipboard.Open()` returns False), the user has already been told the copy succeeded. This is a misleading announcement.
+**File:** `stonereader/app.py:323-328`
 
-**Fix:**
-Move the speech announcement to after the clipboard write succeeds, or have the export callback return success/failure:
+**Issue:** `MainWindow._check_clipboard_for_deckstring` accesses `self._nav._panels.get("Import Deck")` — reaching into a private attribute of `NavigationController` from outside the class. The `NavigationController` exposes `get_presenter()` but no `get_panel()`. This couples `MainWindow` to the controller's internal storage and silently breaks if `_panels` is renamed/restructured. It also forces an `isinstance(import_panel, ImportDeckPanel)` check inside an unrelated method.
 
+**Fix:** Add a public accessor on `NavigationController`:
 ```python
-def export_current_deckstring(self) -> str | None:
-    """Return deckstring of current deck for clipboard copy (D-15)."""
-    item = self._current_item()
-    if item is None or not isinstance(item, DeckSummary):
-        return None
-    # Don't announce here -- let view confirm success
-    return item.deckstring
-
-def _export_to_clipboard(self) -> None:
-    deckstring = self.export_current_deckstring()
-    if deckstring is not None and self._export_callback is not None:
-        self._export_callback(deckstring)
-        self._speech.speak("Deck code copied to clipboard")
+def get_panel(self, name: str) -> wx.Panel | None:
+    """Return the panel for a registered name, or None."""
+    return self._panels.get(name)
 ```
+Then in `_check_clipboard_for_deckstring`, replace `self._nav._panels.get("Import Deck")` with `self._nav.get_panel("Import Deck")`.
 
-### WR-02: Schema version table allows duplicate rows
+### WR-02: HomePanel never reflects presenter cursor in the wx.ListBox selection
 
-**File:** `stonereader/db.py:11-13`
-**Issue:** The `schema_version` table has no UNIQUE or PRIMARY KEY constraint on `version`, and `init_db` on line 63 always does `INSERT INTO schema_version (version) VALUES (?)`. If `init_db` is called concurrently from two processes (or if `get_schema_version` returns 0 due to a race), multiple version rows could be inserted. `get_schema_version` uses `fetchone()` which returns the first row -- this happens to work, but the table can accumulate stale rows.
+**File:** `stonereader/views/home.py:36-48` (and `stonereader/presenters/home.py`)
 
-**Fix:**
-Add a PRIMARY KEY or UNIQUE constraint, or use REPLACE/INSERT OR IGNORE:
+**Issue:** `HomePresenter` maintains a zone cursor and announces "N of 3" via speech, but `HomePanel` never wires a state-changed callback. Compared to `DeckContentsPanel` (which calls `presenter.set_on_state_changed(self._on_state_changed)`), the home `wx.ListBox` selection always stays at index 0 visually. For sighted screen-reader users, mouse users, or anyone who tabs into the ListBox after navigating with arrows, the visual state diverges from the speech state. MSAA "selected item" property does not match the presenter's logical cursor — a screen reader querying the listbox directly will read the wrong item.
 
-```sql
-CREATE TABLE IF NOT EXISTS schema_version (
-    version INTEGER PRIMARY KEY
-);
-```
+**Fix:** Add a state-changed callback in `HomePresenter` mirroring `DeckContentsPresenter`'s pattern, and have `HomePanel` bind `_list_box.SetSelection(cursor)` in the callback.
 
-And change the insert on line 63 to:
-```python
-conn.execute("INSERT OR REPLACE INTO schema_version (version) VALUES (?)", (1,))
-```
+### WR-03: `_make_placeholder_card` produces a Card with `card_set=""` that may break group-by-set indexing
 
-### WR-03: Broad exception catch masks debugging information
+**File:** `stonereader/models/deck.py:23-38`
 
-**File:** `stonereader/presenters/deck_manager.py:122-125`
-**Issue:** `open_current_deck` catches `(ValueError, TypeError, Exception)` on line 122. Since `Exception` is the base class of both `ValueError` and `TypeError`, listing all three is redundant but also overly broad -- it silently swallows unexpected errors (e.g., `AttributeError` from a code bug in `Deck.from_deckstring`) with only a generic "Could not load deck cards" message, making debugging difficult.
+**Issue:** Placeholder cards are constructed with `card_set=""` (empty string) while real cards have non-empty enum values. If a future feature groups deck contents by set, or asks `CardDatabase.cards_by_set` about cards in a deck, the empty bucket may shadow logic. Same concern, smaller scale, applies to `card_class="NEUTRAL"` masquerading as a real class.
 
-The same pattern appears in `stonereader/presenters/import_deck.py:77` and `stonereader/app.py:181`.
+**Fix:** Either pick a sentinel (`card_set="UNKNOWN"`) and document it, or — preferred — add a Card-level discriminator (`is_placeholder: bool = False`). Then `count_unknown_cards` becomes `sum(count for card, count in deck.cards if card.is_placeholder)`.
 
-**Fix:**
-Catch only the expected exceptions (`ValueError`, `TypeError`) and let unexpected ones propagate, or at minimum log them:
+### WR-04: `count_unknown_cards` uses fragile string-prefix discriminator
 
-```python
-try:
-    deck = Deck.from_deckstring(item.deckstring, self._card_db, item.name)
-except (ValueError, TypeError) as exc:
-    self._speech.speak("Could not load deck cards")
-    return
-```
+**File:** `stonereader/models/deck.py:41-48`
 
-### WR-04: Clipboard cleared after deckstring detection could lose user data
+**Issue:** `count_unknown_cards` identifies placeholder cards via `card.id.startswith("UNKNOWN_")`. Couples the helper to the literal string emitted by `_make_placeholder_card`. If anyone changes the placeholder ID format, the counter silently returns 0 and the import success message stops mentioning unknown cards — a silent regression with no test failure unless a test pins the exact string.
 
-**File:** `stonereader/app.py:206-208`
-**Issue:** After detecting a valid deckstring on the clipboard and the user accepts the import dialog, the clipboard is unconditionally cleared. This destroys whatever was on the clipboard. If the user had other content copied after the deckstring (due to timing), or if they decline and the deckstring text was also useful for pasting elsewhere, the clear is destructive. The clear also happens even if `pre_fill_deckstring` fails for any reason.
-
-**Fix:**
-Only clear the clipboard if the import panel was successfully pre-filled, and consider whether clearing is truly necessary (the `_last_clipboard_deckstring` guard already prevents re-prompting for the same string):
-
-```python
-if result == wx.ID_YES:
-    self._nav.show_panel("Import Deck")
-    import_panel = self._nav._panels.get("Import Deck")
-    if import_panel is not None:
-        from stonereader.views.import_deck import ImportDeckPanel
-        if isinstance(import_panel, ImportDeckPanel):
-            import_panel.pre_fill_deckstring(text)
-            wx.CallAfter(import_panel.name_ctrl.SetFocus)
-    # Don't clear clipboard -- _last_clipboard_deckstring prevents re-prompt
-```
-
-### WR-05: Missing `__init__.py` module docstring in `models/deck.py`
-
-**File:** `stonereader/models/deck.py:1`
-**Issue:** Per the project conventions documented in CLAUDE.md ("Module-level docstrings present on all files"), `deck.py` is missing its module-level docstring. This is the only source file among the 13 reviewed source files that lacks one.
-
-**Fix:**
-Add a module docstring at the top of the file:
-
-```python
-"""Hearthstone deck models -- Deck (resolved cards) and DeckSummary (lightweight list display)."""
-```
+**Fix:** Replace string check with a structural discriminator (see WR-03), or expose `_PLACEHOLDER_ID_PREFIX = "UNKNOWN_"` as a module-level constant used by both functions.
 
 ## Info
 
-### IN-01: Accessing private NavigationController attributes from app wiring
+### IN-01: Local import inside `_check_clipboard_for_deckstring` runs on every window activation
 
-**File:** `stonereader/app.py:198, 287-289`
-**Issue:** `_check_clipboard_for_deckstring` accesses `self._nav._panels` (line 198) and `_on_open_deck` accesses `nav._panels`, `nav._sizer`, and `nav._stack` (lines 287-289). This couples the app wiring code to NavigationController internals. If the NavigationController implementation changes, these will break silently.
+**File:** `stonereader/app.py:303`
 
-**Fix:**
-Add public methods to `NavigationController`:
+**Issue:** `from hearthstone.deckstrings import parse_deckstring` is imported lazily inside the method, which fires on every `wx.EVT_ACTIVATE`. First call pays the import cost; subsequent calls hit Python's import cache. The same symbol is plausibly already used elsewhere transitively via `Deck.from_deckstring`.
 
-```python
-def get_panel(self, name: str) -> wx.Panel | None:
-    return self._panels.get(name)
+**Fix:** Move the import to the top of `app.py` alongside the other `hearthstone` imports.
 
-def replace_panel(self, name: str, panel: wx.Panel, presenter: object, focus_target: wx.Window) -> None:
-    """Replace an existing panel, destroying the old one."""
-    if name in self._panels:
-        old = self._panels[name]
-        self._sizer.Detach(old)
-        old.Destroy()
-        self._stack = [n for n in self._stack if n != name]
-    self.register_panel(name, panel, presenter, focus_target)
-```
+### IN-02: Two near-identical `except` blocks in `validate_and_import`
 
-### IN-02: Global mutable state in test helper `_next_dbf_id`
+**File:** `stonereader/presenters/import_deck.py:69-80`
 
-**File:** `tests/test_deck_contents.py:10`, `tests/test_import_deck.py:12`
-**Issue:** Both test files use a global `_next_dbf_id` counter with `global _next_dbf_id` to generate unique card IDs. This creates order-dependent state between tests if they run in the same process. While pytest typically isolates modules, this is a fragile pattern.
+**Issue:** `except ValueError` and `except TypeError` use identical message bodies. Maintenance hazard.
 
 **Fix:**
-Use `itertools.count()` or pass dbf_id explicitly:
-
-```python
-_dbf_counter = itertools.count(9000)
-
-def _make_card(name: str = "Test Card", ...) -> Card:
-    dbf_id = next(_dbf_counter)
-    ...
-```
-
-### IN-03: Redundant exception types in except clauses
-
-**File:** `stonereader/app.py:181`, `stonereader/presenters/import_deck.py:77`
-**Issue:** `except (ValueError, TypeError, Exception)` is redundant -- `Exception` already covers both `ValueError` and `TypeError`. Listing all three suggests the author intended to catch only specific exceptions but added `Exception` as a safety net. This makes the intent unclear.
-
-**Fix:**
-Either catch only the specific expected exceptions:
 ```python
 except (ValueError, TypeError):
+    self._show_error(
+        "Invalid deck code. Check that you copied the full "
+        "code from Hearthstone and try again."
+    )
+    return False
 ```
-Or if truly all exceptions must be caught, use just:
+Note: `MissingCardsError` is a `ValueError` subclass, so its handler must remain ordered before the combined clause.
+
+### IN-03: `_on_open_deck` parameter typed as `object` with `# type: ignore[arg-type]`
+
+**File:** `stonereader/app.py:433-437`
+
+**Issue:** The lambda signature `def _on_open_deck(deck: object) -> None:` constructs `DeckContentsPresenter(speech, deck)` with `# type: ignore[arg-type]`. The `type: ignore` masks the contract instead of expressing it.
+
+**Fix:** Type the parameter precisely (`def _on_open_deck(deck: Deck) -> None:` after a TYPE_CHECKING import) and remove the `# type: ignore`.
+
+### IN-04: Shift-modifier rule comment does not match implementation
+
+**File:** `stonereader/input_layer.py:45-48`
+
+**Issue:** Comment says "Shift prefix for letter keys only — not arrows, enter, etc." but the check `if event.ShiftDown() and name not in _KEY_NAMES.values():` will also prefix digit and punctuation characters. shift+digit would emit `"shift+1"`.
+
+**Fix:** Tighten implementation (`if event.ShiftDown() and name.isalpha() and len(name) == 1:`) and update comment, or broaden the comment. Also cache `_NAMED_KEYS = frozenset(_KEY_NAMES.values())` to avoid per-event O(n) scan.
+
+### IN-05: `StoneReaderApp._frame` attribute lifecycle
+
+**File:** `stonereader/app.py:347-459`
+
+**Issue:** `StoneReaderApp` attaches `self._frame = MainWindow()` inside `OnInit`. There is no `__init__` and no class-level annotation. Currently nothing else reads it, so this is purely a hygiene note.
+
+**Fix:** Either annotate at class scope (`_frame: MainWindow`) or skip the attribute and just `MainWindow().Show()` since nothing else needs the reference.
+
+### IN-06: `_format_missing_cards_message` is private but tested directly
+
+**File:** `stonereader/presenters/import_deck.py:110-126` and `tests/test_import_deck.py:221-242`
+
+**Issue:** Method is underscore-prefixed (private convention) yet two tests call it directly through `presenter._format_missing_cards_message(...)`.
+
+**Fix:** If the formatted string is part of the public contract (it is user-visible), drop the underscore. Otherwise drive validation through `validate_and_import` with `set_on_show_error` capturing the message.
+
+### IN-07: `wx.App(False)` instantiated at module scope in two test files
+
+**File:** `tests/test_input_layer.py:6` and `tests/test_navigation.py:12`
+
+**Issue:** Each file creates `_app = wx.App(False)` at import time. wx allows only one `wx.App` per process; pytest collects both modules in the same process, so whichever imports second gets a no-op (or, on some wx versions, an error/warning). Construction order is undefined.
+
+**Fix:** Move the `wx.App` setup to a session-scoped autouse fixture in `tests/conftest.py`:
 ```python
-except Exception:
+@pytest.fixture(scope="session", autouse=True)
+def _wx_app():
+    app = wx.App(False)
+    yield app
 ```
-
-### IN-04: `DeckManagerPanel` does not display empty state in the view
-
-**File:** `stonereader/views/deck_manager.py:40-68`
-**Issue:** When the deck list is empty, the `_DeckListCtrl` shows nothing visually. The presenter handles the speech announcement ("Deck Manager: no saved decks"), but sighted users (or screen reader users who missed the announcement) have no persistent indication that the list is empty. Consider adding a static text label that shows/hides based on whether decks exist.
-
-**Fix:**
-This is a minor UX improvement -- add a "No saved decks" label that toggles visibility:
-
-```python
-self._empty_label = wx.StaticText(self, label="No saved decks. Import a deck to get started.")
-sizer.Add(self._empty_label, 0, wx.ALL, 8)
-
-def _on_state_changed(self, decks, cursor):
-    self._list_ctrl.set_decks(decks)
-    self._empty_label.Show(not decks)
-    if decks:
-        self._list_ctrl.Select(cursor)
-    self.Layout()
-```
+Then drop the module-level `_app = wx.App(False)` from both test files.
 
 ---
 
-_Reviewed: 2026-04-15T12:00:00Z_
-_Reviewer: Claude (gsd-code-reviewer)_
+_Reviewer: gsd-code-reviewer_
 _Depth: standard_
+_Reviewed: 2026-04-25_
+_Note: Supersedes the 2026-04-15 review (which ran before gap-closure plans 01-05/06/07). Older findings should be cross-checked against current code before assuming resolution._
