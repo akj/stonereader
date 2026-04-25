@@ -8,6 +8,46 @@ from hearthstone import deckstrings
 from stonereader.models.card import Card, CardDatabase
 
 
+class MissingCardsError(ValueError):
+    """Raised when a deckstring references DBF IDs not present in the card database.
+
+    Subclass of ValueError so existing `except ValueError` handlers continue to
+    catch it. Exposes the missing DBF IDs as a tuple for diagnostic display.
+    """
+
+    def __init__(self, missing_dbf_ids: tuple[int, ...]) -> None:
+        self.missing_dbf_ids = missing_dbf_ids
+        super().__init__(f"Missing cards with DBF IDs: {list(missing_dbf_ids)}")
+
+
+def _make_placeholder_card(dbf_id: int) -> Card:
+    """Build a placeholder Card for an unknown DBF ID (graceful-degrade import)."""
+    return Card(
+        id=f"UNKNOWN_{dbf_id}",
+        dbf_id=dbf_id,
+        name=f"Unknown card #{dbf_id}",
+        cost=0,
+        attack=None,
+        health=None,
+        text="",
+        rarity="COMMON",
+        card_class="NEUTRAL",
+        card_type="MINION",
+        card_set="",
+        collectible=False,
+    )
+
+
+def count_unknown_cards(deck: "Deck") -> int:
+    """Return the number of placeholder (unknown) Card entries in a Deck.
+
+    Used by ImportDeckPresenter to announce 'N unknown cards' after a
+    graceful-degrade import. Counts (card, count) tuples whose card.id
+    starts with 'UNKNOWN_'.
+    """
+    return sum(count for card, count in deck.cards if card.id.startswith("UNKNOWN_"))
+
+
 @dataclass(frozen=True)
 class Deck:
     """Represents a Hearthstone deck."""
@@ -42,27 +82,45 @@ class Deck:
             "EPIC": 400,
             "LEGENDARY": 1600,
         }
-        return sum(
-            dust_costs.get(card.rarity, 0) * count for card, count in self.cards
-        )
+        return sum(dust_costs.get(card.rarity, 0) * count for card, count in self.cards)
 
     @classmethod
     def from_deckstring(
-        cls, deckstring: str, card_db: CardDatabase, name: str = "Imported Deck"
+        cls,
+        deckstring: str,
+        card_db: CardDatabase,
+        name: str = "Imported Deck",
+        *,
+        allow_unknown: bool = False,
     ) -> "Deck":
+        """Parse a deckstring into a Deck.
+
+        By default (allow_unknown=False), raises MissingCardsError if any DBF
+        ID in the deckstring is not present in card_db. The error's
+        missing_dbf_ids attribute lists the offending IDs for diagnostics.
+
+        With allow_unknown=True, missing DBF IDs become placeholder Card
+        entries (id prefixed with UNKNOWN_, collectible=False). This lets a
+        deckstring from a newer expansion still import when the local card
+        database is older. The original deckstring is preserved on the Deck so
+        a later refresh can re-resolve the unknown cards.
+        """
         cards_data, heroes_data, format_data, _ = deckstrings.parse_deckstring(
             deckstring
         )
-        cards = []
-        missing_cards = []
+        cards: list[tuple[Card, int]] = []
+        missing_dbf_ids: list[int] = []
         for dbf_id, count in cards_data:
             card = card_db.get_card_by_dbf_id(dbf_id)
-            if card:
+            if card is not None:
                 cards.append((card, count))
+            elif allow_unknown:
+                cards.append((_make_placeholder_card(dbf_id), count))
+                missing_dbf_ids.append(dbf_id)
             else:
-                missing_cards.append(dbf_id)
-        if missing_cards:
-            raise ValueError(f"Missing cards with DBF IDs: {missing_cards}")
+                missing_dbf_ids.append(dbf_id)
+        if missing_dbf_ids and not allow_unknown:
+            raise MissingCardsError(tuple(missing_dbf_ids))
         hero_class = "NEUTRAL"
         if heroes_data:
             hero_card = card_db.get_card_by_dbf_id(heroes_data[0])
