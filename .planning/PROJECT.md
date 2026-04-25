@@ -21,6 +21,7 @@ Screen reader users can access live game tracking information (remaining deck, o
 - ✓ SQLite database for decks and games — existing
 - ✓ Deck model with deckstring import/export — existing
 - ✓ Game state and replay state models — existing
+- ✓ Deck management — import deckstrings (with graceful-degrade for unknown DBF IDs), browse saved decks, view deck contents with detail inspection, delete with confirmation, export to clipboard — Validated in Phase 01
 
 ### Active
 
@@ -31,7 +32,6 @@ Screen reader users can access live game tracking information (remaining deck, o
 - [ ] Mulligan guidance (stats-based suggestions)
 - [ ] Global hotkeys that announce info while Hearthstone has focus
 - [ ] Background window with full zone navigation for live game state
-- [ ] Deck management tab — import deckstrings, browse saved decks
 - [ ] Replay viewer — turn-by-turn navigation with board/hand/log zones
 - [ ] Replay viewer — action-by-action drill-down within turns
 - [ ] Game history storage (basic win/loss, matchups)
@@ -72,7 +72,7 @@ Screen reader users can access live game tracking information (remaining deck, o
 | Power.log parsing for game data | Proven approach (HDT, Firestone use it), stable across patches, no injection risk | — Pending |
 | Background window + global hotkeys | Overlays are useless for screen readers; global hotkeys bridge the gap | — Pending |
 | Windows-only platform target | NVDA/JAWS are Windows; simplifies global hotkey implementation | — Pending |
-| Import-only deck management | Building decks from scratch is complex and low-value when deckstrings exist | — Pending |
+| Import-only deck management | Building decks from scratch is complex and low-value when deckstrings exist | ✓ Validated in Phase 01 — deckstring import (with graceful-degrade for unknown DBF IDs) is the sole path |
 | Basic game history, not deep analytics | Stats are nice-to-have, not the core value; avoids scope creep | — Pending |
 
 ## Evolution
@@ -93,4 +93,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-14 after initialization*
+*Last updated: 2026-04-25 after Phase 01 (Deck Management) completion*
