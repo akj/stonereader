@@ -389,3 +389,107 @@ def test_oninit_registers_import_deck_as_transient():
     assert pattern.search(app_src) is not None, (
         'OnInit must register "Import Deck" with transient=True'
     )
+
+
+# ---------- restore_focus tests (UAT Gap 3 / D-06) ----------
+
+
+def test_restore_focus_schedules_setfocus_on_current_panel():
+    """restore_focus schedules SetFocus on the visible panel's focus target."""
+    from unittest.mock import patch
+
+    nav, frame, _ = _make_controller()
+    panel = wx.Panel(frame)
+    nav.register_panel("Home", panel, _StubPresenter("h"), panel)
+    nav.show_panel("Home")
+    # Patch the wx.CallAfter symbol on the import path that `restore_focus`
+    # resolves through (stonereader/app.py imports `wx`, then calls
+    # `wx.CallAfter(...)` inside restore_focus). patch.object auto-restores
+    # on exception via its context-manager semantics.
+    with patch("stonereader.app.wx.CallAfter") as mock_call_after:
+        nav.restore_focus()
+    mock_call_after.assert_called_once()
+    args, _kwargs = mock_call_after.call_args
+    assert args[0] == panel.SetFocus
+    frame.Destroy()
+
+
+def test_restore_focus_no_op_when_nothing_visible():
+    """With no panel visible, restore_focus must NOT schedule wx.CallAfter."""
+    from unittest.mock import patch
+
+    nav, frame, _ = _make_controller()
+    # No show_panel called -> _current_visible is None.
+    with patch("stonereader.app.wx.CallAfter") as mock_call_after:
+        nav.restore_focus()
+    mock_call_after.assert_not_called()
+    frame.Destroy()
+
+
+def test_restore_focus_targets_currently_visible_panel_after_switch():
+    """After A then B, restore_focus targets B's focus target, not A's."""
+    from unittest.mock import patch
+
+    nav, frame, _ = _make_controller()
+    panel_a = wx.Panel(frame)
+    panel_b = wx.Panel(frame)
+    nav.register_panel("A", panel_a, _StubPresenter("a"), panel_a)
+    nav.register_panel("B", panel_b, _StubPresenter("b"), panel_b)
+    nav.show_panel("A")
+    nav.show_panel("B")
+    with patch("stonereader.app.wx.CallAfter") as mock_call_after:
+        nav.restore_focus()
+    mock_call_after.assert_called_once()
+    args, _kwargs = mock_call_after.call_args
+    assert args[0] == panel_b.SetFocus
+    assert args[0] != panel_a.SetFocus
+    frame.Destroy()
+
+
+def test_restore_focus_targets_transient_focus_target_when_transient_visible():
+    """While a transient panel is visible, restore_focus targets ITS focus widget."""
+    from unittest.mock import patch
+
+    nav, frame, _ = _make_controller()
+    home = wx.Panel(frame)
+    transient_panel = wx.Panel(frame)
+    transient_focus = wx.TextCtrl(transient_panel)
+    nav.register_panel("Home", home, _StubPresenter("h"), home)
+    nav.register_panel(
+        "T", transient_panel, _StubPresenter("t"), transient_focus, transient=True
+    )
+    nav.show_panel("Home")
+    nav.show_panel("T")
+    with patch("stonereader.app.wx.CallAfter") as mock_call_after:
+        nav.restore_focus()
+    mock_call_after.assert_called_once()
+    args, _kwargs = mock_call_after.call_args
+    assert args[0] == transient_focus.SetFocus
+    assert args[0] != home.SetFocus
+    frame.Destroy()
+
+
+def test_check_clipboard_no_path_calls_restore_focus_static():
+    """Static check: the No branch of _check_clipboard_for_deckstring calls restore_focus.
+
+    Bind the assertion to the specific YES/else pair so a future inner `else:`
+    elsewhere in the function body cannot silently invalidate this test.
+    A static-text check is sufficient because the dialog interaction needs
+    a real event loop and a real clipboard to test end-to-end.
+    """
+    import re
+    from pathlib import Path
+
+    src = Path("stonereader/app.py").read_text()
+    pattern = re.compile(
+        r"if\s+result\s*==\s*wx\.ID_YES:.*?else:\s*\n\s*"
+        r"(?:#[^\n]*\n\s*)*"
+        r"self\._nav\.restore_focus\(\)",
+        re.DOTALL,
+    )
+    match = pattern.search(src)
+    assert match, (
+        "Expected `else: self._nav.restore_focus()` directly under "
+        "`if result == wx.ID_YES:` in _check_clipboard_for_deckstring; "
+        "regex did not match."
+    )
