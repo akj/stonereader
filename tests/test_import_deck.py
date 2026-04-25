@@ -101,24 +101,23 @@ def test_invalid_deckstring_shows_error(tmp_path):
     conn.close()
 
 
-def test_missing_cards_shows_error(tmp_path):
-    """Deckstring references cards not in the card database -> ValueError."""
+def test_missing_cards_imports_with_placeholders(tmp_path):
+    """With allow_unknown=True (now the default in validate_and_import), a deckstring
+    referencing unknown cards still imports successfully and records placeholders."""
     conn = _make_db(tmp_path)
     speech = MockSpeechService()
-    errors: list[str] = []
-    # Empty card database -- all card DBF IDs will be "missing"
+    # Empty card DB so every card is unknown.
     presenter = ImportDeckPresenter(speech, conn, CardDatabase())
-    presenter.set_on_show_error(lambda msg, title: errors.append(msg))
-    # This is a real deckstring format but the card DB is empty
-    # parse_deckstring will succeed but from_deckstring will raise ValueError
-    # because all card DBF IDs are unknown
+    # Deckstring with cards that resolve to non-empty but unknown DBF IDs.
     result = presenter.validate_and_import(
         "AAECAf0GAA/pBu0GkAeODsIPwxaFF+CsAsmrA/2wA5GxA5O6A8O8A/fRA4fhAwA=",
-        "Missing Cards Deck",
+        "Unknown Cards Deck",
     )
-    assert result is False
-    # Should get either "not found" or "Invalid" error
-    assert len(errors) > 0
+    assert result is True
+    assert "Unknown Cards Deck imported" in speech.last_speech
+    assert "unknown card" in speech.last_speech
+    decks = get_all_decks(conn)
+    assert len(decks) == 1
     conn.close()
 
 
@@ -178,4 +177,66 @@ def test_error_fallback_to_speech_when_no_callback(tmp_path):
     # No on_show_error set
     presenter.validate_and_import("", "My Deck")
     assert "Enter a deck code to import" in speech.last_speech
+    conn.close()
+
+
+def test_known_cards_only_omits_unknown_suffix(tmp_path):
+    """With all cards resolved, success announcement has no unknown-card suffix."""
+    conn = _make_db(tmp_path)
+    speech = MockSpeechService()
+    card_db = CardDatabase()
+    hero = _make_card(name="Malfurion", card_class="DRUID", dbf_id=274)
+    card_db.cards_by_dbf_id[274] = hero
+    card_db.cards_by_id[hero.id] = hero
+    presenter = ImportDeckPresenter(speech, conn, card_db)
+    result = presenter.validate_and_import("AAECAZICAAAAAA==", "Empty Druid")
+    assert result is True
+    assert speech.last_speech == "Empty Druid imported"
+    conn.close()
+
+
+def test_singular_unknown_card_uses_singular_form(tmp_path):
+    """One unknown card => 'imported, 1 unknown card' (no trailing s)."""
+    from hearthstone.deckstrings import write_deckstring
+    from hearthstone.enums import FormatType
+
+    deckstring = write_deckstring(
+        cards=[(99999, 1)],
+        heroes=[274],
+        format=FormatType.FT_STANDARD,
+    )
+
+    conn = _make_db(tmp_path)
+    speech = MockSpeechService()
+    card_db = CardDatabase()
+    hero = _make_card(name="Malfurion", card_class="DRUID", dbf_id=274)
+    card_db.cards_by_dbf_id[274] = hero
+    card_db.cards_by_id[hero.id] = hero
+    presenter = ImportDeckPresenter(speech, conn, card_db)
+    presenter.validate_and_import(deckstring, "One Unknown")
+    assert speech.last_speech == "One Unknown imported, 1 unknown card"
+    conn.close()
+
+
+def test_format_missing_cards_message_includes_dbf_ids(tmp_path):
+    """The diagnostic helper lists the actual DBF IDs in the error message."""
+    conn = _make_db(tmp_path)
+    speech = MockSpeechService()
+    presenter = ImportDeckPresenter(speech, conn, CardDatabase())
+    msg = presenter._format_missing_cards_message((99999, 88888, 77777))
+    assert "99999" in msg
+    assert "88888" in msg
+    assert "77777" in msg
+    assert "DBF IDs" in msg
+    conn.close()
+
+
+def test_format_missing_cards_message_empty_falls_back(tmp_path):
+    """Empty tuple => generic message (no parenthesized empty list)."""
+    conn = _make_db(tmp_path)
+    speech = MockSpeechService()
+    presenter = ImportDeckPresenter(speech, conn, CardDatabase())
+    msg = presenter._format_missing_cards_message(())
+    assert "DBF" not in msg or "(" not in msg
+    assert "newer expansion" in msg
     conn.close()
