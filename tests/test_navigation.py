@@ -241,3 +241,151 @@ def test_get_presenter_returns_none_for_unknown():
     nav, frame, _ = _make_controller()
     assert nav.get_presenter("Unknown") is None
     frame.Destroy()
+
+
+# ---------- Transient panel tests (UAT Gap 2 / D-02) ----------
+
+
+def test_register_panel_with_transient_flag():
+    nav, frame, _ = _make_controller()
+    panel = wx.Panel(frame)
+    presenter = _StubPresenter("t")
+    nav.register_panel("Transient", panel, presenter, panel, transient=True)
+    assert "Transient" in nav._transient_panels
+    assert "Transient" in nav._panels
+    assert not panel.IsShown()
+    frame.Destroy()
+
+
+def test_register_panel_default_is_not_transient():
+    nav, frame, _ = _make_controller()
+    panel = wx.Panel(frame)
+    presenter = _StubPresenter("n")
+    nav.register_panel("Normal", panel, presenter, panel)
+    assert "Normal" not in nav._transient_panels
+    frame.Destroy()
+
+
+def test_show_transient_does_not_push_onto_stack():
+    nav, frame, _ = _make_controller()
+    home = wx.Panel(frame)
+    transient = wx.Panel(frame)
+    nav.register_panel("Home", home, _StubPresenter("h"), home)
+    nav.register_panel("T", transient, _StubPresenter("t"), transient, transient=True)
+    nav.show_panel("Home")
+    nav.show_panel("T")
+    assert nav._stack == ["Home"]
+    assert nav.current_panel_name == "T"
+    assert transient.IsShown()
+    assert not home.IsShown()
+    frame.Destroy()
+
+
+def test_go_back_from_transient_skips_it_returning_to_previous_non_transient():
+    nav, frame, _ = _make_controller()
+    home = wx.Panel(frame)
+    sub = wx.Panel(frame)
+    transient = wx.Panel(frame)
+    nav.register_panel("Home", home, _StubPresenter("h"), home)
+    nav.register_panel("Sub", sub, _StubPresenter("s"), sub)
+    nav.register_panel("T", transient, _StubPresenter("t"), transient, transient=True)
+    nav.show_panel("Home")
+    nav.show_panel("Sub")
+    nav.show_panel("T")
+    assert nav.current_panel_name == "T"
+    nav.go_back()
+    assert nav.current_panel_name == "Sub"
+    assert sub.IsShown()
+    assert not transient.IsShown()
+    assert nav._stack == ["Home", "Sub"]
+    frame.Destroy()
+
+
+def test_go_back_from_transient_at_home_returns_to_home():
+    nav, frame, _ = _make_controller()
+    home = wx.Panel(frame)
+    transient = wx.Panel(frame)
+    nav.register_panel("Home", home, _StubPresenter("h"), home)
+    nav.register_panel("T", transient, _StubPresenter("t"), transient, transient=True)
+    nav.show_panel("Home")
+    nav.show_panel("T")
+    nav.go_back()
+    assert nav.current_panel_name == "Home"
+    assert home.IsShown()
+    assert not transient.IsShown()
+    frame.Destroy()
+
+
+def test_show_non_transient_after_transient_leaves_no_transient_trace():
+    """After a transient is dismissed by forward-navigation, _stack is clean."""
+    nav, frame, _ = _make_controller()
+    home = wx.Panel(frame)
+    transient = wx.Panel(frame)
+    other = wx.Panel(frame)
+    nav.register_panel("Home", home, _StubPresenter("h"), home)
+    nav.register_panel("T", transient, _StubPresenter("t"), transient, transient=True)
+    nav.register_panel("Other", other, _StubPresenter("o"), other)
+    nav.show_panel("Home")
+    nav.show_panel("T")
+    nav.show_panel("Other")
+    assert nav._stack == ["Home", "Other"]
+    assert "T" not in nav._stack
+    nav.go_back()
+    assert nav.current_panel_name == "Home"
+    frame.Destroy()
+
+
+def test_transient_panel_gets_escape_and_back_keys():
+    """Transient panels must always be escapable, even when shown from Home."""
+    nav, frame, layer = _make_controller()
+    home = wx.Panel(frame)
+    transient = wx.Panel(frame)
+    nav.register_panel("Home", home, _StubPresenter("h"), home)
+    nav.register_panel("T", transient, _StubPresenter("t"), transient, transient=True)
+    nav.show_panel("Home")
+    nav.show_panel("T")
+    assert "escape" in layer._current_key_map
+    assert "back" in layer._current_key_map
+    frame.Destroy()
+
+
+def test_replace_panel_preserves_transient_flag():
+    nav, frame, _ = _make_controller()
+    old = wx.Panel(frame)
+    new = wx.Panel(frame)
+    nav.register_panel("Slot", old, _StubPresenter("o"), old, transient=True)
+    nav.replace_panel("Slot", new, _StubPresenter("n"), new, transient=True)
+    assert "Slot" in nav._transient_panels
+    assert nav._panels["Slot"] is new
+    frame.Destroy()
+
+
+def test_replace_panel_can_unset_transient():
+    nav, frame, _ = _make_controller()
+    old = wx.Panel(frame)
+    new = wx.Panel(frame)
+    nav.register_panel("Slot", old, _StubPresenter("o"), old, transient=True)
+    nav.replace_panel("Slot", new, _StubPresenter("n"), new, transient=False)
+    assert "Slot" not in nav._transient_panels
+    frame.Destroy()
+
+
+def test_oninit_registers_import_deck_as_transient():
+    """Verify StoneReaderApp.OnInit registers Import Deck with transient=True.
+
+    This is a static-text check on app.py to avoid spinning up the full app
+    (which requires loading the entire CardDatabase). The grep matches the
+    transient=True kwarg on the Import Deck register_panel call specifically.
+    """
+    import re
+    from pathlib import Path
+
+    app_src = Path("stonereader/app.py").read_text()
+    # Match: register_panel(...Import Deck..., transient=True...) across newlines.
+    pattern = re.compile(
+        r"register_panel\s*\([^)]*?\"Import Deck\"[^)]*?transient\s*=\s*True[^)]*?\)",
+        re.DOTALL,
+    )
+    assert pattern.search(app_src) is not None, (
+        'OnInit must register "Import Deck" with transient=True'
+    )
