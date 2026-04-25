@@ -9,7 +9,8 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Deck Management
 
-- [ ] **DECK-01**: User can import a deck by pasting a deckstring and naming it
+- [x] **DECK-01
+**: User can import a deck by pasting a deckstring and naming it
 - [ ] **DECK-02**: User can browse saved decks in a navigable list
 - [ ] **DECK-03**: User can view deck contents with card details via zone navigation
 - [ ] **DECK-04**: User can delete a saved deck with confirmation
@@ -92,7 +93,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DECK-01 | Phase 1 | Pending |
+| DECK-01 | Phase 1 | Complete (01-03, 01-07) |
 | DECK-02 | Phase 1 | Pending |
 | DECK-03 | Phase 1 | Pending |
 | DECK-04 | Phase 1 | Pending |

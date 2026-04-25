@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 1 UI-SPEC approved
-last_updated: "2026-04-25T18:49:54.121Z"
-last_activity: 2026-04-25 -- Phase 01 execution started
+stopped_at: Completed 01-07-PLAN.md
+last_updated: "2026-04-25T19:07:47.762Z"
+last_activity: 2026-04-25
 progress:
   total_phases: 4
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 7
-  completed_plans: 4
-  percent: 57
+  completed_plans: 7
+  percent: 100
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-04-14)
 ## Current Position
 
 Phase: 01 (deck-management) — EXECUTING
-Plan: 1 of 7
-Status: Executing Phase 01
-Last activity: 2026-04-25 -- Phase 01 execution started
+Plan: 2 of 7
+Status: Ready to execute
+Last activity: 2026-04-25
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -52,6 +52,7 @@ Progress: [░░░░░░░░░░] 0%
 - Trend: —
 
 *Updated after each plan completion*
+| Phase 01 P07 | 2min | 1 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -64,6 +65,9 @@ Recent decisions affecting current work:
 - [Roadmap]: Phase 2 (Log Infrastructure) has no UI; phases 1, 3, 4 have UI components
 - [Roadmap]: Global hotkeys via wx.Frame.RegisterHotKey (not keyboard/pynput libraries)
 - [Roadmap]: New services/ directory for LogWatcher, GameEngine, GlobalHotkeyService, ReplayEngine
+- [01-07] Chose Option A (restore_focus helper on NavigationController) over inline wx.CallAfter -- generalizes to every future modal callsite for ~5 lines
+- [01-07] _focus_targets.get() defensive lookup -- silently no-ops if panel was destroyed mid-flight rather than raising
+- [01-07] Yes/No path asymmetry intentional and documented -- Yes path keeps name_ctrl.SetFocus override; No path uses default focus target via restore_focus()
 
 ### Pending Todos
 
@@ -84,8 +88,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-04-15T05:15:04.852Z
-Stopped at: Phase 1 UI-SPEC approved
-Resume file: .planning/phases/01-deck-management/01-UI-SPEC.md
+Last session: 2026-04-25T19:07:47.756Z
+Stopped at: Completed 01-07-PLAN.md
+Resume file: None
 
 **Planned Phase:** 01 (deck-management) — 7 plans — 2026-04-25T17:07:39.351Z

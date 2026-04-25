@@ -84,7 +84,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Deck Management | 0/4 | Planning complete | - |
+| 1. Deck Management | 4/4 (+3 gap-closure: 01-05, 01-06, 01-07) | Complete (gap-closure plans merged) | 2026-04-25 |
 | 2. Log Infrastructure | 0/0 | Not started | - |
 | 3. Live Game Tracking | 0/0 | Not started | - |
 | 4. Replay Viewer | 0/0 | Not started | - |
