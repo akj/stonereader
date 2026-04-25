@@ -38,6 +38,13 @@ class NavigationController:
         self._presenters: dict[str, object] = {}
         self._focus_targets: dict[str, wx.Window] = {}
         self._stack: list[str] = []
+        # Transient panels (e.g. Import Deck) are shown on demand but never
+        # pushed onto _stack so go_back skips them on the way home (D-02).
+        self._transient_panels: set[str] = set()
+        # Name of the panel currently visible (transient or stacked); the
+        # source of truth for current_panel_name. _stack[-1] only reflects
+        # the most recent non-transient panel.
+        self._current_visible: str | None = None
 
     def register_panel(
         self,
@@ -45,49 +52,106 @@ class NavigationController:
         panel: wx.Panel,
         presenter: object,
         focus_target: wx.Window,
+        *,
+        transient: bool = False,
     ) -> None:
-        """Register a panel for navigation. Initially hidden."""
+        """Register a panel for navigation. Initially hidden.
+
+        A *transient* panel is shown on demand (e.g. Import Deck) but is not
+        pushed onto the navigation history -- go_back skips it on the way home,
+        so users never land on it via back-navigation. This matches the mental
+        model of a one-shot operation rather than a peer destination (D-02).
+        """
         self._panels[name] = panel
         self._presenters[name] = presenter
         self._focus_targets[name] = focus_target
         self._sizer.Add(panel, 1, wx.EXPAND)
         panel.Hide()
+        if transient:
+            self._transient_panels.add(name)
 
     def show_panel(self, name: str) -> None:
-        """Show a panel by name, pushing it onto the navigation stack."""
-        if self._stack:
-            current = self._stack[-1]
-            self._panels[current].Hide()
-        self._stack.append(name)
+        """Show a panel by name.
+
+        For non-transient panels: pushes onto the navigation stack so go_back
+        can return here. For transient panels (e.g. Import Deck): does NOT
+        push onto the stack so go_back skips this panel on the way home.
+        """
+        # Hide whatever is currently visible (transient or stacked)
+        if self._current_visible is not None:
+            self._panels[self._current_visible].Hide()
+
+        # Show the new panel
         self._panels[name].Show()
+        self._current_visible = name
+
+        # Update navigation history. Transient panels are NEVER pushed.
+        if name not in self._transient_panels:
+            self._stack.append(name)
+
         self._sizer.Layout()
-        # Activate key map with escape/back for navigation
+
+        # Activate key map. Add escape/back if there is anywhere to go back
+        # to: a non-transient parent exists in _stack OR this panel is
+        # transient (transient panels always need an escape route, even from
+        # Home, so the user can dismiss them without committing to the op).
         presenter = self._presenters[name]
         get_map = getattr(presenter, "get_key_map", None)
         key_map = dict(get_map()) if get_map else {}
-        # Add escape/back to all panels except home (D-02)
-        if len(self._stack) > 1:
+        if name in self._transient_panels or len(self._stack) > 1:
             key_map["escape"] = self.go_back
             key_map["back"] = self.go_back
         self._input_layer.activate_view(name, key_map)
         wx.CallAfter(self._focus_targets[name].SetFocus)
 
     def go_back(self) -> None:
-        """Pop the current panel and return to the previous one (D-02)."""
-        if len(self._stack) <= 1:
-            return  # Already at home, nowhere to go
-        self._panels[self._stack.pop()].Hide()
-        current = self._stack[-1]
-        self._panels[current].Show()
+        """Pop the current panel and return to the previous one (D-02).
+
+        If the currently visible panel is transient: hide it and re-show the
+        top of _stack (the most recent non-transient panel). Transients never
+        appear in _stack, so the user is taken back to the panel they were on
+        before opening the transient -- bypassing it on subsequent
+        back-navigation.
+
+        If the currently visible panel is non-transient: pop _stack and
+        re-show the new top, exactly as before.
+
+        No-op if there is nowhere to go back to (only Home, no transient).
+        """
+        if self._current_visible is None:
+            return
+
+        if self._current_visible in self._transient_panels:
+            # Hide transient and return to the top of _stack (last
+            # non-transient panel).
+            self._panels[self._current_visible].Hide()
+            if not self._stack:
+                # No non-transient ancestry; nothing to restore. Defensive --
+                # should not occur because OnInit always shows Home before
+                # any transient.
+                self._current_visible = None
+                return
+            target = self._stack[-1]
+        else:
+            # Non-transient: pop ourselves off _stack, restore the new top.
+            if len(self._stack) <= 1:
+                return  # Already at home (only one non-transient on stack)
+            self._panels[self._current_visible].Hide()
+            self._stack.pop()
+            target = self._stack[-1]
+
+        self._panels[target].Show()
+        self._current_visible = target
         self._sizer.Layout()
-        presenter = self._presenters[current]
+
+        presenter = self._presenters[target]
         get_map = getattr(presenter, "get_key_map", None)
         key_map = dict(get_map()) if get_map else {}
-        if len(self._stack) > 1:
+        if target in self._transient_panels or len(self._stack) > 1:
             key_map["escape"] = self.go_back
             key_map["back"] = self.go_back
-        self._input_layer.activate_view(current, key_map)
-        wx.CallAfter(self._focus_targets[current].SetFocus)
+        self._input_layer.activate_view(target, key_map)
+        wx.CallAfter(self._focus_targets[target].SetFocus)
 
     def replace_panel(
         self,
@@ -95,12 +159,14 @@ class NavigationController:
         panel: wx.Panel,
         presenter: object,
         focus_target: wx.Window,
+        *,
+        transient: bool = False,
     ) -> None:
         """Replace an existing panel, destroying the old one.
 
         If *name* is not yet registered, behaves like register_panel().
-        Cleans up the old panel's sizer entry and removes stale stack
-        entries to prevent ghost navigation.
+        Cleans up the old panel's sizer entry, removes stale stack entries,
+        and updates the transient registry.
         """
         if name in self._panels:
             old_panel = self._panels[name]
@@ -110,7 +176,10 @@ class NavigationController:
             del self._panels[name]
             del self._presenters[name]
             del self._focus_targets[name]
-        self.register_panel(name, panel, presenter, focus_target)
+            self._transient_panels.discard(name)
+            if self._current_visible == name:
+                self._current_visible = None
+        self.register_panel(name, panel, presenter, focus_target, transient=transient)
 
     def get_presenter(self, name: str) -> object | None:
         """Return the presenter for a named panel, or None."""
@@ -118,8 +187,8 @@ class NavigationController:
 
     @property
     def current_panel_name(self) -> str | None:
-        """Return the name of the currently visible panel."""
-        return self._stack[-1] if self._stack else None
+        """Return the name of the currently visible panel (transient or stacked)."""
+        return self._current_visible
 
 
 class MainWindow(wx.Frame):
@@ -304,7 +373,11 @@ class StoneReaderApp(wx.App):
             on_back=nav.go_back,
         )
         nav.register_panel(
-            "Import Deck", import_panel, import_presenter, import_panel.deckstring_ctrl
+            "Import Deck",
+            import_panel,
+            import_presenter,
+            import_panel.deckstring_ctrl,
+            transient=True,
         )
 
         # --- Wire callbacks ---
