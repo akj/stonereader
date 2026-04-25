@@ -190,6 +190,23 @@ class NavigationController:
         """Return the name of the currently visible panel (transient or stacked)."""
         return self._current_visible
 
+    def restore_focus(self) -> None:
+        """Restore keyboard focus to the currently visible panel's focus target.
+
+        Used by modal callsites (e.g. clipboard auto-import dialog) to ensure
+        focus does not get lost in the destroyed dialog's parent chain after
+        the user dismisses it. No-op if no panel is currently visible.
+
+        Uses wx.CallAfter to schedule SetFocus after the current event loop
+        iteration completes (Pitfall 4 -- see RESEARCH.md).
+        """
+        if self._current_visible is None:
+            return
+        target = self._focus_targets.get(self._current_visible)
+        if target is None:
+            return
+        wx.CallAfter(target.SetFocus)
+
 
 class MainWindow(wx.Frame):
     """Top-level window with panel-swap navigation."""
@@ -309,8 +326,15 @@ class MainWindow(wx.Frame):
 
                 if isinstance(import_panel, ImportDeckPanel):
                     import_panel.pre_fill_deckstring(text)
+                    # Override the default focus target (deckstring_ctrl): after
+                    # pre-filling, the next user action is to enter a name.
                     wx.CallAfter(import_panel.name_ctrl.SetFocus)
             # Don't clear clipboard -- _last_clipboard_deckstring prevents re-prompt
+        else:
+            # No path: explicitly restore focus to the active panel so screen
+            # readers don't silently lose their place after dialog dismissal
+            # (UAT Gap 3, D-06).
+            self._nav.restore_focus()
 
     def _on_quit(self, event: wx.CommandEvent) -> None:
         self.Close()
