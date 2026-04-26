@@ -70,16 +70,22 @@ def test_match_is_case_insensitive(monkeypatch) -> None:
     assert proc is fake
 
 
-def test_get_install_dir_returns_parent_of_exe(monkeypatch) -> None:
+def test_get_install_dir_returns_parent_of_exe(monkeypatch, tmp_path) -> None:
     from stonereader.services._process_detect import ProcessDetector
 
-    fake = _FakeProc("Hearthstone.exe", r"C:\Program Files\Hearthstone\Hearthstone.exe")
+    # Use a POSIX path under tmp_path so the Path() parsing works on both
+    # Linux test runners and Windows. The production target is Windows but
+    # the test must run cross-platform.
+    install_dir = tmp_path / "Hearthstone"
+    install_dir.mkdir()
+    exe_path = install_dir / "Hearthstone.exe"
+    fake = _FakeProc("Hearthstone.exe", str(exe_path))
     monkeypatch.setattr(psutil, "process_iter", lambda attrs=None: iter([fake]))
     detector = ProcessDetector()
-    install_dir = detector.get_install_dir()
-    assert install_dir is not None
-    # Path comparison must work cross-platform; check the final segment.
-    assert install_dir.name == "Hearthstone"
+    result = detector.get_install_dir()
+    assert result is not None
+    assert result == install_dir
+    assert result.name == "Hearthstone"
 
 
 def test_get_install_dir_returns_none_when_not_running(monkeypatch) -> None:
@@ -99,9 +105,7 @@ def test_skips_processes_that_disappear_during_iteration(monkeypatch) -> None:
         def info(self):
             raise psutil.NoSuchProcess(pid=999)
 
-    real = _FakeProc(
-        "Hearthstone.exe", r"C:\Program Files\Hearthstone\Hearthstone.exe"
-    )
+    real = _FakeProc("Hearthstone.exe", r"C:\Program Files\Hearthstone\Hearthstone.exe")
     monkeypatch.setattr(
         psutil, "process_iter", lambda attrs=None: iter([_GoneProc(), real])
     )
