@@ -13,7 +13,7 @@ StoneReader already has a working card browser with zone navigation, detail insp
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [ ] **Phase 1: Deck Management** - Import, browse, inspect, export, and delete saved decks
-- [ ] **Phase 2: Log Infrastructure** - Watch, parse, and filter Hearthstone's Power.log in a background thread
+- [x] **Phase 2: Log Infrastructure** - Watch, parse, and filter Hearthstone's Power.log in a background thread
 - [ ] **Phase 3: Live Game Tracking** - Track and announce live game state via global hotkeys while Hearthstone has focus
 - [ ] **Phase 4: Replay Viewer** - Load and navigate HSReplay XML files turn-by-turn with action drill-down
 
