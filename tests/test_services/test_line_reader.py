@@ -1,4 +1,5 @@
 """Tests for _LineReader UTF-8 boundary handling."""
+
 from __future__ import annotations
 
 import pytest

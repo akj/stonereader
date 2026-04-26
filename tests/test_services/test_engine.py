@@ -1,4 +1,5 @@
 """Tests for stonereader.services._engine."""
+
 from __future__ import annotations
 
 import dataclasses
@@ -10,7 +11,7 @@ pytest.importorskip("stonereader.services._engine")
 
 from stonereader.services._engine import GameEngine
 from stonereader.services._events import GameStarted
-from stonereader.services._packets import CreateGamePacket, TagChangePacket
+from stonereader.services._packets import CreateGamePacket
 from stonereader.services._parser import Parser
 
 
@@ -42,9 +43,9 @@ def test_mid_game_fixture_emits_expected_events(power_log_fixture):
     for line in path.read_text(encoding="utf-8").splitlines():
         for pkt in parser.feed_line(line):
             events.extend(engine.apply(pkt))
-    assert any(
-        isinstance(e, GameStarted) for e in events
-    ), "mid_game.log must contain CREATE_GAME and emit GameStarted"
+    assert any(isinstance(e, GameStarted) for e in events), (
+        "mid_game.log must contain CREATE_GAME and emit GameStarted"
+    )
 
 
 def test_dual_source_fixture_no_duplicates(power_log_fixture):
@@ -67,9 +68,9 @@ def test_dual_source_fixture_no_duplicates(power_log_fixture):
     for line in gs_only.splitlines():
         for pkt in p2.feed_line(line):
             evs2.extend(e2.apply(pkt))
-    assert len(evs1) == len(
-        evs2
-    ), f"Duplicate detection failed: full={len(evs1)} GameState-only={len(evs2)}"
+    assert len(evs1) == len(evs2), (
+        f"Duplicate detection failed: full={len(evs1)} GameState-only={len(evs2)}"
+    )
 
 
 def test_tick_under_50ms(power_log_fixture):
