@@ -6,8 +6,6 @@ import os
 import time
 from pathlib import Path
 
-import pytest
-
 
 def test_picks_newest_subdirectory_by_mtime(tmp_path: Path) -> None:
     from stonereader.services._log_path import discover_power_log_path
