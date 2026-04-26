@@ -59,7 +59,7 @@ Plans:
 - [x] 02-05-PLAN.md — Wave 2: Internal Packet types + hslog wrapper Parser (D-09/D-10)
 - [x] 02-06-PLAN.md — Wave 3: _LineReader + GameEngine + PowerLogWatcher (D-01/D-13/D-15)
 - [x] 02-07-PLAN.md — Wave 4: GameTracker facade + app.py/__main__ integration
-- [ ] 02-08-PLAN.md — Wave 5: Power.log fixture capture (D-17)
+- [x] 02-08-PLAN.md — Wave 5: Power.log fixture capture (D-17)
 
 ### Phase 3: Live Game Tracking
 **Goal**: Users can query live game state through speech announcements via global hotkeys while Hearthstone has focus
