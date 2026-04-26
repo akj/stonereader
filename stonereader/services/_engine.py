@@ -74,7 +74,14 @@ class GameEngine:
         self._game_started_emitted = False
         self._game_ended_emitted = False
         self._mulligan_done_emitted = False
-        # Default friendly player_id is 1 (refined when CONTROLLER on hero is observed).
+        # Default friendly player_id is 1.
+        # TODO(WR-02): This stub is incorrect for the ~50 % of games where the
+        # local player is assigned CONTROLLER=2 by the server coin-flip.  To
+        # refine it we need the local player's BattleTag hi/lo (from the OS
+        # account APIs or a Hearthstone startup log line) and compare against
+        # CreateGamePacket.players hi/lo fields.  Until that data is wired in,
+        # card draw / play events for local-player-as-entity-2 games will have
+        # their controller attribution inverted.  See WR-02 in 02-REVIEW.md.
         self._friendly_player_id = 1
 
     @property

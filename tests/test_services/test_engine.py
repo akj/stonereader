@@ -10,8 +10,12 @@ import pytest
 pytest.importorskip("stonereader.services._engine")
 
 from stonereader.services._engine import GameEngine
-from stonereader.services._events import GameStarted
-from stonereader.services._packets import CreateGamePacket
+from stonereader.services._events import CardDrawn, GameStarted
+from stonereader.services._packets import (
+    CreateGamePacket,
+    FullEntityPacket,
+    TagChangePacket,
+)
 from stonereader.services._parser import Parser
 
 
@@ -33,6 +37,49 @@ def test_emits_frozen_gamestate_snapshots():
         pass
     else:
         raise AssertionError("GameState must be frozen")
+
+
+def test_card_drawn_controller_reflects_log_controller():
+    """CardDrawn.controller is the raw CONTROLLER tag value from the log.
+
+    WR-02: _friendly_player_id defaults to 1, so when the local player is
+    assigned CONTROLLER=2 by the server (coin-flip), their CardDrawn events
+    will show controller=2 — the engine currently cannot distinguish local
+    from opponent in that scenario.  This test documents the existing
+    behaviour so any future fix to _friendly_player_id can verify
+    it doesn't regress the raw-controller pass-through.
+    """
+    engine = GameEngine()
+    # Player 2 / 3 are player entities; entity 10 is a card drawn by
+    # controller 2 (the second player).
+    engine.apply(
+        CreateGamePacket(
+            packet_id=0,
+            game_entity_id=1,
+            players=((2, "LocalPlayer", 144115198130930503, 1), (3, "Opponent", 144115198130930504, 2)),
+        )
+    )
+    # Register entity 10 as belonging to controller 2 with no zone yet.
+    engine.apply(
+        FullEntityPacket(
+            packet_id=1,
+            entity_id=10,
+            card_id="CS2_023",
+            tags={"CONTROLLER": 2, "ZONE": 0},  # Zone 0 = INVALID (not in hand yet)
+        )
+    )
+    # Now entity 10 moves to HAND (Zone=3).
+    events = engine.apply(
+        TagChangePacket(packet_id=2, entity_id=10, tag="ZONE", value=3)
+    )
+    drawn = [e for e in events if isinstance(e, CardDrawn)]
+    assert len(drawn) == 1, "Expected exactly one CardDrawn event"
+    # controller value is 2 — the raw CONTROLLER tag, not remapped to
+    # friendly/opponent.  When _friendly_player_id is correctly resolved
+    # this test should still pass because controller is always the raw tag.
+    assert drawn[0].controller == 2, (
+        f"CardDrawn.controller should be 2 (raw CONTROLLER tag), got {drawn[0].controller}"
+    )
 
 
 def test_mid_game_fixture_emits_expected_events(power_log_fixture):
