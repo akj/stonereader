@@ -54,9 +54,9 @@ last_updated: 2026-04-25
 | 02-05-T2 | 05 | 2 | LOG-02 | T-2-PARSE,T-2-DRIFT | NoSuchEnum log-once cache; PowerTaskList drop verified | unit | `uv run pytest tests/test_services/test_parser.py -x` | stonereader/services/_parser.py | ⬜ pending |
 | 02-06-T1 | 06 | 3 | LOG-01,LOG-02,LOG-03 | T-2-RESET | _LineReader resets decoder + partial buffer; engine snapshots frozen | unit | `uv run pytest tests/test_services/test_line_reader.py tests/test_services/test_engine.py -x` | stonereader/services/_line_reader.py, _engine.py | ⬜ pending |
 | 02-06-T2 | 06 | 3 | LOG-01,LOG-02,LOG-03 | T-2-03,T-2-D04 | 100k buffer cap; tick error log+continue; backward scan capped at 1MB | unit | `uv run pytest tests/test_services/test_watcher.py -x` | stonereader/services/_watcher.py | ⬜ pending |
-| 02-07-T1 | 07 | 4 | LOG-05 | T-2-04 | Subscriber exception isolation (Pitfall 3) | unit | `uv run pytest tests/test_services/test_tracker.py -x` | stonereader/services/_tracker.py | ⬜ pending |
-| 02-07-T2 | 07 | 4 | LOG-04,LOG-05 | T-2-PITFALL10 | configure_logging called exactly once at __main__ | integration | `uv run pytest tests/ -x && uv run python -c "from stonereader.app import StoneReaderApp"` | stonereader/__main__.py, stonereader/app.py | ⬜ pending |
-| 02-07-T3 | 07 | 4 | LOG-01..05 | T-2-LIFECYCLE | Manual launch verifies Timer + log.config + lifecycle | manual | (human verify — see Plan 07 task 3) | (human checkpoint) | ⬜ pending |
+| 02-07-T1 | 07 | 4 | LOG-05 | T-2-04 | Subscriber exception isolation (Pitfall 3) | unit | `uv run pytest tests/test_services/test_tracker.py -x` | stonereader/services/_tracker.py | ✅ green |
+| 02-07-T2 | 07 | 4 | LOG-04,LOG-05 | T-2-PITFALL10 | configure_logging called exactly once at __main__ | integration | `uv run pytest tests/ -x && uv run python -c "from stonereader.app import StoneReaderApp"` | stonereader/__main__.py, stonereader/app.py | ✅ green |
+| 02-07-T3 | 07 | 4 | LOG-01..05 | T-2-LIFECYCLE | Manual launch verifies Timer + log.config + lifecycle | manual | (human verify — see Plan 07 task 3) | (human checkpoint) | ⬜ pending (awaiting human verification) |
 | 02-08-T1 | 08 | 5 | LOG-01,LOG-02 | T-2-PII | Anonymization removes BattleTags/BnetIDs | manual | (capture procedure — see Plan 08 task 1) | tests/fixtures/log/*.log | ⬜ pending |
 | 02-08-T2 | 08 | 5 | (infra) | T-2-FIXTURE-DRIFT | Documented re-capture procedure | infra | `test -f .planning/phases/02-log-infrastructure/02-FIXTURE-CAPTURE.md` | 02-FIXTURE-CAPTURE.md | ⬜ pending |
 | 02-08-T3 | 08 | 5 | LOG-01,LOG-02 | T-2-FIXTURE-SIZE | Fixtures fit size budget | integration | `uv run pytest tests/test_services/test_engine.py -v` (test_mid_game_*, test_dual_source_*, test_tick_under_50ms PASS not SKIP) | tests/fixtures/log/*.log | ⬜ pending |
@@ -80,7 +80,7 @@ last_updated: 2026-04-25
 | LOG-04 | `ensure_log_config` creates file with `[Power]` section when none exists | unit (tmp_path) | `uv run pytest tests/test_services/test_log_config.py::test_creates_file_when_absent -x` | ⬜ Plan 02 |
 | LOG-04 | `ensure_log_config` updates `[Power]` keys without destroying other sections | unit (tmp_path) | `uv run pytest tests/test_services/test_log_config.py::test_preserves_other_sections -x` | ⬜ Plan 02 |
 | LOG-04 | `ensure_log_config` is idempotent — second call returns False (no change) | unit | `uv run pytest tests/test_services/test_log_config.py::test_idempotent_when_correct -x` | ⬜ Plan 02 |
-| LOG-05 (D-19) | `tracker.start()` then `tracker.stop()` does not leak Timer or threads | unit (wx.App fixture) | `uv run pytest tests/test_services/test_tracker.py::test_start_stop_clean -x` | ⬜ Plan 07 |
+| LOG-05 (D-19) | `tracker.start()` then `tracker.stop()` stops the wx.Timer cleanly; no UI freeze; tracker._started is False after stop (D-19) | unit (wx.App fixture) | `uv run pytest tests/test_services/test_tracker.py::test_start_stop_clean -x` | ⬜ Plan 07 |
 | LOG-05 (D-19) | A 1000-line fixture processed in a single tick completes in under 50ms | unit (timing) | `uv run pytest tests/test_services/test_engine.py::test_tick_under_50ms -x` | ⬜ Plan 06 stub, Plan 08 fixture |
 
 ---
