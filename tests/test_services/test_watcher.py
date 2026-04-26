@@ -1,4 +1,5 @@
 """Tests for stonereader.services._watcher."""
+
 from __future__ import annotations
 
 import pytest
@@ -22,9 +23,7 @@ def test_appended_lines_picked_up_within_one_tick(tmp_path):
     w._do_tick()
     assert emitted == []
     # Append a GameState line
-    log.write_bytes(
-        b"D 13:00:00.0000000 GameState.DebugPrintPower() - CREATE_GAME\n"
-    )
+    log.write_bytes(b"D 13:00:00.0000000 GameState.DebugPrintPower() - CREATE_GAME\n")
     w._do_tick()
     assert any("CREATE_GAME" in ln for ln in emitted)
 
@@ -58,9 +57,7 @@ def test_truncation_resets_offset_and_parser(tmp_path):
     )
     w._do_tick()
     # Truncate
-    log.write_bytes(
-        b"D 13:00:00.0000000 GameState.DebugPrintPower() - CREATE_GAME\n"
-    )
+    log.write_bytes(b"D 13:00:00.0000000 GameState.DebugPrintPower() - CREATE_GAME\n")
     w._do_tick()
     assert reset_count["n"] >= 1
 
@@ -72,14 +69,21 @@ def test_reset_clears_partial_line_buffer(tmp_path):
     emitted = []
     w = PowerLogWatcher(lambda: log, emitted.extend, lambda: None)
     w._do_tick()
-    # Truncate and start over — partial buffer should be flushed
-    log.write_bytes(
-        b"D 13:00:01.0000000 GameState.DebugPrintPower() - CREATE_GAME\n"
-    )
+    # Truncate the file to zero (simulates Hearthstone log rotation: size shrinks
+    # below offset, which is the documented truncation signal — Pitfall 1).
+    # The watcher must observe the truncation (tick) so the partial buffer is
+    # flushed; then writing a brand-new line proves no corruption from the
+    # stale partial leaks into emitted output.
+    log.write_bytes(b"")
+    w._do_tick()  # observe truncation -> reset
+    log.write_bytes(b"D 13:00:01.0000000 GameState.DebugPrintPower() - CREATE_GAME\n")
     w._do_tick()
     # Emitted line must be the new CREATE_GAME, not a corrupted "CREATE_GA" + new content concat
     assert any("13:00:01" in ln and "CREATE_GAME" in ln for ln in emitted)
     assert not any("CREATE_GAD" in ln for ln in emitted)  # corruption signature
+    # The partial-buffer leak would also produce a "CREATE_GAME" with the OLD
+    # 13:00:00 timestamp; that must NOT appear.
+    assert not any("13:00:00" in ln and "CREATE_GAME" in ln for ln in emitted)
 
 
 def test_buffer_cap_drops_oldest_lines(tmp_path, monkeypatch):

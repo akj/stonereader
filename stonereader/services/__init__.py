@@ -1,6 +1,7 @@
 """StoneReader services package — log watcher, parser, engine, and game tracker."""
 
 from stonereader.services._engine import GameEngine
+from stonereader.services._watcher import PowerLogWatcher
 from stonereader.services._events import (
     AttackStarted,
     CardDrawn,
@@ -30,4 +31,5 @@ __all__ = [
     "MinionDied",
     "DamageDealt",
     "GameEngine",
+    "PowerLogWatcher",
 ]
