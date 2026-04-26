@@ -9,6 +9,7 @@ dependencies = [
     "hearthstone>=9.15.8",
     "hearthstone-data>=221175.1",
     "pip",
+    "psutil>=7.0,<8",
     "setuptools>=80.9.0",
     "wxpython>=4.2.5",
 ]
