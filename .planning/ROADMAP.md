@@ -48,8 +48,18 @@ Plans:
   2. Duplicate lines from PowerTaskList blocks are filtered so each game action appears exactly once
   3. When Hearthstone restarts and Power.log is truncated/reset, the watcher detects the reset and re-reads from the beginning without crashing or double-emitting old events
   4. On first run, the app creates or verifies log.config in the Hearthstone directory so Power.log output is enabled
-  5. The log watcher thread can be started and stopped cleanly without UI freezes or orphaned threads
-**Plans**: TBD
+  5. The log watcher (wx.Timer per D-19) can be started and stopped cleanly without UI freezes or orphaned threads
+**Plans:** 8 plans
+
+Plans:
+- [ ] 02-01-PLAN.md — Wave 0: Test scaffolds, conftest, dependency install (hslog, psutil)
+- [ ] 02-02-PLAN.md — Wave 1: Logging config (D-16) + log.config bootstrap (D-11)
+- [ ] 02-03-PLAN.md — Wave 1: Power.log path discovery (D-12) + ProcessDetector (D-03)
+- [ ] 02-04-PLAN.md — Wave 2: GameState extension (D-08) + 11 typed events (D-06)
+- [ ] 02-05-PLAN.md — Wave 2: Internal Packet types + hslog wrapper Parser (D-09/D-10)
+- [ ] 02-06-PLAN.md — Wave 3: _LineReader + GameEngine + PowerLogWatcher (D-01/D-13/D-15)
+- [ ] 02-07-PLAN.md — Wave 4: GameTracker facade + app.py/__main__ integration
+- [ ] 02-08-PLAN.md — Wave 5: Power.log fixture capture (D-17)
 
 ### Phase 3: Live Game Tracking
 **Goal**: Users can query live game state through speech announcements via global hotkeys while Hearthstone has focus
