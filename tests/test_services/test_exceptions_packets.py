@@ -33,10 +33,12 @@ def test_engine_error_is_services_error():
 
 def test_no_hslog_import_in_exceptions():
     """D-10: _exceptions.py must not import hslog."""
-    import importlib.util
+    import importlib
     import pathlib
 
-    src = pathlib.Path("stonereader/services/_exceptions.py").read_text()
+    spec = importlib.util.find_spec("stonereader.services._exceptions")
+    assert spec is not None and spec.origin is not None
+    src = pathlib.Path(spec.origin).read_text()
     assert "import hslog" not in src
     assert "from hslog" not in src
 
@@ -157,16 +159,28 @@ def test_change_entity_packet_fields():
 
 def test_no_list_type_hints_in_packets():
     """Per plan constraint: no List[ in _packets.py — use Tuple instead."""
+    import importlib
     import pathlib
 
-    src = pathlib.Path("stonereader/services/_packets.py").read_text()
+    spec = importlib.util.find_spec("stonereader.services._packets")
+    assert spec is not None and spec.origin is not None
+    src = pathlib.Path(spec.origin).read_text()
     assert "List[" not in src, "_packets.py must not use List[ type hints"
 
 
 def test_no_hslog_import_in_packets():
-    """D-10: _packets.py must not import hslog."""
+    """D-10: _packets.py must not import hslog — check actual import lines only."""
+    import importlib
     import pathlib
 
-    src = pathlib.Path("stonereader/services/_packets.py").read_text()
-    assert "import hslog" not in src
-    assert "from hslog" not in src
+    spec = importlib.util.find_spec("stonereader.services._packets")
+    assert spec is not None and spec.origin is not None
+    src = pathlib.Path(spec.origin).read_text()
+    # Check only non-comment, non-docstring lines for hslog imports
+    import_lines = [
+        line.strip()
+        for line in src.splitlines()
+        if line.strip().startswith(("import ", "from "))
+    ]
+    for line in import_lines:
+        assert "hslog" not in line, f"D-10 violation: _packets.py has hslog import: {line}"
