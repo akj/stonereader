@@ -55,8 +55,8 @@ Plans:
 - [x] 02-01-PLAN.md — Wave 0: Test scaffolds, conftest, dependency install (hslog, psutil)
 - [x] 02-02-PLAN.md — Wave 1: Logging config (D-16) + log.config bootstrap (D-11)
 - [x] 02-03-PLAN.md — Wave 1: Power.log path discovery (D-12) + ProcessDetector (D-03)
-- [ ] 02-04-PLAN.md — Wave 2: GameState extension (D-08) + 11 typed events (D-06)
-- [ ] 02-05-PLAN.md — Wave 2: Internal Packet types + hslog wrapper Parser (D-09/D-10)
+- [x] 02-04-PLAN.md — Wave 2: GameState extension (D-08) + 11 typed events (D-06)
+- [x] 02-05-PLAN.md — Wave 2: Internal Packet types + hslog wrapper Parser (D-09/D-10)
 - [ ] 02-06-PLAN.md — Wave 3: _LineReader + GameEngine + PowerLogWatcher (D-01/D-13/D-15)
 - [ ] 02-07-PLAN.md — Wave 4: GameTracker facade + app.py/__main__ integration
 - [ ] 02-08-PLAN.md — Wave 5: Power.log fixture capture (D-17)
