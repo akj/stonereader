@@ -48,7 +48,7 @@ def test_no_such_enum_logged_and_skipped(monkeypatch, caplog):
     def fake_read(line):
         call_count["n"] += 1
         if call_count["n"] == 1:
-            raise NoSuchEnum("UNKNOWN_TAG")
+            raise NoSuchEnum("GameTag", "UNKNOWN_TAG")
         return original_read(line)
 
     monkeypatch.setattr(parser._hslog, "read_line", fake_read)
@@ -67,7 +67,7 @@ def test_no_such_enum_logged_only_once(monkeypatch, caplog):
     parser = Parser()
 
     def fake_read(line):
-        raise NoSuchEnum("UNKNOWN_TAG")
+        raise NoSuchEnum("GameTag", "UNKNOWN_TAG")
 
     monkeypatch.setattr(parser._hslog, "read_line", fake_read)
     with caplog.at_level(logging.WARNING):
