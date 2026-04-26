@@ -14,6 +14,8 @@ import os
 from pathlib import Path
 from typing import Optional
 
+from stonereader.services._exceptions import ServicesError
+
 logger = logging.getLogger(__name__)
 
 REQUIRED_POWER_SECTION = {
@@ -45,6 +47,11 @@ def ensure_log_config(path: Optional[Path] = None) -> bool:
     - Preserves all other sections (HDT, Firestone, etc.) — Pitfall 5.
     - Uses RawConfigParser to avoid % interpolation surprises.
     - Sets optionxform = str to preserve key case.
+
+    Raises:
+        ServicesError: If the file cannot be written (PermissionError, OSError,
+            disk full, read-only filesystem, etc.).  Callers are responsible for
+            catching this and surfacing an appropriate error to the user.
     """
     path = path or log_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -64,7 +71,11 @@ def ensure_log_config(path: Optional[Path] = None) -> bool:
             changed = True
 
     if changed:
-        with path.open("w", encoding="utf-8") as f:
-            parser.write(f)
+        try:
+            with path.open("w", encoding="utf-8") as f:
+                parser.write(f)
+        except OSError as exc:
+            logger.error("Failed to write log.config at %s: %s", path, exc)
+            raise ServicesError(f"Cannot write log.config: {exc}") from exc
         logger.info("Updated log.config at %s", path)
     return changed
