@@ -22,10 +22,12 @@ Screen reader users can access live game tracking information (remaining deck, o
 - ✓ Deck model with deckstring import/export — existing
 - ✓ Game state and replay state models — existing
 - ✓ Deck management — import deckstrings (with graceful-degrade for unknown DBF IDs), browse saved decks, view deck contents with detail inspection, delete with confirmation, export to clipboard — Validated in Phase 01
+- ✓ Log infrastructure — Hearthstone Power.log watcher (150ms wx.Timer tail with rotation/process-gone detection), hslog parser wrapper (D-10 isolation), GameEngine with frozen GameState reducer + 11 typed events, GameTracker facade with subscriber bus, log.config bootstrap (D-11), stdlib logging (D-16) — Validated in Phase 02
 
 ### Active
 
-- [ ] Live game tracking via Power.log file parsing
+- [ ] Live game tracking via Power.log file parsing  <!-- infrastructure done in Phase 02; subscriber UI in Phase 03 -->
+  - **Phase 03 prerequisite (WR-02):** Replace `_friendly_player_id = 1` stub in `_engine.py` with BattleTag account-id–based resolution. Baseline test `test_card_drawn_controller_reflects_log_controller` already locks the raw-controller pass-through.
 - [ ] Remaining deck display with card counts and copy tracking
 - [ ] Opponent played cards tracking
 - [ ] Opponent hand tracking (cards held since which turn)
@@ -93,4 +95,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-25 after Phase 01 (Deck Management) completion*
+*Last updated: 2026-04-26 after Phase 02 (Log Infrastructure) completion*
