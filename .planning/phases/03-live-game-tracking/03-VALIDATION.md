@@ -45,6 +45,20 @@ created: 2026-04-26
 | 03-W0-03 | W0 | 0 | WR-02 / D-18 | — | N/A | unit-stubs | `uv run pytest tests/test_services/test_engine_friendly_player.py --collect-only` | ❌ W0 | ⬜ pending |
 | 03-W0-04 | W0 | 0 | D-19 | — | N/A | unit-stubs | `uv run pytest tests/test_services/test_engine_lineage.py --collect-only` | ❌ W0 | ⬜ pending |
 | 03-W0-05 | W0 | 0 | shared mock | — | N/A | fixture | `uv run pytest tests/conftest.py --collect-only` | ✅ ext | ⬜ pending |
+| 03-01-T1 | 03-01 | 0 | LIVE-01..09 | T-03-02 | MockGameTracker fixture for tests | fixture | `uv run pytest tests/ --collect-only -q` | ✅ | ⬜ pending |
+| 03-01-T2 | 03-01 | 0 | LIVE-01..08 + D-07/D-08/D-09 | T-03-01 | Stub xfail tests created so wave 2/3 has feedback loop | unit-stubs | `uv run pytest tests/test_live_game_presenter.py tests/test_global_hotkey.py --collect-only -q` | ❌ W0 | ⬜ pending |
+| 03-01-T3 | 03-01 | 0 | WR-02 + D-19 | T-03-01 | Stub xfail tests for engine extensions | unit-stubs | `uv run pytest tests/test_services/test_engine_friendly_player.py tests/test_services/test_engine_lineage.py --collect-only -q` | ❌ W0 | ⬜ pending |
+| 03-02-T1 | 03-02 | 1 | WR-02 | T-03-WR-02 | 5-tuple CreateGamePacket.players carries player_id; parser test asserts new shape | unit | `uv run pytest tests/test_services/test_parser.py -x` | ✅ | ⬜ pending |
+| 03-02-T2 | 03-02 | 1 | WR-02 | T-03-WR-02 | AI heuristic + SHOW_ENTITY fallback resolve friendly_player_id correctly | unit + integration | `uv run pytest tests/test_services/test_engine_friendly_player.py tests/test_services/test_engine.py -x` | ❌ W0 | ⬜ pending |
+| 03-03-T1 | 03-03 | 1 | LIVE-03, LIVE-04, D-19 | T-03-D19-01,02,03 | creation_lineage field; lineage capture in POWER block; opponent_hand reconstruction | unit | `uv run pytest tests/test_services/ -x` | ✅/❌ | ⬜ pending |
+| 03-03-T2 | 03-03 | 1 | D-19 | T-03-D19-01,02 | 4 lineage tests pass (3 synthetic + 1 reconnect-fixture regression) | unit + integration | `uv run pytest tests/test_services/test_engine_lineage.py -x` | ❌ W0 | ⬜ pending |
+| 03-04-T1 | 03-04 | 2 | LIVE-09 | T-03-LIVE-09-01,02,03 | GlobalHotkeyService register/dispatch/clear_all all green | unit | `uv run pytest tests/test_global_hotkey.py -x` | ❌ W0 | ⬜ pending |
+| 03-05-T1 | 03-05 | 2 | LIVE-01..08 | T-03-LIVE-01..04 | LiveGamePresenter compiles + ruff/pyright clean | unit (smoke) | `uv run python -c "from stonereader.presenters.live_game import LiveGamePresenter, OpponentHandRow"` | ✅ | ⬜ pending |
+| 03-05-T2 | 03-05 | 2 | LIVE-01..08, D-07/D-08/D-09 | T-03-LIVE-01..04 | All 14 LiveGamePresenter tests pass | unit | `uv run pytest tests/test_live_game_presenter.py -x -v` | ❌ W0 | ⬜ pending |
+| 03-06-T1 | 03-06 | 3 | LIVE-01 | T-03-WIRE-* | LiveGamePanel + home menu update; test_home regression-locks | unit + integration | `uv run pytest tests/test_home.py -x` | ✅ | ⬜ pending |
+| 03-06-T2 | 03-06 | 3 | LIVE-01, LIVE-09 | T-03-WIRE-01,02,03,04 | App wiring; close-cleanup ordering integration test | unit + integration | `uv run pytest tests/test_navigation.py -x` | ✅/❌ | ⬜ pending |
+| 03-06-T3 | 03-06 | 3 | LIVE-01, LIVE-09 | T-03-WIRE-* | Manual NVDA/JAWS smoke test on Windows | manual | (manual checkpoint — see 03-06-PLAN.md Task 3) | manual | ⬜ pending |
+
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 

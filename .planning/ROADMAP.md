@@ -71,7 +71,16 @@ Plans:
   3. User can press a global hotkey to hear opponent's played cards in play order
   4. User can press global hotkeys to hear deck counts, hand counts, and mana totals for both players
   5. The app auto-detects which saved deck the user is playing by matching the initial deck list against saved decks
-**Plans**: TBD
+**Plans:** 6 plans
+
+Plans:
+- [ ] 03-01-PLAN.md — Wave 0: Test scaffolds + MockGameTracker fixture
+- [ ] 03-02-PLAN.md — Wave 1: WR-02 friendly_player resolution + 5-tuple CreateGamePacket
+- [ ] 03-03-PLAN.md — Wave 1: D-19 creation lineage + opponent_hand reconstruction
+- [ ] 03-04-PLAN.md — Wave 2: GlobalHotkeyService (wx.Frame.RegisterHotKey wrapper)
+- [ ] 03-05-PLAN.md — Wave 2: LiveGamePresenter (3 zones + auto-detection + speech)
+- [ ] 03-06-PLAN.md — Wave 3: LiveGamePanel view + app wiring + manual checkpoint
+
 **UI hint**: yes
 
 ### Phase 4: Replay Viewer
