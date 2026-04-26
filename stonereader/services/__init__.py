@@ -1,8 +1,31 @@
-"""StoneReader services package — log watcher, parser, engine, and detection helpers.
+"""StoneReader services package — log watcher, parser, engine, and game tracker."""
 
-This package is intentionally headless: no wxPython, no presenter, no view.
-Public API is added by later phase-2 plans (`GameTracker`, `Watcher`, etc.).
-The current contents are the building blocks consumed by those modules.
-"""
+from stonereader.services._events import (
+    AttackStarted,
+    CardDrawn,
+    CardPlayed,
+    CardRemoved,
+    CardRevealed,
+    DamageDealt,
+    GameEnded,
+    GameEvent,
+    GameStarted,
+    MinionDied,
+    MulliganDone,
+    TurnChanged,
+)
 
-from __future__ import annotations
+__all__ = [
+    "GameEvent",
+    "GameStarted",
+    "GameEnded",
+    "TurnChanged",
+    "MulliganDone",
+    "CardDrawn",
+    "CardPlayed",
+    "CardRevealed",
+    "CardRemoved",
+    "AttackStarted",
+    "MinionDied",
+    "DamageDealt",
+]
