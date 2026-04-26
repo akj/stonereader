@@ -154,6 +154,14 @@ class GameEngine:
     # ----------------------------------------------------------------- handlers
 
     def _on_create_game(self, p: CreateGamePacket) -> List[GameEvent]:
+        if self._game_started_emitted:
+            # A second CREATE_GAME arrived before game ended (e.g. reconnect to
+            # an in-progress game).  Log a warning so it is detectable, then
+            # fall through to reset and re-emit — callers must handle duplicate
+            # GameStarted events gracefully.
+            logger.warning(
+                "CREATE_GAME received while game already in progress — resetting"
+            )
         self.reset()
         # Initialize entities for the GameEntity and Players
         self._record_entity(p.game_entity_id, "", p.initial_tags)
