@@ -7,6 +7,7 @@ StoneReaderApp (entry point that wires all presenters and panels).
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 
 import wx
@@ -340,6 +341,14 @@ class MainWindow(wx.Frame):
         self.Close()
 
     def _on_close(self, event: wx.CloseEvent) -> None:
+        # Stop the GameTracker (Phase 2) cleanly so the wx.Timer reference is
+        # cleared before the frame is destroyed (D-19, T-2-LIFECYCLE).
+        tracker = getattr(self, "_tracker", None)
+        if tracker is not None:
+            try:
+                tracker.stop()
+            except Exception:
+                logging.getLogger(__name__).exception("tracker.stop() failed")
         self._db_conn.close()
         self.Destroy()
 
@@ -358,6 +367,29 @@ class StoneReaderApp(wx.App):
         from stonereader.models.card import CardDatabase
 
         card_db = CardDatabase.load()
+
+        # --- Game Tracker (Phase 2) ---
+        # NOTE: Logging is bootstrapped exactly once in __main__.py before the
+        # wx.App is constructed (Pitfall 10). Do NOT bootstrap it here — adding
+        # a second bootstrap call would attach duplicate handlers to the root
+        # logger. ensure_log_config() below is the per-launch log.config
+        # bootstrap (D-11) and is silent unless it actually changed the file.
+        from stonereader.services import GameTracker
+        from stonereader.services._log_config import ensure_log_config
+
+        try:
+            log_config_changed = ensure_log_config()
+            if log_config_changed:
+                speech.speak("Hearthstone logging enabled.")
+        except Exception:
+            # Non-Windows or permissions failure — log and continue (D-04 spirit).
+            logging.getLogger(__name__).exception(
+                "ensure_log_config failed; continuing"
+            )
+
+        self._tracker = GameTracker(card_db=card_db)
+        # Stash the tracker on the frame so MainWindow._on_close can stop it.
+        self._frame._tracker = self._tracker  # type: ignore[attr-defined]
 
         # --- Home Screen ---
         from stonereader.presenters.home import HomePresenter
@@ -456,4 +488,14 @@ class StoneReaderApp(wx.App):
         nav.show_panel("Home")
 
         self._frame.Show()
+
+        # Start tracker AFTER frame.Show() (Pitfall 9: Timer must not fire
+        # before the message loop is wired up to the visible frame).
+        try:
+            self._tracker.start(parent=self._frame)
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "tracker.start() failed; tracker disabled"
+            )
+
         return True
