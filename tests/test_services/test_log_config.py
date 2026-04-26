@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import configparser
 
-import pytest
-
 
 def test_creates_file_when_absent(tmp_path):
     from stonereader.services._log_config import (
@@ -33,12 +31,7 @@ def test_preserves_other_sections(tmp_path):
 
     path = tmp_path / "log.config"
     path.write_text(
-        "[Achievements]\n"
-        "LogLevel=1\n"
-        "FilePrinting=True\n"
-        "\n"
-        "[FullScreenFX]\n"
-        "LogLevel=1\n",
+        "[Achievements]\nLogLevel=1\nFilePrinting=True\n\n[FullScreenFX]\nLogLevel=1\n",
         encoding="utf-8",
     )
 
