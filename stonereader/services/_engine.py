@@ -148,6 +148,28 @@ class GameEngine:
             ent["card_id"] = card_id
         for k, v in tags.items():
             ent[k] = v
+        # D-19: lineage capture — opponent-hand entities generated inside a POWER block.
+        #
+        # Captures the INNERMOST POWER block subject (top of _block_subjects stack).
+        # Lineage is best-effort and approximate (see GameEntity.creation_lineage docs):
+        # - Only fires when the innermost open block is POWER.
+        # - Sticky once set ("creation_lineage" not in ent): later TAG_CHANGE or
+        #   SHOW_ENTITY reveals do NOT overwrite (verified by test_show_entity_after_lineage).
+        # - Friendly entities are excluded (controller == _friendly_player_id).
+        if (
+            self._block_stack
+            and self._block_stack[-1] == "POWER"
+            and self._block_subjects
+            and ent.get("ZONE") == int(Zone.HAND)
+            and ent.get("CONTROLLER") is not None
+            and ent.get("CONTROLLER") != self._friendly_player_id
+            and "creation_lineage" not in ent
+        ):
+            subject_eid = self._block_subjects[-1]  # INNERMOST subject
+            subject_card_id = self._entities.get(subject_eid, {}).get("card_id", "")
+            subject_card = self._lookup_card(subject_card_id) if subject_card_id else None
+            if subject_card:
+                ent["creation_lineage"] = subject_card.name
 
     def _lookup_card(self, card_id: str) -> Optional[Card]:
         if not card_id or self._card_db is None:
@@ -532,15 +554,52 @@ class GameEngine:
         ]
 
     def _refresh_state(self) -> None:
-        """Rebuild the published snapshot from internal bookkeeping."""
+        """Rebuild the published snapshot from internal bookkeeping.
+
+        D-19: reconstructs opponent_hand from self._entities. Iteration over
+        the dict (keyed by entity_id) implicitly dedupes — there is exactly
+        one bookkeeping entry per entity, so duplicate hand entries are
+        impossible by construction.
+        """
         if self._current_state is None:
             return
+        opponent_hand_entities: List[GameEntity] = []
+        for eid, ent in self._entities.items():
+            zone = ent.get("ZONE")
+            controller = ent.get("CONTROLLER")
+            if zone != int(Zone.HAND):
+                continue
+            if controller is None or controller == self._friendly_player_id:
+                continue
+            card_id = ent.get("card_id", "") or ""
+            base = self._lookup_card(card_id) if card_id else None
+            drawn_turn_raw = ent.get("drawn_turn", -1)
+            drawn_turn = drawn_turn_raw if isinstance(drawn_turn_raw, int) else -1
+            opponent_hand_entities.append(
+                GameEntity(
+                    entity_id=eid,
+                    card_id=card_id,
+                    base_card=base,
+                    name=base.name if base else "",
+                    cost=base.cost if base else 0,
+                    current_attack=ent.get("ATK", 0) or 0,
+                    current_health=ent.get("HEALTH", 0) or 0,
+                    card_type=base.card_type if base else "",
+                    zone="HAND",
+                    zone_position=ent.get("ZONE_POSITION", 0) or 0,
+                    controller=int(controller),
+                    drawn_turn=drawn_turn,
+                    creation_lineage=ent.get("creation_lineage", "") or "",
+                )
+            )
+        opponent_hand_entities.sort(key=lambda e: e.zone_position)
         self._current_state = dataclasses.replace(
             self._current_state,
             player_played=tuple(self._player_played),
             opponent_played=tuple(self._opponent_played),
             player_drawn=tuple(self._player_drawn),
             opponent_drawn=tuple(self._opponent_drawn),
+            opponent_hand=tuple(opponent_hand_entities),
         )
 
 

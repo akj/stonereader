@@ -45,6 +45,19 @@ class GameEntity:
     # NEW (Phase 2): turn the entity was drawn into hand (for DIFF-01 deferred,
     # but cheap to capture now). 0 = mulligan; -1 = unknown (opponent hidden).
     drawn_turn: int = -1
+    # NEW (Phase 3, D-19): subject card name when this entity was generated
+    # inside a POWER block (e.g. "Cabal Shadow Priest", "Wand of Disintegration").
+    # Empty string when the entity was drawn normally (no POWER block parent)
+    # or when this is a friendly entity (we only track opponent's hand).
+    #
+    # Best-effort and approximate (per 03-REVIEWS.md MEDIUM 03-03):
+    # - Only the INNERMOST POWER block subject is captured. Nested-generator
+    #   chains (subject A → spell → subject B → entity) attribute to B, not A.
+    # - Lineage is sticky once set: later SHOW_ENTITY reveals or transformations
+    #   do NOT overwrite or clear it.
+    # - Lineage is dropped on engine reset() (e.g. reconnect / second CREATE_GAME).
+    # - Discover-in-progress signal is NOT tracked (deferred to v2).
+    creation_lineage: str = ""
 
 
 @dataclass(frozen=True)
