@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Callable, Dict
 
+import pytest
 import wx
 
 from stonereader.input_layer import InputLayer
@@ -493,3 +494,117 @@ def test_check_clipboard_no_path_calls_restore_focus_static():
         "`if result == wx.ID_YES:` in _check_clipboard_for_deckstring; "
         "regex did not match."
     )
+
+
+# ---------- Close-cleanup ordering tests (plan 03-06) ----------
+
+
+def test_close_cleans_hotkeys(monkeypatch) -> None:
+    """MainWindow._on_close calls hotkeys.clear_all + live_presenter.cleanup
+    + tracker.stop in that order before Destroy.
+    """
+    from stonereader.app import MainWindow
+
+    try:
+        frame = MainWindow()
+    except Exception:
+        pytest.skip("MainWindow construction requires display environment")
+    try:
+        call_order: list[str] = []
+
+        class FakeHotkeys:
+            def clear_all(self) -> None:
+                call_order.append("hotkeys")
+
+        class FakePresenter:
+            def cleanup(self) -> None:
+                call_order.append("presenter")
+
+        class FakeTracker:
+            def stop(self) -> None:
+                call_order.append("tracker")
+
+        frame._hotkeys = FakeHotkeys()  # type: ignore[attr-defined]
+        frame._live_presenter = FakePresenter()  # type: ignore[attr-defined]
+        frame._tracker = FakeTracker()  # type: ignore[attr-defined]
+
+        destroyed: list[bool] = []
+        monkeypatch.setattr(frame, "Destroy", lambda: destroyed.append(True))
+
+        frame._on_close(wx.CloseEvent())
+
+        assert call_order == ["hotkeys", "presenter", "tracker"]
+        assert destroyed == [True]
+    finally:
+        try:
+            frame.Destroy()
+        except Exception:
+            pass
+
+
+def test_close_continues_on_failure(monkeypatch, caplog) -> None:
+    """Per 03-REVIEWS.md MEDIUM 03-06 #5: a raise in one cleanup step does
+    NOT prevent later steps from running. Verify all 4 steps fire even
+    when the first 3 raise.
+    """
+    import logging
+
+    from stonereader.app import MainWindow
+
+    try:
+        frame = MainWindow()
+    except Exception:
+        pytest.skip("MainWindow construction requires display environment")
+    try:
+        steps_attempted: list[str] = []
+
+        class RaisingHotkeys:
+            def clear_all(self) -> None:
+                steps_attempted.append("hotkeys")
+                raise RuntimeError("boom hotkeys")
+
+        class RaisingPresenter:
+            def cleanup(self) -> None:
+                steps_attempted.append("presenter")
+                raise RuntimeError("boom presenter")
+
+        class RaisingTracker:
+            def stop(self) -> None:
+                steps_attempted.append("tracker")
+                raise RuntimeError("boom tracker")
+
+        class RaisingDb:
+            def close(self) -> None:
+                steps_attempted.append("db")
+                raise RuntimeError("boom db")
+
+        frame._hotkeys = RaisingHotkeys()  # type: ignore[attr-defined]
+        frame._live_presenter = RaisingPresenter()  # type: ignore[attr-defined]
+        frame._tracker = RaisingTracker()  # type: ignore[attr-defined]
+        frame._db_conn = RaisingDb()  # type: ignore[attr-defined]
+
+        destroyed: list[bool] = []
+        monkeypatch.setattr(frame, "Destroy", lambda: destroyed.append(True))
+
+        with caplog.at_level(logging.ERROR):
+            frame._on_close(wx.CloseEvent())
+
+        # All 4 cleanup steps were attempted despite earlier raises.
+        assert steps_attempted == ["hotkeys", "presenter", "tracker", "db"]
+        # Destroy still ran.
+        assert destroyed == [True]
+        # 4 exception logs.
+        error_messages = [
+            r.message for r in caplog.records if r.levelno >= logging.ERROR
+        ]
+        assert any("hotkeys.clear_all() failed" in m for m in error_messages)
+        assert any(
+            "live_presenter.cleanup() failed" in m for m in error_messages
+        )
+        assert any("tracker.stop() failed" in m for m in error_messages)
+        assert any("db_conn.close() failed" in m for m in error_messages)
+    finally:
+        try:
+            frame.Destroy()
+        except Exception:
+            pass
