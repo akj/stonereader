@@ -74,15 +74,17 @@ class GameEngine:
         self._game_started_emitted = False
         self._game_ended_emitted = False
         self._mulligan_done_emitted = False
-        # Default friendly player_id is 1.
-        # TODO(WR-02): This stub is incorrect for the ~50 % of games where the
-        # local player is assigned CONTROLLER=2 by the server coin-flip.  To
-        # refine it we need the local player's BattleTag hi/lo (from the OS
-        # account APIs or a Hearthstone startup log line) and compare against
-        # CreateGamePacket.players hi/lo fields.  Until that data is wired in,
-        # card draw / play events for local-player-as-entity-2 games will have
-        # their controller attribution inverted.  See WR-02 in 02-REVIEW.md.
-        self._friendly_player_id = 1
+        # WR-02 / D-18: friendly player resolution.
+        # Default to 1 (correct for vs-AI captures and for the half of games
+        # where the local player is Player 1). The AI heuristic at CREATE_GAME
+        # refines this immediately; the SHOW_ENTITY-into-HAND fallback handles
+        # multiplayer games where both players have lo != 0. On resolution,
+        # _rebucket_from_entities recomputes the published drawn/played lists
+        # from authoritative _entities CONTROLLER tags so MIXED-timing events
+        # (some before resolution, some after) are all correctly attributed in
+        # the final GameState.
+        self._friendly_player_id: int = 1
+        self._friendly_player_resolved: bool = False
 
     @property
     def current_state(self) -> Optional[GameState]:
@@ -102,6 +104,10 @@ class GameEngine:
         self._game_started_emitted = False
         self._game_ended_emitted = False
         self._mulligan_done_emitted = False
+        # WR-02: clear friendly-player resolution so a new CREATE_GAME (e.g.
+        # reconnect to a different server-assigned slot) re-resolves cleanly.
+        self._friendly_player_resolved = False
+        self._friendly_player_id = 1
 
     def apply(self, packet: Packet) -> List[GameEvent]:
         """Apply a packet; return a list of zero or more events emitted."""
@@ -158,6 +164,101 @@ class GameEngine:
         except (ValueError, KeyError):
             return ""
 
+    # ----------------------------------------------------------------- WR-02
+
+    def _resolve_friendly_player_ai_heuristic(self, players: Any) -> None:
+        """WR-02 fast-path. Mirrors hslog.export.FriendlyPlayerExporter logic.
+
+        If exactly one player has lo == 0 (AI account) and one has lo != 0
+        (real account), the real account is friendly. Resolves immediately
+        on CREATE_GAME consumption.
+        """
+        ai_pids: List[int] = []
+        real_pids: List[int] = []
+        for _entity_id, player_id, _name, _hi, lo in players:
+            if lo == 0:
+                ai_pids.append(player_id)
+            else:
+                real_pids.append(player_id)
+        if len(ai_pids) == 1 and len(real_pids) == 1:
+            new_friendly = real_pids[0]
+            if new_friendly != self._friendly_player_id:
+                self._friendly_player_id = new_friendly
+                self._rebucket_from_entities()
+            self._friendly_player_resolved = True
+
+    def _resolve_friendly_player_show_entity_fallback(
+        self, p: ShowEntityPacket
+    ) -> None:
+        """WR-02 slow-path. The first SHOW_ENTITY into HAND determines friendly.
+
+        Per FriendlyPlayerExporter: in multiplayer games (both players have
+        lo != 0), watch CONTROLLER tags during FULL_ENTITY/SHOW_ENTITY. The
+        first SHOW_ENTITY whose target zone is HAND is the friendly player's
+        first revealed mulligan card → that entity's controller IS the friendly
+        player_id.
+        """
+        new_zone = p.tags.get("ZONE")
+        if new_zone != int(Zone.HAND):
+            return
+        controller = p.tags.get("CONTROLLER")
+        if controller is None:
+            ent = self._entities.get(p.entity_id, {})
+            controller = ent.get("CONTROLLER")
+        if controller is None:
+            return
+        new_friendly = int(controller)
+        if new_friendly != self._friendly_player_id:
+            self._friendly_player_id = new_friendly
+            self._rebucket_from_entities()
+        self._friendly_player_resolved = True
+
+    def _rebucket_from_entities(self) -> None:
+        """Re-attribute prior drawn/played rows using AUTHORITATIVE _entities CONTROLLER state.
+
+        Replaces the old 'swap accumulated lists' approach (03-REVIEWS.md
+        HIGH #2): the swap was correct only when ALL pre-resolution events
+        were uniformly inverted. With mixed timing — some events before
+        resolution (potentially wrong bucket using default _friendly_player_id=1),
+        some after (correct bucket) — the swap would un-correct the
+        post-resolution rows.
+
+        This implementation walks each row, looks up the authoritative
+        CONTROLLER from self._entities[row.entity_id], and places the row in
+        the correct bucket based on the now-resolved _friendly_player_id.
+        Rows whose entity is no longer in _entities (extremely rare) fall
+        back to their own .controller attribute.
+        """
+
+        def _is_friendly(entity_id: int, fallback_controller: int) -> bool:
+            ent = self._entities.get(entity_id, {})
+            controller = ent.get("CONTROLLER", fallback_controller)
+            return int(controller) == self._friendly_player_id
+
+        all_drawn = list(self._player_drawn) + list(self._opponent_drawn)
+        new_player_drawn: List[PlayedCard] = []
+        new_opponent_drawn: List[PlayedCard] = []
+        for row in all_drawn:
+            if _is_friendly(row.entity_id, row.controller):
+                new_player_drawn.append(row)
+            else:
+                new_opponent_drawn.append(row)
+        self._player_drawn = new_player_drawn
+        self._opponent_drawn = new_opponent_drawn
+
+        all_played = list(self._player_played) + list(self._opponent_played)
+        new_player_played: List[PlayedCard] = []
+        new_opponent_played: List[PlayedCard] = []
+        for row in all_played:
+            if _is_friendly(row.entity_id, row.controller):
+                new_player_played.append(row)
+            else:
+                new_opponent_played.append(row)
+        self._player_played = new_player_played
+        self._opponent_played = new_opponent_played
+
+        self._refresh_state()
+
     # ----------------------------------------------------------------- handlers
 
     def _on_create_game(self, p: CreateGamePacket) -> List[GameEvent]:
@@ -172,9 +273,12 @@ class GameEngine:
         self.reset()
         # Initialize entities for the GameEntity and Players
         self._record_entity(p.game_entity_id, "", p.initial_tags)
-        for entity_id, name, _hi, _lo in p.players:
+        for entity_id, player_id, name, _hi, _lo in p.players:
             self._record_entity(entity_id, "", {})
             self._entities[entity_id]["player_name"] = name
+            self._entities[entity_id]["PLAYER_ID"] = player_id
+        # WR-02: AI heuristic for friendly player resolution.
+        self._resolve_friendly_player_ai_heuristic(p.players)
         # Build minimal initial GameState
         empty_hero = Hero(
             id="?",
@@ -395,6 +499,11 @@ class GameEngine:
         ent = self._entities.get(p.entity_id, {})
         previously_hidden = not ent.get("card_id")
         self._record_entity(p.entity_id, p.card_id, p.tags)
+        # WR-02: SHOW_ENTITY-into-HAND fallback (multiplayer games where both
+        # players have lo != 0 and the AI heuristic at CREATE_GAME could not
+        # disambiguate).
+        if not self._friendly_player_resolved:
+            self._resolve_friendly_player_show_entity_fallback(p)
         if previously_hidden and p.card_id:
             base = self._lookup_card(p.card_id)
             return [

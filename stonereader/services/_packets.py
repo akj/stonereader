@@ -5,7 +5,7 @@ Engine consumes these. Parser is the only translator from hslog.packets.*.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 
 @dataclass(frozen=True)
