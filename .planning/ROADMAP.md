@@ -77,8 +77,8 @@ Plans:
 - [x] 03-01-PLAN.md — Wave 0: Test scaffolds + MockGameTracker fixture
 - [x] 03-02-PLAN.md — Wave 1: WR-02 friendly_player resolution + 5-tuple CreateGamePacket
 - [x] 03-03-PLAN.md — Wave 1: D-19 creation lineage + opponent_hand reconstruction
-- [ ] 03-04-PLAN.md — Wave 2: GlobalHotkeyService (wx.Frame.RegisterHotKey wrapper)
-- [ ] 03-05-PLAN.md — Wave 2: LiveGamePresenter (3 zones + auto-detection + speech)
+- [x] 03-04-PLAN.md — Wave 2: GlobalHotkeyService (wx.Frame.RegisterHotKey wrapper)
+- [x] 03-05-PLAN.md — Wave 2: LiveGamePresenter (3 zones + auto-detection + speech)
 - [ ] 03-06-PLAN.md — Wave 3: LiveGamePanel view + app wiring + manual checkpoint
 
 **UI hint**: yes

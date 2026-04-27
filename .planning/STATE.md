@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-03-PLAN.md
-last_updated: "2026-04-27T03:32:46.765Z"
+stopped_at: Completed 03-05-PLAN.md
+last_updated: "2026-04-27T03:50:00.000Z"
 last_activity: 2026-04-27
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 21
-  completed_plans: 18
-  percent: 86
+  completed_plans: 20
+  percent: 95
 ---
 
 # Project State
@@ -26,17 +26,17 @@ See: .planning/PROJECT.md (updated 2026-04-14)
 ## Current Position
 
 Phase: 03 (live-game-tracking) — EXECUTING
-Plan: 4 of 6
+Plan: 6 of 6
 Status: Ready to execute
 Last activity: 2026-04-27
 
-Progress: [█████████░] 86%
+Progress: [█████████▌] 95%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 15
+- Total plans completed: 17
 - Average duration: —
 - Total execution time: 0 hours
 
@@ -57,6 +57,8 @@ Progress: [█████████░] 86%
 | Phase 03 P01 | 5min | 3 tasks | 5 files |
 | Phase Phase 03 PP02 | 11min | 2 tasks tasks | 6 files files |
 | Phase Phase 03 PP03 | 6min | 2 tasks tasks | 3 files files |
+| Phase 03 P04 | 5min | 1 task | 2 files |
+| Phase 03 P05 | 7min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -83,6 +85,13 @@ Recent decisions affecting current work:
 - [03-03] Sticky-once-set guard ('creation_lineage' not in ent) prevents later TAG_CHANGE / SHOW_ENTITY from overwriting captured lineage
 - [03-03] _record_entity now calls _refresh_state unconditionally (no-op pre-CREATE_GAME) so direct-into-HAND FullEntity packets surface in state.opponent_hand
 - [03-03] state.opponent_hand reconstructed from self._entities (entity_id-keyed dict, implicit dedupe) sorted by zone_position; previously always ()
+- [03-04] GlobalHotkeyService accumulates registration failures (Pitfall 4) — partial registration reports via .failed list, never raises on dup/conflict
+- [03-04] MOD_NOREPEAT applied by default inside register() so callers don't have to remember it (Pitfall 5)
+- [03-04] _on_hotkey wraps callbacks in try/except + logger.exception so one bad handler doesn't break the dispatcher (Pitfall 3)
+- [03-04] D-DEFER-01 logged: pre-existing wx test-ordering fragility (multiple wx.App() per session leaks) — recommend session-scoped wx fixture in future test-infrastructure plan
+- [03-05] LiveGamePresenter is wx-free (no wx import) — view layer (Wave 3) will own all wx widgets
+- [03-05] D-07 silent-during-event preserved: _on_game_event NEVER calls speech, only caches state and notifies view to re-render
+- [03-05] Auto-deck-detection runs once per game (CREATE_GAME boundary), not per state update
 
 ### Pending Todos
 
@@ -103,8 +112,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-04-27T03:32:46.757Z
-Stopped at: Completed 03-03-PLAN.md
+Last session: 2026-04-27T03:50:00.000Z
+Stopped at: Completed 03-05-PLAN.md (Wave 2 done; Wave 3 checkpoint plan pending)
 Resume file: None
 
 **Planned Phase:** 3 (Live Game Tracking) — 6 plans — 2026-04-27T02:52:38.709Z
