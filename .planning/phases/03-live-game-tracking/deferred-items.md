@@ -42,3 +42,28 @@ it adds further wx-bound presenter tests).
 
 **Workaround until fixed:** Run `tests/test_navigation.py` before any other
 wx-using suite, or run navigation tests in their own pytest invocation.
+
+---
+
+## D-DEFER-02: pre-existing ruff F401 unused-import warnings in test files
+
+**Discovered during:** Plan 03-06 final verification (`uv run ruff check stonereader/ tests/`).
+
+**Symptom:** 6 ruff F401 errors across 4 test files I did not modify in 03-06:
+
+- `tests/test_deck_manager.py:7,9` — `get_all_decks`, `DeckSummary` unused
+- `tests/test_services/test_events.py:6` — `pytest` unused
+- `tests/test_services/test_log_config.py:62,63` — `stat`, `MagicMock` unused
+- `tests/test_services/test_parser.py:6` — `pytest` unused
+
+**Pre-existing — not caused by 03-06:** Last touched in `e0e7a1b feat(03-02)`,
+`5901b33 fix(02)`, `d8af4ae chore: merge executor worktree (02-04 data layer)` —
+all before plan 03-06.
+
+**Recommended owner:** A future test-cleanup pass; trivially fixable with
+`uv run ruff check --fix tests/` but explicitly out of scope per the Scope
+Boundary rule (file changes unrelated to plan 03-06's work).
+
+**Pyright:** Pyright scoped to `stonereader/` is clean (0 errors). Whole-tree
+`uv run pyright` reports 12 errors in `tests/test_services/test_exceptions_packets.py`
+which are also pre-existing and out of scope.
