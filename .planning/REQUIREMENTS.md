@@ -27,14 +27,14 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Live Game Tracking
 
 - [x] **LIVE-01**: App detects game start and end events from Power.log
-- [ ] **LIVE-02**: User can see remaining cards in their deck with counts
-- [ ] **LIVE-03**: User can see cards drawn this game
-- [ ] **LIVE-04
+- [x] **LIVE-02**: User can see remaining cards in their deck with counts
+- [x] **LIVE-03**: User can see cards drawn this game
+- [x] **LIVE-04
 **: User can see opponent's played cards in play order
 - [x] **LIVE-05**: User can query opponent hand count
-- [ ] **LIVE-06**: User can query deck count for both players
-- [ ] **LIVE-07**: User can query current and max mana for both players
-- [ ] **LIVE-08**: App auto-detects which saved deck the user is playing
+- [x] **LIVE-06**: User can query deck count for both players
+- [x] **LIVE-07**: User can query current and max mana for both players
+- [x] **LIVE-08**: App auto-detects which saved deck the user is playing
 - [x] **LIVE-09**: User can query live game state via global hotkeys while Hearthstone has focus
 
 ### Replay Viewer
@@ -105,13 +105,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 | LOG-04 | Phase 2 | Pending |
 | LOG-05 | Phase 2 | Pending |
 | LIVE-01 | Phase 3 | Complete (03-06) |
-| LIVE-02 | Phase 3 | Pending |
-| LIVE-03 | Phase 3 | Pending |
-| LIVE-04 | Phase 3 | Pending |
+| LIVE-02 | Phase 3 | Complete (03-05/06, HUMAN-UAT pending A5) |
+| LIVE-03 | Phase 3 | Complete (03-05/06, HUMAN-UAT pending A11) |
+| LIVE-04 | Phase 3 | Complete (03-03/05) |
 | LIVE-05 | Phase 3 | Complete (03-06) |
-| LIVE-06 | Phase 3 | Pending |
-| LIVE-07 | Phase 3 | Pending |
-| LIVE-08 | Phase 3 | Pending |
+| LIVE-06 | Phase 3 | Complete (03-05/06, HUMAN-UAT pending A5) |
+| LIVE-07 | Phase 3 | Complete (03-05/06, HUMAN-UAT pending A6) |
+| LIVE-08 | Phase 3 | Complete (03-05, HUMAN-UAT pending A9) |
 | LIVE-09 | Phase 3 | Complete (03-06) |
 | REPLAY-01 | Phase 4 | Pending |
 | REPLAY-02 | Phase 4 | Pending |

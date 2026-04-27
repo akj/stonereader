@@ -23,17 +23,10 @@ Screen reader users can access live game tracking information (remaining deck, o
 - ✓ Game state and replay state models — existing
 - ✓ Deck management — import deckstrings (with graceful-degrade for unknown DBF IDs), browse saved decks, view deck contents with detail inspection, delete with confirmation, export to clipboard — Validated in Phase 01
 - ✓ Log infrastructure — Hearthstone Power.log watcher (150ms wx.Timer tail with rotation/process-gone detection), hslog parser wrapper (D-10 isolation), GameEngine with frozen GameState reducer + 11 typed events, GameTracker facade with subscriber bus, log.config bootstrap (D-11), stdlib logging (D-16) — Validated in Phase 02
+- ✓ Live game tracking — WR-02 friendly-player resolution (AI fast-path + SHOW_ENTITY fallback, no hslog leak), D-19 opponent-hand creation lineage with INNERMOST POWER subject + sticky guard + reset-on-CREATE_GAME, opponent_hand reconstruction in `_refresh_state`, GlobalHotkeyService (MOD_NOREPEAT default, failure accumulation, callback isolation, idempotent clear_all), LiveGamePresenter (4 zones — remaining_deck/opponent_hand/opponent_played/cards_drawn, auto-deck-detection on CREATE_GAME, public hotkey-callable accessors, wx-free, D-07 silent-during-event), LiveGamePanel (passive view, no SpeechService import, AcceptsFocus(False) ListCtrls + sibling-order MSAA labels), `Ctrl+Shift+R/O/D/H` chord wiring, `_on_close` continue-on-failure cleanup ordering — Validated in Phase 03 (manual NVDA/JAWS smoke test deferred to 03-HUMAN-UAT.md)
 
 ### Active
 
-- [ ] Live game tracking via Power.log file parsing  <!-- infrastructure done in Phase 02; subscriber UI in Phase 03 -->
-  - **Phase 03 prerequisite (WR-02):** Replace `_friendly_player_id = 1` stub in `_engine.py` with BattleTag account-id–based resolution. Baseline test `test_card_drawn_controller_reflects_log_controller` already locks the raw-controller pass-through.
-- [ ] Remaining deck display with card counts and copy tracking
-- [ ] Opponent played cards tracking
-- [ ] Opponent hand tracking (cards held since which turn)
-- [ ] Mulligan guidance (stats-based suggestions)
-- [ ] Global hotkeys that announce info while Hearthstone has focus
-- [ ] Background window with full zone navigation for live game state
 - [ ] Replay viewer — turn-by-turn navigation with board/hand/log zones
 - [ ] Replay viewer — action-by-action drill-down within turns
 - [ ] Game history storage (basic win/loss, matchups)
@@ -71,9 +64,9 @@ Screen reader users can access live game tracking information (remaining deck, o
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Power.log parsing for game data | Proven approach (HDT, Firestone use it), stable across patches, no injection risk | — Pending |
-| Background window + global hotkeys | Overlays are useless for screen readers; global hotkeys bridge the gap | — Pending |
-| Windows-only platform target | NVDA/JAWS are Windows; simplifies global hotkey implementation | — Pending |
+| Power.log parsing for game data | Proven approach (HDT, Firestone use it), stable across patches, no injection risk | ✓ Validated in Phase 02 — hslog wrapper isolated behind D-10; reducer-style GameEngine over frozen GameState |
+| Background window + global hotkeys | Overlays are useless for screen readers; global hotkeys bridge the gap | ✓ Validated in Phase 03 — `Ctrl+Shift+R/O` browse-open, `Ctrl+Shift+D/H` speak-only via `wx.Frame.RegisterHotKey` + MOD_NOREPEAT |
+| Windows-only platform target | NVDA/JAWS are Windows; simplifies global hotkey implementation | ✓ Validated in Phase 03 — RegisterHotKey is Win32; engine deliberately portable for Phase 4 replay reuse |
 | Import-only deck management | Building decks from scratch is complex and low-value when deckstrings exist | ✓ Validated in Phase 01 — deckstring import (with graceful-degrade for unknown DBF IDs) is the sole path |
 | Basic game history, not deep analytics | Stats are nice-to-have, not the core value; avoids scope creep | — Pending |
 
@@ -95,4 +88,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-26 after Phase 02 (Log Infrastructure) completion*
+*Last updated: 2026-04-27 after Phase 03 (Live Game Tracking) completion — manual NVDA/JAWS smoke test pending in 03-HUMAN-UAT.md*
