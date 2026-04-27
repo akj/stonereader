@@ -170,6 +170,12 @@ class GameEngine:
             subject_card = self._lookup_card(subject_card_id) if subject_card_id else None
             if subject_card:
                 ent["creation_lineage"] = subject_card.name
+        # D-19: bookkeeping changed → republish the snapshot so opponent_hand
+        # reflects newly-arrived / updated entities. _refresh_state is a no-op
+        # if _current_state is None (pre-CREATE_GAME), so this is safe to
+        # invoke unconditionally for every record. Existing zone-change events
+        # already call _refresh_state from _handle_zone_change.
+        self._refresh_state()
 
     def _lookup_card(self, card_id: str) -> Optional[Card]:
         if not card_id or self._card_db is None:
