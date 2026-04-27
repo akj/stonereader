@@ -26,16 +26,16 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Live Game Tracking
 
-- [ ] **LIVE-01**: App detects game start and end events from Power.log
+- [x] **LIVE-01**: App detects game start and end events from Power.log
 - [ ] **LIVE-02**: User can see remaining cards in their deck with counts
 - [ ] **LIVE-03**: User can see cards drawn this game
 - [ ] **LIVE-04
 **: User can see opponent's played cards in play order
-- [ ] **LIVE-05**: User can query opponent hand count
+- [x] **LIVE-05**: User can query opponent hand count
 - [ ] **LIVE-06**: User can query deck count for both players
 - [ ] **LIVE-07**: User can query current and max mana for both players
 - [ ] **LIVE-08**: App auto-detects which saved deck the user is playing
-- [ ] **LIVE-09**: User can query live game state via global hotkeys while Hearthstone has focus
+- [x] **LIVE-09**: User can query live game state via global hotkeys while Hearthstone has focus
 
 ### Replay Viewer
 
@@ -104,15 +104,15 @@ Which phases cover which requirements. Updated during roadmap creation.
 | LOG-03 | Phase 2 | Pending |
 | LOG-04 | Phase 2 | Pending |
 | LOG-05 | Phase 2 | Pending |
-| LIVE-01 | Phase 3 | Pending |
+| LIVE-01 | Phase 3 | Complete (03-06) |
 | LIVE-02 | Phase 3 | Pending |
 | LIVE-03 | Phase 3 | Pending |
 | LIVE-04 | Phase 3 | Pending |
-| LIVE-05 | Phase 3 | Pending |
+| LIVE-05 | Phase 3 | Complete (03-06) |
 | LIVE-06 | Phase 3 | Pending |
 | LIVE-07 | Phase 3 | Pending |
 | LIVE-08 | Phase 3 | Pending |
-| LIVE-09 | Phase 3 | Pending |
+| LIVE-09 | Phase 3 | Complete (03-06) |
 | REPLAY-01 | Phase 4 | Pending |
 | REPLAY-02 | Phase 4 | Pending |
 | REPLAY-03 | Phase 4 | Pending |
@@ -127,4 +127,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 ---
 *Requirements defined: 2026-04-15*
-*Last updated: 2026-04-14 after roadmap creation*
+*Last updated: 2026-04-27 — Phase 3 plan 03-06 complete (LIVE-01, LIVE-05, LIVE-09 marked complete; manual NVDA/JAWS smoke deferred to HUMAN-UAT)*
