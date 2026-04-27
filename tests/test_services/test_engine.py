@@ -25,7 +25,7 @@ def test_emits_frozen_gamestate_snapshots():
         CreateGamePacket(
             packet_id=0,
             game_entity_id=1,
-            players=((2, "P1", 1, 1), (3, "P2", 2, 2)),
+            players=((2, 1, "P1", 1, 1), (3, 2, "P2", 2, 2)),
         )
     )
     state = engine.current_state
@@ -56,7 +56,7 @@ def test_card_drawn_controller_reflects_log_controller():
         CreateGamePacket(
             packet_id=0,
             game_entity_id=1,
-            players=((2, "LocalPlayer", 144115198130930503, 1), (3, "Opponent", 144115198130930504, 2)),
+            players=((2, 1, "LocalPlayer", 144115198130930503, 1), (3, 2, "Opponent", 144115198130930504, 2)),
         )
     )
     # Register entity 10 as belonging to controller 2 with no zone yet.

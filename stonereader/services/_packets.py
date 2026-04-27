@@ -22,11 +22,15 @@ class Packet:
 class CreateGamePacket(Packet):
     """The ``GameState.DebugPrintPower() - CREATE_GAME`` boundary.
 
-    players is a tuple of (player_id, player_name, hi, lo) for each player.
+    players is a tuple of (entity_id, player_id, name, hi, lo) per player.
+    Both entity_id and player_id are retained (WR-02 / D-18): the engine's
+    FriendlyPlayerExporter heuristic needs player_id distinctly from
+    entity_id. hi/lo come from the Player's GameAccountId (lo == 0 marks
+    an AI account).
     """
 
     game_entity_id: int
-    players: Tuple[Tuple[int, str, int, int], ...] = ()
+    players: Tuple[Tuple[int, int, str, int, int], ...] = ()
     initial_tags: Dict[str, int] = field(default_factory=dict)
 
 

@@ -49,12 +49,19 @@ class Parser:
         self._seen_ids: Set[int] = set()
         self._next_packet_id: int = 0
         self._missing_enums_logged: Set[Tuple[str, Any]] = set()
+        # Deferred emission tracking for CreateGame: hslog appends Player rows
+        # to the in-progress CreateGame after the CREATE_GAME line is parsed,
+        # so we cannot emit it on first sight. We defer until either a NEW
+        # top-level packet appears after it OR the parser's entity_packet
+        # state shows we have moved past the CreateGame's player block.
+        self._pending_create_game_pyid: Optional[int] = None
 
     def reset(self) -> None:
         """Drop all hslog state and start fresh. Called on file rotation."""
         self._hslog = LogParser()
         self._seen_ids.clear()
         self._next_packet_id = 0
+        self._pending_create_game_pyid = None
         # Keep _missing_enums_logged across resets — same enum drift appears
         # across multiple files after a Hearthstone patch.
 
@@ -98,15 +105,30 @@ class Parser:
 
     def _walk(self, hslog_pkts: Any, out: List[Packet]) -> None:
         """Recursively walk hslog packets and translate unseen ones."""
-        for hp in hslog_pkts:
+        # Compute index of the last packet so we can detect "is the in-progress
+        # CreateGame still trailing or has hslog moved on".
+        pkts_list = list(hslog_pkts)
+        for idx, hp in enumerate(pkts_list):
             pyid = id(hp)
+            is_last = idx == len(pkts_list) - 1
             if pyid in self._seen_ids:
                 # Recurse into block children even if the block itself was seen,
                 # because new children may have been appended since last walk.
                 if isinstance(hp, hslog_packets.Block):
                     self._walk(hp.packets, out)
                 continue
+            # Defer CreateGame emission until subsequent packets exist OR the
+            # hslog parser state confirms we've moved past Player parsing.
+            # This is necessary because hslog appends Player rows to the
+            # in-progress CreateGame *after* the CREATE_GAME line is parsed,
+            # so emitting on first sight gives us players=().
+            if isinstance(hp, hslog_packets.CreateGame) and is_last:
+                if self._create_game_still_building(hp):
+                    self._pending_create_game_pyid = pyid
+                    continue
             self._seen_ids.add(pyid)
+            if pyid == self._pending_create_game_pyid:
+                self._pending_create_game_pyid = None
             translated = self._translate(hp)
             if translated is not None:
                 out.append(translated)
@@ -123,6 +145,33 @@ class Parser:
                         )
                     )
 
+    def _create_game_still_building(self, hp: Any) -> bool:
+        """True if hslog is still appending Player rows to this CreateGame.
+
+        We defer CreateGame emission until either (a) the next top-level
+        packet appears after it (which means parsing has moved past the
+        Player block), or (b) hslog's entity_packet state indicates we've
+        moved past the CreateGame and its players.
+        """
+        try:
+            state = self._hslog._parsing_state
+            entity_packet = getattr(state, "entity_packet", None)
+        except AttributeError:
+            return False
+        if entity_packet is None:
+            return False
+        # If entity_packet is the CreateGame itself, parsing is still inside
+        # the GameEntity portion (which precedes Player rows).
+        if entity_packet is hp:
+            return True
+        # If entity_packet is a Player whose parent is the in-progress
+        # CreateGame, more Player rows may still arrive.
+        if isinstance(entity_packet, hslog_packets.CreateGame.Player):
+            for player in getattr(hp, "players", []) or []:
+                if player is entity_packet:
+                    return True
+        return False
+
     def _next_id(self) -> int:
         """Return next monotonic packet id."""
         i = self._next_packet_id
@@ -134,9 +183,11 @@ class Parser:
         if isinstance(hp, hslog_packets.CreateGame):
             players = tuple(
                 (
-                    # Player uses .entity (EntityID) and .player_id (PlayerID)
-                    getattr(p, "entity", 0) or getattr(p, "player_id", 0),
-                    str(getattr(p, "name", "") or ""),
+                    # entity_id is on PlayerReference (Player.entity is a
+                    # PlayerReference with .entity_id, not a plain int).
+                    self._player_entity_id(p),
+                    getattr(p, "player_id", 0) or 0,         # player_id (PlayerID=N)
+                    self._player_name(p),
                     getattr(p, "hi", 0) or 0,
                     getattr(p, "lo", 0) or 0,
                 )
@@ -202,6 +253,38 @@ class Parser:
         if hasattr(tag, "name"):
             return tag.name
         return str(tag)
+
+    @staticmethod
+    def _player_entity_id(p: Any) -> int:
+        """Extract the integer EntityID from a hslog Player record.
+
+        Player.entity is a PlayerReference (with .entity_id) when hslog
+        successfully parsed an EntityID=N field; treat any other shape
+        defensively and fall back to player_id.
+        """
+        ent = getattr(p, "entity", None)
+        if ent is None:
+            return int(getattr(p, "player_id", 0) or 0)
+        eid = getattr(ent, "entity_id", None)
+        if isinstance(eid, int):
+            return eid
+        if isinstance(ent, int):
+            return ent
+        return int(getattr(p, "player_id", 0) or 0)
+
+    @staticmethod
+    def _player_name(p: Any) -> str:
+        """Extract a printable name. Prefer Player.name, fall back to
+        PlayerReference.name (set by hslog when the player resolves).
+        """
+        name = getattr(p, "name", None)
+        if name:
+            return str(name)
+        ent = getattr(p, "entity", None)
+        ref_name = getattr(ent, "name", None) if ent is not None else None
+        if ref_name:
+            return str(ref_name)
+        return ""
 
     @staticmethod
     def _block_type_name(hp: Any) -> str:
