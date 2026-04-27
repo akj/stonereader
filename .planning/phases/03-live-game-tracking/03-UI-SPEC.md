@@ -24,7 +24,7 @@ The sections that ARE first-class for this phase:
 1. **Speech announcement contracts** (per-zone phrasing, panel-entry phrasing, hotkey-triggered phrasing, interrupt vs queued semantics).
 2. **Global hotkey contracts** (which `Ctrl+Shift+<letter>` chords, modifier semantics, conflict-failure UX).
 3. **In-app keyboard contracts** (zone navigation key map, EVT_CHAR_HOOK routing, text-mode handling).
-4. **Panel/widget contract** for `LiveGamePanel` (three-zone layout, label-before-control MSAA pattern, virtual `ListCtrl` with `AcceptsFocus() -> False`).
+4. **Panel/widget contract** for `LiveGamePanel` (four-zone layout — Remaining Deck, Opponent Hand, Opponent Played, Cards Drawn — label-before-control MSAA pattern, virtual `ListCtrl` with `AcceptsFocus() -> False`).
 5. **Diminishing message UX rules** (already standardized via `ZoneNavigationMixin`).
 
 These are specified deeply below.
@@ -58,14 +58,15 @@ These are specified deeply below.
 | `_RemainingDeckListCtrl` | `stonereader/views/live_game.py` | `wx.ListCtrl` (`LC_REPORT \| LC_VIRTUAL \| LC_SINGLE_SEL \| LC_NO_HEADER`) | `AcceptsFocus() -> False`. Owned by zone `"remaining_deck"`. |
 | `_OpponentHandListCtrl` | `stonereader/views/live_game.py` | `wx.ListCtrl` (same style) | `AcceptsFocus() -> False`. Owned by zone `"opponent_hand"`. |
 | `_OpponentPlayedListCtrl` | `stonereader/views/live_game.py` | `wx.ListCtrl` (same style) | `AcceptsFocus() -> False`. Owned by zone `"opponent_played"`. |
+| `_CardsDrawnListCtrl` | `stonereader/views/live_game.py` | `wx.ListCtrl` (same style) | `AcceptsFocus() -> False`. Owned by zone `"cards_drawn"` (LIVE-03 — chronological list of cards the friendly player has drawn this game). |
 
 ### Reused widgets / patterns (Phase 1/2 carry-forward)
 
 | Widget | Source | Used by Phase 3 |
 |--------|--------|-----------------|
 | `NavigationController.show_panel`, `register_panel`, `restore_focus` | `stonereader/app.py` | Browse-open hotkeys; home menu entry |
-| `InputLayer` (EVT_CHAR_HOOK) | `stonereader/input_layer.py` | In-panel arrow keys (left/right/up/down/home/end) |
-| `ZoneNavigationMixin` | `stonereader/presenters/base.py` | All three zones inherit cursor-per-zone navigation, N-of-M speech, detail-line inspection, diminishing messages |
+| `InputLayer` (EVT_CHAR_HOOK) | `stonereader/input_layer.py` | In-panel arrow keys (left/right/up/down/home/end) and number keys (1/2/3/4) for zone switching |
+| `ZoneNavigationMixin` | `stonereader/presenters/base.py` | All four zones inherit cursor-per-zone navigation, N-of-M speech, detail-line inspection, diminishing messages |
 | `SpeechService.speak(text, interrupt: bool=True)` | `stonereader/speech_service.py` | All speech output |
 
 ### Removed / not used
@@ -96,6 +97,9 @@ Vertical `wx.BoxSizer`. Top-down reading order matters for screen readers — it
 +-----------------------------------------------------------+
 | StaticText: "Opponent Played:"                            |  <-- MSAA label
 | _OpponentPlayedListCtrl (virtual, AcceptsFocus=False)     |  <-- list zone 3
++-----------------------------------------------------------+
+| StaticText: "Cards Drawn:"                                |  <-- MSAA label (LIVE-03)
+| _CardsDrawnListCtrl       (virtual, AcceptsFocus=False)   |  <-- list zone 4
 +-----------------------------------------------------------+
 ```
 
@@ -147,6 +151,7 @@ This section IS the design contract for screen-reader users. Every announcement 
 | `remaining_deck` | `Tuple[Card, int]` | `"Reno Jackson, 1 copy, <pos> of <total>"` (singular) — `"Fireball, 2 copies, <pos> of <total>"` (plural) — `"Loatheb, 0 copies, <pos> of <total>"` (drawn-to-zero, only when detected deck known) | D-13 |
 | `opponent_hand` | `OpponentHandRow(position, identity, drawn_turn, lineage)` | Three variants below | D-14 |
 | `opponent_played` | `PlayedCard` | `"Turn 6, Reno Jackson, <pos> of <total>"` | D-15 |
+| `cards_drawn` | `PlayedCard` (chronological friendly draws) | `"Turn 3, Reno Jackson, <pos> of <total>"` — chronological order from `state.player_drawn` | LIVE-03 (added per 03-CHECKER blocker #1) |
 
 **Opponent Hand row variants (D-14):**
 
@@ -170,12 +175,14 @@ When the user enters a zone (via `navigate_to_zone`, `jump_to_zone`, or a browse
 | `remaining_deck` | `"Remaining deck zone"` |
 | `opponent_hand` | `"Opponent hand zone"` |
 | `opponent_played` | `"Opponent played zone"` |
+| `cards_drawn` | `"Cards drawn zone"` |
 
 **Examples:**
 
 - `"Remaining deck zone, 18 cards. Glacial Shard, 1 copy, 1 of 18."`
 - `"Opponent hand zone, 4 cards. Position 1, Reno Jackson, drawn turn 5, 1 of 4."`
 - `"Opponent played zone, 6 cards. Turn 1, Frostbolt, 1 of 6."`
+- `"Cards drawn zone, 12 cards. Turn 1, The Coin, 1 of 12."`
 
 **Empty zone:**
 
@@ -284,11 +291,14 @@ In-panel keys route via `EVT_CHAR_HOOK` → `InputLayer._on_char_hook` → `pres
 | `down` | `read_detail_lines(item, direction=+1)` — next detail line |
 | `home` | `jump_to_first()` — first row in current zone |
 | `end` | `jump_to_last()` — last row in current zone |
-| `1` | `navigate_to_zone("remaining_deck", "Remaining deck zone")` — switch to zone 1 |
-| `2` | `navigate_to_zone("opponent_hand", "Opponent hand zone")` — switch to zone 2 |
-| `3` | `navigate_to_zone("opponent_played", "Opponent played zone")` — switch to zone 3 |
+| `1` | `navigate_to_zone("remaining_deck", "Remaining Deck")` — switch to zone 1 |
+| `2` | `navigate_to_zone("opponent_played", "Opponent Played")` — switch to zone 2 |
+| `3` | `navigate_to_zone("opponent_hand", "Opponent Hand")` — switch to zone 3 |
+| `4` | `navigate_to_zone("cards_drawn", "Cards Drawn")` — switch to zone 4 (LIVE-03) |
 
-**Why number keys for zone switching:** The Live Game panel has three zones with no input fields, so number keys are unambiguous. `Tab` is reserved for OS-level focus walks (panel ↔ other panels). Number-key zone switching matches the "zone keys are always global — no enter/exit required" rule from CLAUDE.md.
+**Why number keys for zone switching:** The Live Game panel has four zones with no input fields, so number keys are unambiguous. `Tab` is reserved for OS-level focus walks (panel ↔ other panels). Number-key zone switching matches the "zone keys are always global — no enter/exit required" rule from CLAUDE.md.
+
+> Note: The zone label arguments above use the human-readable form (e.g., `"Remaining Deck"`); zone-entry speech wraps them as `"Remaining Deck zone, N cards. ..."` per D-17. Implementation uses module-level constants `_REMAINING_DECK_ZONE`, `_OPPONENT_PLAYED_ZONE`, `_OPPONENT_HAND_ZONE`, `_CARDS_DRAWN_ZONE` for the internal zone names.
 
 **InputLayer interaction (carry-forward, no changes):**
 
@@ -419,7 +429,7 @@ The following concerns from the cross-AI review have been incorporated into this
 
 | Reviewer concern | Severity | How this contract addresses it |
 |------------------|----------|-------------------------------|
-| LIVE-03 ("cards drawn this game") not surfaced | HIGH | Out of scope per CONTEXT.md "Deferred Ideas" — drawn cards are visible indirectly via Remaining Deck "0 copies" rows (D-13). LIVE-03 is satisfied by the engine continuing to populate `state.player_drawn` (Phase 2). Phase 3 does NOT add a chronological draw zone; this contract makes that explicit. Planner / requirements doc may need to mark LIVE-03 as "satisfied indirectly via D-13." |
+| LIVE-03 ("cards drawn this game") not surfaced | HIGH | **Surfaced via the new Cards Drawn zone (zone 4).** Plan 03-05 adds a fourth zone `cards_drawn` driven by `state.player_drawn` (chronological friendly draws). Per-row format `"Turn N, <Card name>, <pos> of <total>"`. Reachable via number key `4` (in-panel) and via the standard zone-entry speech (D-17). No longer "deferred" — LIVE-03 is now an explicit acceptance gate of plan 03-05. |
 | WR-02 friendly-player edge cases (mixed-timing) | HIGH | Speech contract is agnostic to which player_id is friendly — the per-row formats reference `state.player_deck` and `state.opponent_*`, which the engine maintains correctly per the WR-02 fix. UI does not need to change if the engine resolution improves. |
 | UI-coupling to presenter internals (`_zone_cursors`, `_format_title`, `_current_state`) | HIGH | This contract requires `set_on_state_changed(zone_name, items, cursor)` and `set_on_title_changed(text)` callbacks ONLY. Public methods `announce_deck_counts()`, `announce_opponent_hand_count()`, `jump_to_zone(name)` are the sole external entry points. View MUST NOT read presenter private attributes. |
 | Three non-focusable `ListCtrl`s — accessibility model | HIGH | Locked: `AcceptsFocus() -> False` keeps Tab focus on the outer `wx.Panel`; the panel's `EVT_CHAR_HOOK` chain routes arrows into the presenter key map (matches the proven `card_browser.py` pattern). NVDA's object navigation can still walk into each list independently. **Manual NVDA verification required at the Phase 3 manual checkpoint** (planner already includes this in 03-06-PLAN). |
@@ -433,11 +443,11 @@ The following concerns from the cross-AI review have been incorporated into this
 
 A Phase 3 implementation satisfies this contract when:
 
-- [ ] `LiveGamePanel` exists as `stonereader/views/live_game.py` with the three-zone vertical layout above and `style=wx.WANTS_CHARS`.
-- [ ] All three `_*ListCtrl` widgets return `AcceptsFocus() -> False`.
-- [ ] Each list ctrl has a preceding `wx.StaticText` MSAA label (`"Remaining Deck:"`, `"Opponent Hand:"`, `"Opponent Played:"`).
+- [ ] `LiveGamePanel` exists as `stonereader/views/live_game.py` with the four-zone vertical layout above and `style=wx.WANTS_CHARS`.
+- [ ] All four `_*ListCtrl` widgets return `AcceptsFocus() -> False`.
+- [ ] Each list ctrl has a preceding `wx.StaticText` MSAA label (`"Remaining Deck:"`, `"Opponent Hand:"`, `"Opponent Played:"`, `"Cards Drawn:"`).
 - [ ] Top of panel has a `_TitleStaticText` updated via `set_on_title_changed`.
-- [ ] `LiveGamePresenter.get_key_map()` exposes the 9 keys above (left/right/up/down/home/end/1/2/3).
+- [ ] `LiveGamePresenter.get_key_map()` exposes the 10 keys above (left/right/up/down/home/end/1/2/3/4).
 - [ ] `_on_game_event` never calls `self._speech.speak` (test lock: `test_silent_during_event`).
 - [ ] Per-zone row format matches D-13/D-14/D-15 exactly (test locks: `test_remaining_deck_speech_format`, etc.).
 - [ ] Zone-entry speech matches D-17 format (test lock: `test_zone_entry_format`).

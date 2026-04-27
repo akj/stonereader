@@ -859,29 +859,34 @@ def announce_deck_counts(self) -> None:
 | A8 | The captured fixtures in `tests/fixtures/log/` are sufficient to validate the engine extensions; no new fixture capture needed | Validation Architecture | If the lineage code path requires a fixture with a real generator block (Cabal Shadow Priest, Wand) that none of the four fixtures contain, planner needs to either capture one OR build a synthetic packet stream test. **Verified via grep:** `mid_game.log` contains `BLOCK_START.*POWER` blocks (per `grep BLOCK_START.*POWER tests/fixtures/log/mid_game.log` → multiple matches), so synthetic tests can be supplemented by real-fixture assertions. |
 | A9 | `MainWindow._on_close` runs before `Destroy()`, leaving time to call `GlobalHotkeyService.clear_all()` | Runtime State Inventory | Already proven safe — `_on_close` already calls `tracker.stop()` before `self.Destroy()` (line 343-353); same pattern. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should the SHOW_ENTITY fallback path for `_friendly_player_id` re-bucket already-recorded events?**
+   - **RESOLVED:** Re-bucket from authoritative entity state (not blind list-swap). Plan 03-02 implements `_rebucket_from_entities()` which recomputes `player_drawn`/`opponent_drawn`/`player_played`/`opponent_played` by reading `CONTROLLER` tags from `_entities` after fallback resolution. Mixed-timing test (`test_mixed_timing_fallback`) and reconnect test (`test_reconnect_resolves_friendly`) lock the behavior. (See 03-02-PLAN.md.)
    - What we know: AI-heuristic resolves at CREATE_GAME; SHOW_ENTITY fallback may resolve later.
    - What's unclear: Whether to delay event emission until resolution OR re-bucket on resolution. Both have correctness costs.
    - Recommendation: Delay bucketing. Buffer rows with raw `controller` until friendly_player_id is known, then flush in one pass. Simpler than re-bucketing.
 
 2. **Is mana announced via panel zone footer or a separate hotkey (LIVE-07)?**
+   - **RESOLVED:** Panel-only via `current_mana_summary()` public accessor on `LiveGamePresenter`. No dedicated mana hotkey in v1. (See 03-CONTEXT.md D-07 / Open Question 2 + plan 03-05.)
    - What we know: HA already speaks own-mana and opponent-mana per CONTEXT.md D-02.
    - What's unclear: Whether StoneReader needs a redundant mana hotkey at all.
    - Recommendation: Skip a v1 mana hotkey. The Live Game panel title bar can include a `current_mana / max_mana` summary; panel users can read it via NVDA's title-read shortcut. If users ask, add a hotkey in v2.
 
 3. **Is the speak-only "deck counts" hotkey enough for LIVE-06, or does it need its own browse-open zone too?**
+   - **RESOLVED:** Speak-only is sufficient. `LiveGamePresenter.announce_deck_counts()` returns `"N left, opponent M."` per D-16. No "Opponent Deck Count" zone added. (See plan 03-05; hotkey wired in 03-06 as `Ctrl+Shift+D`.)
    - What we know: D-16 example "18 left, opponent 22." matches LIVE-06 exactly.
    - What's unclear: Whether opponent-deck-count gets its own zone (it can't — opponent's deck contents are never revealed; only count).
    - Recommendation: Speak-only is sufficient. Don't add an "Opponent Deck Count" zone; it's a single integer.
 
 4. **Does the panel title bar need to update live (when matchup is detected, when deck name resolves)?**
+   - **RESOLVED:** Use a `wx.StaticText` inside `LiveGamePanel`, updated via the presenter's public `current_title()` accessor on each `_notify_view()` callback. `MainWindow.SetStatusText` is NOT mutated from the panel. (See plan 03-05 `current_title()` accessor + plan 03-06 view binding.)
    - What we know: The wx StatusBar (`MainWindow.SetStatusText`) is already used for the app's overall status.
    - What's unclear: Whether panel title is set per-panel or globally on the frame.
    - Recommendation: Use a `wx.StaticText` at the top of `LiveGamePanel` for the title, updated by `_notify_view`. Don't mutate `MainWindow.SetStatusText` from the panel — that's a global concern.
 
 5. **Should the home menu's "Live Game" entry pre-jump to a default zone, or land on a zone-selection sub-menu?**
+   - **RESOLVED:** Land on the Remaining Deck zone immediately (matches Phase 1 pattern). Number keys `1`/`2`/`3`/`4` switch between the four zones globally via `LiveGamePresenter.get_key_map()`. (See plan 03-05 `get_key_map()` + 03-UI-SPEC §"Keyboard Contract".)
    - What we know: Other menu items (Card Library, Deck Manager) land on a default zone immediately.
    - What's unclear: Whether the user expects "Live Game" to land on Remaining Deck (most common query) or to present a zone-picker.
    - Recommendation: Match Phase 1 pattern — land on Remaining Deck zone immediately. Arrow keys switch between zones via standard `ZoneNavigationMixin`-style key bindings (TBD per planner — could be Tab/Shift+Tab between zones, or letter shortcuts).
