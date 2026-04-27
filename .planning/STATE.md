@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-02-PLAN.md
-last_updated: "2026-04-27T03:22:34.674Z"
+stopped_at: Completed 03-03-PLAN.md
+last_updated: "2026-04-27T03:32:46.765Z"
 last_activity: 2026-04-27
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 21
-  completed_plans: 17
-  percent: 81
+  completed_plans: 18
+  percent: 86
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-04-14)
 ## Current Position
 
 Phase: 03 (live-game-tracking) — EXECUTING
-Plan: 3 of 6
+Plan: 4 of 6
 Status: Ready to execute
 Last activity: 2026-04-27
 
-Progress: [████████░░] 81%
+Progress: [█████████░] 86%
 
 ## Performance Metrics
 
@@ -56,6 +56,7 @@ Progress: [████████░░] 81%
 | Phase 01 P07 | 2min | 1 tasks | 2 files |
 | Phase 03 P01 | 5min | 3 tasks | 5 files |
 | Phase Phase 03 PP02 | 11min | 2 tasks tasks | 6 files files |
+| Phase Phase 03 PP03 | 6min | 2 tasks tasks | 3 files files |
 
 ## Accumulated Context
 
@@ -78,6 +79,10 @@ Recent decisions affecting current work:
 - [03-02] Deferred CreateGame emission in parser — wait for hslog Player rows to complete (entity_packet moves past CreateGame block) before translating, otherwise players=()
 - [03-02] Authoritative re-bucket from _entities CONTROLLER state on friendly-player resolution flip, not blind list-swap (per 03-REVIEWS.md HIGH #2 mixed-timing)
 - [03-02] reset() clears _friendly_player_resolved + _friendly_player_id so reconnects (second CREATE_GAME) re-run heuristic against new server-assigned slot
+- [03-03] Lineage capture uses INNERMOST POWER block subject (self._block_subjects[-1]) — nested-generator chains attribute to inner subject only
+- [03-03] Sticky-once-set guard ('creation_lineage' not in ent) prevents later TAG_CHANGE / SHOW_ENTITY from overwriting captured lineage
+- [03-03] _record_entity now calls _refresh_state unconditionally (no-op pre-CREATE_GAME) so direct-into-HAND FullEntity packets surface in state.opponent_hand
+- [03-03] state.opponent_hand reconstructed from self._entities (entity_id-keyed dict, implicit dedupe) sorted by zone_position; previously always ()
 
 ### Pending Todos
 
@@ -98,8 +103,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-04-27T03:22:34.668Z
-Stopped at: Completed 03-02-PLAN.md
+Last session: 2026-04-27T03:32:46.757Z
+Stopped at: Completed 03-03-PLAN.md
 Resume file: None
 
 **Planned Phase:** 3 (Live Game Tracking) — 6 plans — 2026-04-27T02:52:38.709Z

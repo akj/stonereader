@@ -29,7 +29,8 @@ Requirements for initial release. Each maps to roadmap phases.
 - [ ] **LIVE-01**: App detects game start and end events from Power.log
 - [ ] **LIVE-02**: User can see remaining cards in their deck with counts
 - [ ] **LIVE-03**: User can see cards drawn this game
-- [ ] **LIVE-04**: User can see opponent's played cards in play order
+- [ ] **LIVE-04
+**: User can see opponent's played cards in play order
 - [ ] **LIVE-05**: User can query opponent hand count
 - [ ] **LIVE-06**: User can query deck count for both players
 - [ ] **LIVE-07**: User can query current and max mana for both players
