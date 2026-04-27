@@ -341,15 +341,36 @@ class MainWindow(wx.Frame):
         self.Close()
 
     def _on_close(self, event: wx.CloseEvent) -> None:
-        # Stop the GameTracker (Phase 2) cleanly so the wx.Timer reference is
-        # cleared before the frame is destroyed (D-19, T-2-LIFECYCLE).
+        # Cleanup order (Runtime State Inventory, plan 03-06):
+        #   hotkeys.clear_all() -> live_presenter.cleanup()
+        #   -> tracker.stop() -> db_conn.close() -> Destroy()
+        # Each step is wrapped in try/except so a raise does NOT prevent later
+        # steps from running (per 03-REVIEWS.md MEDIUM 03-06 #5).
+        log = logging.getLogger(__name__)
+        hotkeys = getattr(self, "_hotkeys", None)
+        if hotkeys is not None:
+            try:
+                hotkeys.clear_all()
+            except Exception:
+                log.exception("hotkeys.clear_all() failed; continuing cleanup")
+        live_presenter = getattr(self, "_live_presenter", None)
+        if live_presenter is not None:
+            try:
+                live_presenter.cleanup()
+            except Exception:
+                log.exception(
+                    "live_presenter.cleanup() failed; continuing cleanup"
+                )
         tracker = getattr(self, "_tracker", None)
         if tracker is not None:
             try:
                 tracker.stop()
             except Exception:
-                logging.getLogger(__name__).exception("tracker.stop() failed")
-        self._db_conn.close()
+                log.exception("tracker.stop() failed; continuing cleanup")
+        try:
+            self._db_conn.close()
+        except Exception:
+            log.exception("db_conn.close() failed; continuing cleanup")
         self.Destroy()
 
 
@@ -436,10 +457,28 @@ class StoneReaderApp(wx.App):
             transient=True,
         )
 
+        # --- Live Game ---
+        from stonereader.presenters.live_game import LiveGamePresenter
+        from stonereader.views.live_game import LiveGamePanel
+
+        live_presenter = LiveGamePresenter(speech, db_conn, self._tracker, card_db)
+        live_panel = LiveGamePanel(self._frame, live_presenter)
+        nav.register_panel("Live Game", live_panel, live_presenter, live_panel)
+        # Stash the presenter on the frame so MainWindow._on_close can clean it
+        # up before tracker.stop() (per Runtime State Inventory).
+        self._frame._live_presenter = live_presenter  # type: ignore[attr-defined]
+
         # --- Wire callbacks ---
 
-        # Home screen selection -> show panel
-        home_presenter.set_on_select(lambda name: nav.show_panel(name))
+        # Home screen selection -> show panel. Live Game also jumps to the
+        # remaining-deck zone so the entry speech matches the global hotkey
+        # browse-open path (per 03-PATTERNS.md app.py composition root).
+        def _on_home_select(name: str) -> None:
+            nav.show_panel(name)
+            if name == "Live Game":
+                live_presenter.jump_to_zone("remaining_deck")
+
+        home_presenter.set_on_select(_on_home_select)
 
         # Card Library category selection -> create and show card browser
         def _on_category_select(category_name: str) -> None:
@@ -488,6 +527,45 @@ class StoneReaderApp(wx.App):
         nav.show_panel("Home")
 
         self._frame.Show()
+
+        # --- Global hotkeys (LIVE-09) ---
+        # Register AFTER Show() so the frame's window handle is valid
+        # for Win32 RegisterHotKey (Pitfall 9).
+        from stonereader.services._global_hotkey import GlobalHotkeyService
+
+        self._hotkeys = GlobalHotkeyService(self._frame)
+        # Stash on the frame so MainWindow._on_close can clear them.
+        self._frame._hotkeys = self._hotkeys  # type: ignore[attr-defined]
+
+        mods = wx.MOD_CONTROL | wx.MOD_SHIFT
+
+        def _open_remaining_deck() -> None:
+            nav.show_panel("Live Game")
+            live_presenter.jump_to_zone("remaining_deck")
+
+        def _open_opponent_hand() -> None:
+            nav.show_panel("Live Game")
+            live_presenter.jump_to_zone("opponent_hand")
+
+        def _speak_deck_counts() -> None:
+            live_presenter.announce_deck_counts()
+
+        def _speak_opponent_hand_count() -> None:
+            # Per 03-REVIEWS.md HIGH #3: delegate to public presenter method
+            # rather than reading the presenter's private state cache directly.
+            live_presenter.announce_opponent_hand_count()
+
+        self._hotkeys.register(mods, ord("R"), _open_remaining_deck, "Remaining Deck")
+        self._hotkeys.register(mods, ord("O"), _open_opponent_hand, "Opponent Hand")
+        self._hotkeys.register(mods, ord("D"), _speak_deck_counts, "Deck Counts")
+        self._hotkeys.register(mods, ord("H"), _speak_opponent_hand_count, "Opponent Hand Count")  # noqa: E501
+
+        if self._hotkeys.failed:
+            speech.speak(
+                "Could not register hotkeys: "
+                + ", ".join(self._hotkeys.failed)
+                + "."
+            )
 
         # Start tracker AFTER frame.Show() (Pitfall 9: Timer must not fire
         # before the message loop is wired up to the visible frame).
