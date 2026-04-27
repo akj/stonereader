@@ -10,7 +10,7 @@ from stonereader.speech_service import SpeechService
 _MENU_ZONE = "menu"
 
 # Menu items -- order matches UI-SPEC home screen ListBox
-MENU_ITEMS = ["Card Library", "Deck Manager", "Import Deck"]
+MENU_ITEMS = ["Card Library", "Deck Manager", "Import Deck", "Live Game"]
 
 
 class HomePresenter(ZoneNavigationMixin, BasePresenter):
