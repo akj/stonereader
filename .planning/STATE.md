@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: planning
-stopped_at: Phase 3 context gathered
-last_updated: "2026-04-26T21:43:05.594Z"
-last_activity: 2026-04-26
+status: executing
+stopped_at: Completed 03-01-PLAN.md
+last_updated: "2026-04-27T03:04:41.374Z"
+last_activity: 2026-04-27
 progress:
   total_phases: 4
   completed_phases: 2
-  total_plans: 15
-  completed_plans: 15
-  percent: 100
+  total_plans: 21
+  completed_plans: 16
+  percent: 76
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-14)
 
 **Core value:** Screen reader users can access live game tracking information during a Hearthstone match without leaving the game window, via global hotkeys that announce through the screen reader.
-**Current focus:** Phase --phase — 02
+**Current focus:** Phase 03 — live-game-tracking
 
 ## Current Position
 
-Phase: 3
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-04-26
+Phase: 03 (live-game-tracking) — EXECUTING
+Plan: 2 of 6
+Status: Ready to execute
+Last activity: 2026-04-27
 
-Progress: [██████████] 100%
+Progress: [████████░░] 76%
 
 ## Performance Metrics
 
@@ -54,6 +54,7 @@ Progress: [██████████] 100%
 
 *Updated after each plan completion*
 | Phase 01 P07 | 2min | 1 tasks | 2 files |
+| Phase 03 P01 | 5min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -69,6 +70,9 @@ Recent decisions affecting current work:
 - [01-07] Chose Option A (restore_focus helper on NavigationController) over inline wx.CallAfter -- generalizes to every future modal callsite for ~5 lines
 - [01-07] _focus_targets.get() defensive lookup -- silently no-ops if panel was destroyed mid-flight rather than raising
 - [01-07] Yes/No path asymmetry intentional and documented -- Yes path keeps name_ctrl.SetFocus override; No path uses default focus target via restore_focus()
+- [03-01] MockGameTracker exposes caught_exceptions list (vs production silent log) so tests can assert subscriber-isolation behavior explicitly
+- [03-01] All Wave 0 stubs use file-level pytest.mark.xfail + per-test pytest.xfail() body — keeps suite green during Wave 0..2 while still surfacing accidentally un-marked stubs as failures
+- [03-01] Global-hotkey stubs use pytest.importorskip('wx') so non-Windows CI collects but skips them
 
 ### Pending Todos
 
@@ -89,8 +93,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: --stopped-at
-Stopped at: Phase 3 context gathered
-Resume file: --resume-file
+Last session: 2026-04-27T03:04:41.366Z
+Stopped at: Completed 03-01-PLAN.md
+Resume file: None
 
-**Planned Phase:** 2 (log-infrastructure) — 8 plans — 2026-04-26T00:18:16.324Z
+**Planned Phase:** 3 (Live Game Tracking) — 6 plans — 2026-04-27T02:52:38.709Z
