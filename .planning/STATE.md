@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-01-PLAN.md
-last_updated: "2026-04-27T03:04:41.374Z"
+stopped_at: Completed 03-02-PLAN.md
+last_updated: "2026-04-27T03:22:34.674Z"
 last_activity: 2026-04-27
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 21
-  completed_plans: 16
-  percent: 76
+  completed_plans: 17
+  percent: 81
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-04-14)
 ## Current Position
 
 Phase: 03 (live-game-tracking) — EXECUTING
-Plan: 2 of 6
+Plan: 3 of 6
 Status: Ready to execute
 Last activity: 2026-04-27
 
-Progress: [████████░░] 76%
+Progress: [████████░░] 81%
 
 ## Performance Metrics
 
@@ -55,6 +55,7 @@ Progress: [████████░░] 76%
 *Updated after each plan completion*
 | Phase 01 P07 | 2min | 1 tasks | 2 files |
 | Phase 03 P01 | 5min | 3 tasks | 5 files |
+| Phase Phase 03 PP02 | 11min | 2 tasks tasks | 6 files files |
 
 ## Accumulated Context
 
@@ -73,6 +74,10 @@ Recent decisions affecting current work:
 - [03-01] MockGameTracker exposes caught_exceptions list (vs production silent log) so tests can assert subscriber-isolation behavior explicitly
 - [03-01] All Wave 0 stubs use file-level pytest.mark.xfail + per-test pytest.xfail() body — keeps suite green during Wave 0..2 while still surfacing accidentally un-marked stubs as failures
 - [03-01] Global-hotkey stubs use pytest.importorskip('wx') so non-Windows CI collects but skips them
+- [03-02] CreateGamePacket.players widened to 5-tuple (entity_id, player_id, name, hi, lo) so engine can run FriendlyPlayerExporter heuristic without hslog import (D-10)
+- [03-02] Deferred CreateGame emission in parser — wait for hslog Player rows to complete (entity_packet moves past CreateGame block) before translating, otherwise players=()
+- [03-02] Authoritative re-bucket from _entities CONTROLLER state on friendly-player resolution flip, not blind list-swap (per 03-REVIEWS.md HIGH #2 mixed-timing)
+- [03-02] reset() clears _friendly_player_resolved + _friendly_player_id so reconnects (second CREATE_GAME) re-run heuristic against new server-assigned slot
 
 ### Pending Todos
 
@@ -93,8 +98,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-04-27T03:04:41.366Z
-Stopped at: Completed 03-01-PLAN.md
+Last session: 2026-04-27T03:22:34.668Z
+Stopped at: Completed 03-02-PLAN.md
 Resume file: None
 
 **Planned Phase:** 3 (Live Game Tracking) — 6 plans — 2026-04-27T02:52:38.709Z

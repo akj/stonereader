@@ -75,7 +75,7 @@ Plans:
 
 Plans:
 - [x] 03-01-PLAN.md — Wave 0: Test scaffolds + MockGameTracker fixture
-- [ ] 03-02-PLAN.md — Wave 1: WR-02 friendly_player resolution + 5-tuple CreateGamePacket
+- [x] 03-02-PLAN.md — Wave 1: WR-02 friendly_player resolution + 5-tuple CreateGamePacket
 - [ ] 03-03-PLAN.md — Wave 1: D-19 creation lineage + opponent_hand reconstruction
 - [ ] 03-04-PLAN.md — Wave 2: GlobalHotkeyService (wx.Frame.RegisterHotKey wrapper)
 - [ ] 03-05-PLAN.md — Wave 2: LiveGamePresenter (3 zones + auto-detection + speech)
@@ -105,5 +105,5 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4
 |-------|----------------|--------|-----------|
 | 1. Deck Management | 4/4 (+3 gap-closure: 01-05, 01-06, 01-07) | Complete (gap-closure plans merged) | 2026-04-25 |
 | 2. Log Infrastructure | 0/0 | Not started | - |
-| 3. Live Game Tracking | 1/6 | In progress | - |
+| 3. Live Game Tracking | 2/6 | In progress | - |
 | 4. Replay Viewer | 0/0 | Not started | - |
