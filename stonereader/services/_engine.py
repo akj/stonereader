@@ -439,11 +439,13 @@ class GameEngine:
             game_type=game_type_name,
             format_type=format_type_name,
         )
-        # gap-closure 03-07: hero entities for both players are typically
-        # recorded inside the CREATE_GAME block via FullEntity packets BEFORE
-        # the GameState is constructed above (every preceding _record_entity
-        # call has already populated _entities). Resolve heroes once so the
-        # initial GameState carries non-empty player_hero / opponent_hero.
+        # gap-closure 03-07 (WR-03): defensive — handles the rare case where
+        # a hero entity was recorded into _entities during the loop above
+        # (e.g. via a future hslog version that inlines hero FULL_ENTITY rows
+        # under CreateGame.entities). In the current hslog version this is a
+        # no-op because hero FullEntities arrive on subsequent apply() calls,
+        # where _record_entity re-runs _resolve_heroes (line 184). Keep the
+        # call so the rare inlined-entities path still benefits.
         self._resolve_heroes()
         self._game_started_emitted = True
         return [
