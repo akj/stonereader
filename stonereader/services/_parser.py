@@ -3,6 +3,7 @@
 The engine and tracker never import hslog. This file is the only translator
 from hslog.packets.* into our internal _packets.* types.
 """
+
 from __future__ import annotations
 
 import logging
@@ -225,7 +226,7 @@ class Parser:
                     # entity_id is on PlayerReference (Player.entity is a
                     # PlayerReference with .entity_id, not a plain int).
                     self._player_entity_id(p),
-                    getattr(p, "player_id", 0) or 0,         # player_id (PlayerID=N)
+                    getattr(p, "player_id", 0) or 0,  # player_id (PlayerID=N)
                     self._player_name(p),
                     getattr(p, "hi", 0) or 0,
                     getattr(p, "lo", 0) or 0,
@@ -322,15 +323,17 @@ class Parser:
         Player.entity is a PlayerReference (with .entity_id) when hslog
         successfully parsed an EntityID=N field; treat any other shape
         defensively and fall back to player_id.
+
+        WR-04: shares the PlayerReference / int coercion logic with
+        `_normalize_entity_id` so the two helpers cannot drift apart on
+        future hslog shape changes. `_player_entity_id` adds the
+        `player_id` fallback that `_normalize_entity_id` does not need
+        (TagChange paths have no `player_id` to fall back to).
         """
         ent = getattr(p, "entity", None)
-        if ent is None:
-            return int(getattr(p, "player_id", 0) or 0)
-        eid = getattr(ent, "entity_id", None)
-        if isinstance(eid, int):
+        eid = Parser._normalize_entity_id(ent) if ent is not None else 0
+        if eid:
             return eid
-        if isinstance(ent, int):
-            return ent
         return int(getattr(p, "player_id", 0) or 0)
 
     @staticmethod
