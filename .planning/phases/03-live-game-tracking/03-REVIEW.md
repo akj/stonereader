@@ -1,149 +1,286 @@
 ---
 phase: 03-live-game-tracking
-reviewed: 2026-04-26T00:00:00Z
+reviewed: 2026-04-29T00:00:00Z
 depth: standard
-files_reviewed: 19
+files_reviewed: 3
 files_reviewed_list:
-  - stonereader/app.py
-  - stonereader/models/game_state.py
-  - stonereader/presenters/home.py
-  - stonereader/presenters/live_game.py
   - stonereader/services/_engine.py
-  - stonereader/services/_global_hotkey.py
-  - stonereader/services/_packets.py
   - stonereader/services/_parser.py
-  - stonereader/views/_live_game_format.py
-  - stonereader/views/live_game.py
-  - tests/conftest.py
-  - tests/test_global_hotkey.py
-  - tests/test_home.py
-  - tests/test_live_game_presenter.py
-  - tests/test_navigation.py
-  - tests/test_services/test_engine.py
-  - tests/test_services/test_engine_friendly_player.py
-  - tests/test_services/test_engine_lineage.py
-  - tests/test_services/test_parser.py
+  - tests/test_services/test_engine_live_state.py
 findings:
-  critical: 0
-  warning: 2
-  info: 6
-  total: 8
+  blocker: 1
+  warning: 5
+  total: 6
 status: issues_found
 ---
 
-# Phase 3: Code Review Report
+# Phase 3 (plan 03-07): Code Review Report
 
-**Reviewed:** 2026-04-26
+**Reviewed:** 2026-04-29
 **Depth:** standard
-**Files Reviewed:** 19
+**Files Reviewed:** 3
 **Status:** issues_found
+**Scope note:** This review supersedes routing decisions for plan 03-07 changes
+only. Findings unrelated to the 03-07 diff (e.g., the pre-existing
+`_handle_playstate` `eid == self._friendly_player_id` entity-id-vs-player-id
+mismatch on `_engine.py:568,573` carried over from `e953836`) are out of scope
+and not re-flagged here.
 
 ## Summary
 
-Phase 3 (`live-game-tracking`) implements the GlobalHotkeyService Win32 wrapper, the four-zone LiveGamePresenter, the passive LiveGamePanel view, the engine improvements (WR-02 friendly_player resolution, D-19 creation lineage, and opponent_hand reconstruction), plus the home-menu and `app.py` wiring. The implementation follows the documented invariants well:
+Plan 03-07 closes the engine-publication gap surfaced by UAT: heroes,
+RESOURCES/RESOURCES_USED, friendly-deck rebuild, and per-controller deck counts
+were never reflected on `engine.current_state`. The fix has the right shape
+— `_resolve_heroes` runs at CREATE_GAME and on every late-arriving HERO entity;
+RESOURCES branches share the player-entity row; `_refresh_state` rebuilds
+`player_deck` from authoritative ZONE==DECK entries — and the captured-fixture
+test added in `test_engine_live_state.py` is a strong regression gate.
 
-- **MVP discipline:** confirmed — `views/live_game.py` does not import `SpeechService` and only consumes public presenter accessors (`current_title`, `cursor_for_zone`, `current_mana_summary`, `get_zone_items`).
-- **Frozen-dataclass discipline:** all state mutations in `_engine.py` go through `dataclasses.replace`; `GameEntity` / `GameState` / `Hero` / `PlayedCard` are all `@dataclass(frozen=True)`.
-- **Engine boundary:** `services/_engine.py` does not import `hslog` (only `hearthstone.enums` for the public enum values, which is a separate library and is allowed).
-- **Wx-free presenter:** `presenters/live_game.py` does not import `wx`.
-- **D-07 invariant:** `LiveGamePresenter._on_game_event` does not call `self._speech.speak`; speech only happens via user-driven entrypoints.
-- **Cleanup ordering:** `MainWindow._on_close` wraps every step in its own `try/except`, exactly matching the test contract in `test_close_continues_on_failure`.
-- **Hotkey isolation:** `GlobalHotkeyService._on_hotkey` catches and logs callback exceptions, isolating one bad chord from the others (Pitfall 3 / `test_callback_exception_isolation`).
-- **Sticky lineage:** `_record_entity` sets `creation_lineage` only when the key is absent (`"creation_lineage" not in ent`), so subsequent `TAG_CHANGE` / `SHOW_ENTITY` cannot overwrite it (covered by `test_show_entity_after_lineage`).
+However, the changes introduce one BLOCKER (heroes are NOT rebucketed when the
+multiplayer SHOW_ENTITY-into-HAND fallback flips `_friendly_player_id`),
+plus several WARNINGs around partial rebucket coverage, false-zero clamping in
+the hero HEALTH/ARMOR fallback, sequencing of hero resolution before
+friendly-player resolution, the parser's continued use of hslog private state,
+and direct private-state coupling in the new captured-fixture tests.
 
-Two warnings were found, both in the global-hotkey integration in `app.py`. Six info-level items document smaller improvements.
+## Blockers
+
+### BL-01: Heroes are never re-attributed when the multiplayer fallback flips `_friendly_player_id`
+
+**File:** `stonereader/services/_engine.py:271-295` (fallback) and
+`stonereader/services/_engine.py:195-239` (`_resolve_heroes`)
+**Issue:** In a multiplayer (PvP) game where both players have `lo != 0`,
+`_resolve_friendly_player_ai_heuristic` cannot disambiguate at CREATE_GAME, so
+`_friendly_player_resolved` stays False and `_friendly_player_id` keeps the
+default `1`. Any HERO entity recorded via `FULL_ENTITY` between CREATE_GAME and
+the first `SHOW_ENTITY` into HAND triggers `_resolve_heroes` (via
+`_record_entity` line 183-184), which classifies the heroes against the
+*default* `_friendly_player_id == 1`. When the friendly is actually player 2,
+`new_player_hero` and `new_opponent_hero` get swapped on the published
+GameState.
+
+When the SHOW_ENTITY-into-HAND fallback subsequently fires
+(`_resolve_friendly_player_show_entity_fallback`), it flips
+`_friendly_player_id` and calls `_rebucket_from_entities`. That helper only
+rebuckets `_player_drawn` / `_opponent_drawn` / `_player_played` /
+`_opponent_played` — it does **not** re-resolve heroes, RESOURCES-derived mana
+fields, or the deck rebuild in `_refresh_state`. Result: in PvP captures, the
+LiveGame panel announces the OPPONENT'S hero class as the user's hero (and vice
+versa) for the rest of the match, even though `_rebucket_from_entities`
+appears to "fix everything."
+
+This is data-integrity-level wrong (LIVE-08 hero-class announcement) and is not
+covered by the captured fixtures (the four `tests/fixtures/log/*.log`
+fixtures appear to be vs-AI captures, where the AI heuristic resolves friendly
+at CREATE_GAME and the codepath is never exercised).
+
+**Fix:** Have `_rebucket_from_entities` (or the fallback resolver itself) call
+`_resolve_heroes` and re-run the RESOURCES classification after flipping
+`_friendly_player_id`. Concretely, in `_rebucket_from_entities`:
+
+```python
+def _rebucket_from_entities(self) -> None:
+    # ...existing drawn/played rebucket...
+    self._player_played = new_player_played
+    self._opponent_played = new_opponent_played
+
+    # gap-closure 03-07 follow-up: heroes were classified at FULL_ENTITY/
+    # CREATE_GAME time using the previous _friendly_player_id. Re-run the
+    # full hero pass so player_hero / opponent_hero swap when friendly
+    # flips from default 1 → real friendly player_id (multiplayer path).
+    self._resolve_heroes()
+
+    # RESOURCES rows on the player entities still carry the correct
+    # PLAYER_ID, so re-derive mana for both sides from authoritative state.
+    self._reapply_mana_from_entities()
+
+    self._refresh_state()
+```
+
+Add a captured-fixture test using a PvP log (or a synthetic one with both
+players' `lo != 0`) that asserts `state.player_hero.hero_class` is the friendly
+class after the fallback resolves. Without that test, this regression class
+will recur on the next refactor.
 
 ## Warnings
 
-### WR-01: Global hotkey re-entry duplicates the navigation stack entry for "Live Game"
+### WR-01: RESOURCES/RESOURCES_USED updates pre-fallback-resolution stick to the wrong side
 
-**File:** `stonereader/app.py:542-548`
-**Issue:** Both `_open_remaining_deck` and `_open_opponent_hand` call `nav.show_panel("Live Game")` unconditionally before `live_presenter.jump_to_zone(...)`. `NavigationController.show_panel` always appends the panel name to `_stack` for non-transient panels (lines 90-91), with no guard for "already visible." Pressing a global hotkey while the Live Game panel is already on screen therefore appends a second `"Live Game"` entry to the stack on every press. After N presses the stack contains N+1 copies of `"Live Game"`, and the user has to press Escape/Back N times to return to Home. This affects the LIVE-09 hotkey contract because the same chord is documented as both "open the panel" and "jump to a zone within it."
+**File:** `stonereader/services/_engine.py:454-484` (RESOURCES branch) and
+`stonereader/services/_engine.py:297-341` (`_rebucket_from_entities`)
+**Issue:** Same root cause as BL-01 but for mana. Any RESOURCES /
+RESOURCES_USED TAG_CHANGE that arrives BEFORE the SHOW_ENTITY-into-HAND
+fallback resolves friendly_player_id is classified using the default
+`_friendly_player_id == 1`, so the mana update may write to
+`player_mana`/`player_max_mana` when it should have written to
+`opponent_mana`/`opponent_max_mana`. `_rebucket_from_entities` does not replay
+the mana derivation, so the stale field values persist.
 
-**Fix:** Either (a) make `show_panel` idempotent for the currently-visible panel:
+In practice the fallback usually fires before significant turn-1
+RESOURCES_USED activity (mulligan happens before turn 1), so this is
+narrower than the hero issue — but the failure mode is identical and any test
+that races a RESOURCES update before the first opponent SHOW_ENTITY-into-HAND
+will see swapped mana for one snapshot.
+
+**Fix:** Add a `_reapply_mana_from_entities()` helper invoked from
+`_rebucket_from_entities`:
 
 ```python
-def show_panel(self, name: str) -> None:
-    if self._current_visible == name:
-        # Already visible — re-activate keymap + focus, but do not stack-push.
-        self._activate_keymap_and_focus(name)
+def _reapply_mana_from_entities(self) -> None:
+    if self._current_state is None:
         return
-    ...existing body...
+    replacements = {}
+    for ent in self._entities.values():
+        player_id = ent.get("PLAYER_ID")
+        if player_id is None:
+            continue
+        resources = ent.get("RESOURCES", 0) or 0
+        resources_used = ent.get("RESOURCES_USED", 0) or 0
+        mana = max(0, resources - resources_used)
+        if int(player_id) == self._friendly_player_id:
+            replacements["player_mana"] = mana
+            replacements["player_max_mana"] = resources
+        else:
+            replacements["opponent_mana"] = mana
+            replacements["opponent_max_mana"] = resources
+    if replacements:
+        self._current_state = dataclasses.replace(
+            self._current_state, **replacements
+        )
 ```
 
-or (b) guard at the hotkey callsite:
+### WR-02: `_resolve_heroes` clamps HEALTH/ARMOR with `or 30` / `or 0`, masking real zero values
+
+**File:** `stonereader/services/_engine.py:223-224`
+**Issue:** Lines 223-224 compute the Hero fields as
 
 ```python
-def _open_remaining_deck() -> None:
-    if nav.current_panel_name != "Live Game":
-        nav.show_panel("Live Game")
-    live_presenter.jump_to_zone("remaining_deck")
+health=ent.get("HEALTH", 30) or 30,
+armor=ent.get("ARMOR", 0) or 0,
 ```
 
-Option (a) is preferable because it also fixes the equivalent footgun for any future hotkey or programmatic navigation.
-
-### WR-02: `LiveGamePresenter.jump_to_zone` skips `_detail_cursor` and `_orienting_counts` reset
-
-**File:** `stonereader/presenters/live_game.py:317-329`
-**Issue:** `jump_to_zone` is the dedicated entrypoint for global hotkeys and the home-menu transition into the Live Game panel. It mutates `self._current_zone` directly and re-clamps the cursor, but it does NOT reset `self._detail_cursor` or `self._orienting_counts` the way `ZoneNavigationMixin.navigate_to_zone` does (`base.py:65-66`). Consequences:
-1. If the user previously read several detail lines (Down arrow) on a different zone, then triggers a global hotkey (or returns from another panel via the home menu), the next Down/Up press starts from a stale `_detail_cursor` index instead of from line 0 of the newly-focused row.
-2. Diminishing-orienting-message counts (`handle_inapplicable_zone`) carry over across zone switches even though the contract is "reset on zone change" (per CLAUDE.md "Diminishing messages" pattern).
-
-**Fix:** Mirror the reset that `navigate_to_zone` performs:
+The `or 30` / `or 0` form short-circuits when the tag is present but falsy (0).
+For `HEALTH=0` this overrides a legitimate value with 30 and hides a hero
+that has been read at 0 health (e.g., late SHOW_ENTITY rebroadcast that
+includes `HEALTH=0` after lethal). For `armor`, `0 or 0` is always 0, so the
+expression is harmless but obscures intent. Use `if ... is None` instead of
+the short-circuit so a zero in the log is preserved:
 
 ```python
-def jump_to_zone(self, zone_name: str) -> None:
-    label = _ZONE_LABELS.get(zone_name, zone_name)
-    items = self.get_zone_items(zone_name)
-    self._current_zone = zone_name
-    self._detail_cursor = 0
-    self._orienting_counts.clear()
-    if not items:
-        self._speech.speak(f"{label}: empty")
-        return
-    ...rest unchanged...
+health_raw = ent.get("HEALTH")
+health = 30 if health_raw is None else int(health_raw)
+armor_raw = ent.get("ARMOR")
+armor = 0 if armor_raw is None else int(armor_raw)
+hero = Hero(
+    id=card.id,
+    name=card.name,
+    health=health,
+    armor=armor,
+    hero_power="",
+    hero_class=card.card_class,
+)
 ```
 
-## Info
+Same pattern recurs throughout `_refresh_state` (lines 701-705, 726-730 — the
+`ent.get("ATK", 0) or 0` and `ent.get("HEALTH", 0) or 0` forms — but those
+were not introduced by 03-07 and are out of scope here).
 
-### IN-01: `app.py` reaches into `nav._panels` directly
+### WR-03: `_resolve_heroes` ordering during CREATE_GAME ignores future late-arriving FULL_ENTITY hero packets without card_id resolution
 
-**File:** `stonereader/app.py:324`
-**Issue:** Inside `_check_clipboard_for_deckstring`, the code does `import_panel = self._nav._panels.get("Import Deck")` — direct access to a private attribute of `NavigationController`. The rest of `app.py` accesses panels through public methods (`get_presenter`, `current_panel_name`). This is a small encapsulation breach with no functional impact today, but it makes future refactors of `NavigationController._panels` (e.g., swapping the dict for a registry object) silently break this callsite.
-**Fix:** Add a public accessor on `NavigationController`, e.g. `get_panel(name) -> wx.Panel | None`, and call `self._nav.get_panel("Import Deck")` here.
+**File:** `stonereader/services/_engine.py:386-393`
+**Issue:** `_on_create_game` calls `_resolve_heroes` at line 393 — but only
+records the GameEntity and player rows beforehand (lines 356-360). Hero
+entities arrive as `FullEntity` packets *after* CREATE_GAME's own packet block
+in the log; those FullEntities are emitted to the engine on subsequent
+`apply()` calls, where each one's `_record_entity` re-invokes
+`_resolve_heroes` (line 184). So the line 393 call usually finds zero
+HERO entities in `_entities` and is a no-op — the work is done later when the
+FullEntity for the hero card is consumed.
 
-### IN-02: `_on_show_entity` recomputes lineage with stale `_friendly_player_id` before fallback resolution
+That's correct behavior, but the comment on lines 388-392 ("hero entities for
+both players are typically recorded inside the CREATE_GAME block via
+FullEntity packets BEFORE the GameState is constructed above") is misleading:
+each FullEntity is a separate top-level hslog packet that arrives in a separate
+`apply()` call, not a sub-row appended inside the CreateGame packet. The first
+call to `_resolve_heroes` at line 393 is therefore typically a no-op, and the
+real resolution happens via `_record_entity` after CREATE_GAME returns.
 
-**File:** `stonereader/services/_engine.py:526-548`
-**Issue:** `_on_show_entity` calls `self._record_entity(...)` BEFORE `self._resolve_friendly_player_show_entity_fallback(p)`. `_record_entity` reads `self._friendly_player_id` to decide whether to assign `creation_lineage`. In the rare case that a SHOW_ENTITY into HAND is what triggers the multiplayer fallback (flipping friendly from default 1 to 2), the lineage check inside `_record_entity` ran with the stale value. In practice this is harmless because the fallback's triggering reveal happens during the friendly mulligan reveal (which is not inside a POWER block), so the lineage condition `self._block_stack and self._block_stack[-1] == "POWER"` is False anyway. But the order is a subtle hazard if a future log scenario combines the two.
-**Fix:** Either (a) document the ordering invariant in a comment ("`_record_entity` runs before fallback resolution; the lineage check tolerates stale friendly_id because POWER blocks are not open during mulligan reveals"), or (b) flip the order so fallback resolution happens first.
+This is not a correctness bug — `_resolve_heroes` is idempotent — but the
+misleading comment will lead future readers to delete the line-393 call as
+"clearly redundant," which would break the case where hero entities ARE
+included in CREATE_GAME's `initial_tags` parse path (rare, but conceivable).
 
-### IN-03: Direct private-state access to `presenter._current_zone` in `tests/test_live_game_presenter.py`
+**Fix:** Either remove the line-393 call (it's a no-op in practice and
+`_record_entity` handles every real case), or update the comment:
 
-**File:** `tests/test_live_game_presenter.py:756-762`
-**Issue:** `test_number_key_zone_switching` reads `presenter._current_zone` to verify the number-key keymap fires the right zone. The rest of the suite uses public accessors (per 03-REVIEWS.md HIGH #3) and a couple of tests explicitly note when they "do read internal state." This test does not have a similar comment, which makes future `_current_zone` rename/refactor risky.
-**Fix:** Either (a) add a comment matching the style in `test_detection_resets_per_game` ("This is one of the rare tests that DOES read internal state...") or (b) add a public accessor `current_zone() -> str` on the presenter and use it here.
+```python
+# gap-closure 03-07: defensive — handles the rare case where a hero
+# entity was recorded into _entities during the loop above (e.g. via a
+# future hslog version that inlines hero FULL_ENTITY rows under
+# CreateGame.entities). In the current hslog version this is a no-op
+# because hero FullEntities arrive on subsequent apply() calls, where
+# _record_entity re-runs _resolve_heroes.
+self._resolve_heroes()
+```
 
-### IN-04: `_walk` creates a `list(hslog_pkts)` on every recursion
+### WR-04: `_normalize_entity_id` duplicates `_player_entity_id` logic, drifting on PlayerReference handling
 
-**File:** `stonereader/services/_parser.py:110-111`
-**Issue:** `_walk` calls `list(hslog_pkts)` for every block recursion to compute `is_last`. This is O(n) per recursion and is invoked on every `feed_line` call (which can be every Power.log line). For deep block trees this adds avoidable allocation per parse cycle. It is not currently a performance issue (the wider `test_tick_under_50ms` budget passes), but is something to be aware of if Power.log line throughput grows.
-**Fix:** Track `is_last` via reverse iteration or by capturing `len(pkts_list) - 1` once and indexing — `pkts_list` is already materialised, so the cost is the materialisation, not the index. The current code is acceptable for v1; consider revisiting if the per-tick budget tightens.
+**File:** `stonereader/services/_parser.py:289-309` and
+`stonereader/services/_parser.py:319-334`
+**Issue:** `_normalize_entity_id` (new, line 289-309) and `_player_entity_id`
+(pre-existing, line 319-334) both coerce a possibly-PlayerReference value to a
+plain int. They are nearly identical except `_player_entity_id` falls back to
+`p.player_id` while `_normalize_entity_id` falls back to `int(entity)` then
+`0`. CreateGame translation uses `_player_entity_id` (line 227) and then
+populates a tuple where the same row's `player_id` is the second column — a
+future refactor that consolidates these two helpers risks flipping the
+fallback semantics and silently making `_entities` keying inconsistent between
+CREATE_GAME and TAG_CHANGE.
 
-### IN-05: `Parser` uses `self._hslog._parsing_state` (hslog private API)
+**Fix:** Have `_player_entity_id` delegate to `_normalize_entity_id` and only
+fall back to `p.player_id` if normalization yields 0:
 
-**File:** `stonereader/services/_parser.py:96, 157`
-**Issue:** Both `_collect_new_packets` and `_create_game_still_building` reach into `self._hslog._parsing_state`, which is a private hslog attribute. The code defensively wraps the access in `try/except AttributeError`, but the silent "soft-fail" path (`return []` / `return False`) means a hslog version bump that renames or removes `_parsing_state` will manifest as "engine seems to ignore packets" rather than a loud failure.
-**Fix:** Pin the supported hslog version range in `pyproject.toml` more narrowly (e.g., `hslog>=9.17.0,<10.0`) and add a startup-time sanity check that logs a WARNING if `_parsing_state` is missing on the underlying parser.
+```python
+@staticmethod
+def _player_entity_id(p: Any) -> int:
+    ent = getattr(p, "entity", None)
+    eid = Parser._normalize_entity_id(ent) if ent is not None else 0
+    if eid:
+        return eid
+    return int(getattr(p, "player_id", 0) or 0)
+```
 
-### IN-06: `_run_auto_detection` sums `revealed.values()` after the caller already enforced 30
+### WR-05: Captured-fixture tests reach into engine private state (`_entities`, `_friendly_player_id`)
 
-**File:** `stonereader/presenters/live_game.py:144-149`
-**Issue:** `_on_game_event` already enforces `revealed_count >= 30` (line 137) before calling `_run_auto_detection`. Inside the method, line 148 re-checks `if sum(revealed.values()) != 30: return`. The two counts can disagree if `state.player_deck` contains entities with the same `card_id` filtered differently, but in practice both walks filter the same way (skip empty `card_id`). The defensive double-check is harmless but obscures intent.
-**Fix:** Either drop the inner check (rely on the caller's guard) or replace it with an `assert` that documents the invariant. If you keep the check, change `>=` to `==` on the caller side or add a comment explaining why "revealed >= 30" can produce "values sum != 30" (e.g., reshuffle-into-deck increases `player_deck` past 30).
+**File:** `tests/test_services/test_engine_live_state.py:88, 178-187`
+**Issue:** Two tests read engine-internal state directly:
+- Line 88: `e.controller == engine._friendly_player_id` in
+  `test_player_deck_rebuilt_from_entities`
+- Line 178-187: iterates `engine._entities.values()` to compute the
+  expected per-controller ZONE==DECK count in `test_deck_counts_track_zone`,
+  using the same private `_friendly_player_id`
+
+This is the same coupling pattern flagged as IN-03 in the prior review (direct
+private state access in tests). For the new tests it's worse because
+`_entities` is the engine's primary internal data structure: any future
+refactor that moves bookkeeping out of a `Dict[int, dict]` (e.g., into a
+typed `EntityRecord` class) will break these tests for reasons unrelated to
+the contract being verified.
+
+**Fix:** Either (a) add a public, test-only readonly accessor on the engine —
+e.g., `engine.snapshot_for_test()` returning a copy or a typed view — and
+have the tests use it; or (b) drop the cross-check against `_entities` in
+`test_deck_counts_track_zone` and rely on the existing assertion that
+`state.player_deck_count > 0` plus the bound `<= 60` (the equality check
+against `_entities` adds little signal beyond the published-state assertions
+and tightly couples the test to internal storage).
+
+If retaining the private-state checks, add an explicit comment matching the
+"this is one of the rare tests that DOES read internal state" style flagged in
+the prior review's IN-03, so future readers know the coupling is intentional.
 
 ---
 
-_Reviewed: 2026-04-26_
+_Reviewed: 2026-04-29_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
