@@ -219,11 +219,18 @@ class GameEngine:
             card = self._lookup_card(card_id)
             if card is None:
                 continue
+            # WR-02: use `is None` rather than `or` so a legitimate HEALTH=0
+            # in the log (e.g. SHOW_ENTITY rebroadcast after lethal) is
+            # preserved instead of being clamped back to 30.
+            health_raw = ent.get("HEALTH")
+            health = 30 if health_raw is None else int(health_raw)
+            armor_raw = ent.get("ARMOR")
+            armor = 0 if armor_raw is None else int(armor_raw)
             hero = Hero(
                 id=card.id,
                 name=card.name,
-                health=ent.get("HEALTH", 30) or 30,
-                armor=ent.get("ARMOR", 0) or 0,
+                health=health,
+                armor=armor,
                 hero_power="",
                 hero_class=card.card_class,
             )
