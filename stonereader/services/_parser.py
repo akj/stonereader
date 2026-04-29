@@ -126,6 +126,27 @@ class Parser:
                 if self._create_game_still_building(hp):
                     self._pending_create_game_pyid = pyid
                     continue
+            # gap-closure 03-07 (Rule 3): same defer pattern for FullEntity,
+            # ShowEntity, and ChangeEntity. hslog appends `tag=...` rows to
+            # the in-progress entity packet on subsequent lines, so emitting
+            # on first sight produced an empty tags dict — silently swallowing
+            # ZONE / CONTROLLER / CARDTYPE / HEALTH / etc. The captured-fixture
+            # integration test in tests/test_services/test_engine_live_state.py
+            # surfaces this; engine_live_state's hero / deck / mana assertions
+            # cannot pass while the engine never sees any of these tags.
+            if (
+                is_last
+                and isinstance(
+                    hp,
+                    (
+                        hslog_packets.FullEntity,
+                        hslog_packets.ShowEntity,
+                        hslog_packets.ChangeEntity,
+                    ),
+                )
+                and self._entity_packet_still_building(hp)
+            ):
+                continue
             self._seen_ids.add(pyid)
             if pyid == self._pending_create_game_pyid:
                 self._pending_create_game_pyid = None
@@ -141,9 +162,27 @@ class Parser:
                         BlockEndPacket(
                             packet_id=self._next_id(),
                             block_type=self._block_type_name(hp),
-                            entity_id=getattr(hp, "entity", 0) or 0,
+                            entity_id=self._normalize_entity_id(
+                                getattr(hp, "entity", 0)
+                            ),
                         )
                     )
+
+    def _entity_packet_still_building(self, hp: Any) -> bool:
+        """True if hslog's parser is still appending tag rows to this packet.
+
+        hslog tracks the currently-being-built entity packet via
+        ``_parsing_state.entity_packet``. While the packet is the active
+        target, more `tag=...` rows may be appended on subsequent lines.
+        Once a new packet starts (or hslog moves into a different parsing
+        target), the entity packet is stable and safe to translate.
+        """
+        try:
+            state = self._hslog._parsing_state
+            entity_packet = getattr(state, "entity_packet", None)
+        except AttributeError:
+            return False
+        return entity_packet is hp
 
     def _create_game_still_building(self, hp: Any) -> bool:
         """True if hslog is still appending Player rows to this CreateGame.
@@ -195,14 +234,14 @@ class Parser:
             )
             return CreateGamePacket(
                 packet_id=self._next_id(),
-                game_entity_id=getattr(hp, "entity", 0) or 0,
+                game_entity_id=self._normalize_entity_id(getattr(hp, "entity", 0)),
                 players=players,
                 initial_tags=self._tags_to_dict(getattr(hp, "tags", None)),
             )
         if isinstance(hp, hslog_packets.TagChange):
             return TagChangePacket(
                 packet_id=self._next_id(),
-                entity_id=getattr(hp, "entity", 0) or 0,
+                entity_id=self._normalize_entity_id(getattr(hp, "entity", 0)),
                 tag=self._tag_name(getattr(hp, "tag", "")),
                 value=self._enum_to_int(getattr(hp, "value", 0)),
                 source_id=getattr(hp, "source", None),
@@ -211,7 +250,7 @@ class Parser:
             return BlockStartPacket(
                 packet_id=self._next_id(),
                 block_type=self._block_type_name(hp),
-                entity_id=getattr(hp, "entity", 0) or 0,
+                entity_id=self._normalize_entity_id(getattr(hp, "entity", 0)),
                 # Block uses .target (not .target_id) and .suboption (not .sub_option)
                 target_id=getattr(hp, "target", None),
                 sub_option=getattr(hp, "suboption", None),
@@ -219,33 +258,55 @@ class Parser:
         if isinstance(hp, hslog_packets.FullEntity):
             return FullEntityPacket(
                 packet_id=self._next_id(),
-                entity_id=getattr(hp, "entity", 0) or 0,
+                entity_id=self._normalize_entity_id(getattr(hp, "entity", 0)),
                 card_id=str(getattr(hp, "card_id", "") or ""),
                 tags=self._tags_to_dict(getattr(hp, "tags", None)),
             )
         if isinstance(hp, hslog_packets.ShowEntity):
             return ShowEntityPacket(
                 packet_id=self._next_id(),
-                entity_id=getattr(hp, "entity", 0) or 0,
+                entity_id=self._normalize_entity_id(getattr(hp, "entity", 0)),
                 card_id=str(getattr(hp, "card_id", "") or ""),
                 tags=self._tags_to_dict(getattr(hp, "tags", None)),
             )
         if isinstance(hp, hslog_packets.HideEntity):
             return HideEntityPacket(
                 packet_id=self._next_id(),
-                entity_id=getattr(hp, "entity", 0) or 0,
+                entity_id=self._normalize_entity_id(getattr(hp, "entity", 0)),
                 # zone may be a Zone enum or an int
                 zone=self._enum_to_int(getattr(hp, "zone", 0)),
             )
         if isinstance(hp, hslog_packets.ChangeEntity):
             return ChangeEntityPacket(
                 packet_id=self._next_id(),
-                entity_id=getattr(hp, "entity", 0) or 0,
+                entity_id=self._normalize_entity_id(getattr(hp, "entity", 0)),
                 card_id=str(getattr(hp, "card_id", "") or ""),
                 tags=self._tags_to_dict(getattr(hp, "tags", None)),
             )
         # MetaData, Choices, ResetGame — not consumed by engine in v1
         return None
+
+    @staticmethod
+    def _normalize_entity_id(entity: Any) -> int:
+        """Coerce hslog's `entity` (int or PlayerReference) to a plain int.
+
+        gap-closure 03-07 (Rule 3): hslog emits TAG_CHANGE on player entities
+        with `entity` set to a PlayerReference (not an int). The engine keys
+        `_entities` by integer entity_id, so without normalization the player
+        entity rows recorded under int 2/3 (from CreateGame) never match the
+        TagChange lookups for RESOURCES, RESOURCES_USED, MAXRESOURCES, etc.
+        """
+        if entity is None:
+            return 0
+        if isinstance(entity, int):
+            return entity
+        eid = getattr(entity, "entity_id", None)
+        if isinstance(eid, int):
+            return eid
+        try:
+            return int(entity)
+        except (TypeError, ValueError):
+            return 0
 
     @staticmethod
     def _tag_name(tag: Any) -> str:
