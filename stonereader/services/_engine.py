@@ -7,7 +7,7 @@ import logging
 import time
 from typing import Any, Callable, Dict, List, Optional
 
-from hearthstone.enums import FormatType, GameType, Zone
+from hearthstone.enums import CardType, FormatType, GameType, Zone
 
 from stonereader.models.card import Card, CardDatabase
 from stonereader.models.game_state import GameEntity, GameState, Hero, PlayedCard
@@ -176,6 +176,12 @@ class GameEngine:
         # invoke unconditionally for every record. Existing zone-change events
         # already call _refresh_state from _handle_zone_change.
         self._refresh_state()
+        # gap-closure 03-07: late-arriving FullEntity packets for hero entities
+        # (FULL_ENTITY may bring CARDTYPE/CONTROLLER after CREATE_GAME's initial
+        # placeholder Hero is published). Cheap CARDTYPE guard avoids running
+        # the hero loop for every minion record.
+        if ent.get("CARDTYPE") == int(CardType.HERO):
+            self._resolve_heroes()
 
     def _lookup_card(self, card_id: str) -> Optional[Card]:
         if not card_id or self._card_db is None:
@@ -184,6 +190,53 @@ class GameEngine:
             return self._card_db.get_card_by_id(card_id)
         except Exception:
             return None
+
+    # ----------------------------------------------------------------- hero resolution (gap-closure 03-07)
+    def _resolve_heroes(self) -> None:
+        """Refine player_hero / opponent_hero from CARDTYPE==HERO entities.
+
+        Iterates self._entities for hero entities, looks up the hero Card
+        via card_db, and replaces the empty placeholder Hero on the
+        published state with a real Hero (id, name, hero_class).
+
+        Idempotent — safe to call multiple times. When card_id is unknown
+        or card_db is None, the hero entity is skipped and we'll re-resolve
+        on the next packet that fills in card_id (typically SHOW_ENTITY).
+        """
+        if self._current_state is None:
+            return
+        new_player_hero: Optional[Hero] = None
+        new_opponent_hero: Optional[Hero] = None
+        for ent in self._entities.values():
+            if ent.get("CARDTYPE") != int(CardType.HERO):
+                continue
+            controller = ent.get("CONTROLLER")
+            if controller is None:
+                continue
+            card_id = ent.get("card_id", "") or ""
+            card = self._lookup_card(card_id)
+            if card is None:
+                continue
+            hero = Hero(
+                id=card.id,
+                name=card.name,
+                health=ent.get("HEALTH", 30) or 30,
+                armor=ent.get("ARMOR", 0) or 0,
+                hero_power="",
+                hero_class=card.card_class,
+            )
+            if int(controller) == self._friendly_player_id:
+                new_player_hero = hero
+            else:
+                new_opponent_hero = hero
+        if new_player_hero is None and new_opponent_hero is None:
+            return
+        replacements: Dict[str, Any] = {}
+        if new_player_hero is not None:
+            replacements["player_hero"] = new_player_hero
+        if new_opponent_hero is not None:
+            replacements["opponent_hero"] = new_opponent_hero
+        self._current_state = dataclasses.replace(self._current_state, **replacements)
 
     @staticmethod
     def _enum_name(enum_cls: Any, value: int) -> str:
@@ -332,6 +385,12 @@ class GameEngine:
             game_type=game_type_name,
             format_type=format_type_name,
         )
+        # gap-closure 03-07: hero entities for both players are typically
+        # recorded inside the CREATE_GAME block via FullEntity packets BEFORE
+        # the GameState is constructed above (every preceding _record_entity
+        # call has already populated _entities). Resolve heroes once so the
+        # initial GameState carries non-empty player_hero / opponent_hero.
+        self._resolve_heroes()
         self._game_started_emitted = True
         return [
             GameStarted(
@@ -392,6 +451,36 @@ class GameEngine:
                 events.append(
                     MulliganDone(timestamp=self._now(), turn=self._current_turn())
                 )
+        elif (
+            p.tag in ("RESOURCES", "RESOURCES_USED")
+            and self._current_state is not None
+        ):
+            # gap-closure 03-07: RESOURCES is the per-turn max mana the player
+            # has access to (Hearthstone displays this as "Y" in the X/Y mana
+            # crystal HUD); RESOURCES_USED is what was spent this turn. The
+            # rendered mana value is RESOURCES - RESOURCES_USED, clamped at 0.
+            #
+            # Tag attaches to the player entity, so PLAYER_ID on the same
+            # entity row identifies which side to update. setdefault above
+            # has already written p.value to ent[p.tag], so re-reading the
+            # complementary tag from _entities is safe.
+            player_id = ent.get("PLAYER_ID")
+            if player_id is not None:
+                resources = ent.get("RESOURCES", 0) or 0
+                resources_used = ent.get("RESOURCES_USED", 0) or 0
+                mana = max(0, resources - resources_used)
+                if int(player_id) == self._friendly_player_id:
+                    self._current_state = dataclasses.replace(
+                        self._current_state,
+                        player_mana=mana,
+                        player_max_mana=resources,
+                    )
+                else:
+                    self._current_state = dataclasses.replace(
+                        self._current_state,
+                        opponent_mana=mana,
+                        opponent_max_mana=resources,
+                    )
         return events
 
     def _handle_zone_change(
@@ -527,6 +616,12 @@ class GameEngine:
         ent = self._entities.get(p.entity_id, {})
         previously_hidden = not ent.get("card_id")
         self._record_entity(p.entity_id, p.card_id, p.tags)
+        # gap-closure 03-07: SHOW_ENTITY may reveal a hero card_id that was
+        # missing on initial CREATE_GAME. Re-resolve heroes BEFORE the
+        # friendly-player fallback so the early-return path on previously
+        # hidden cards still benefits from hero resolution.
+        if self._entities.get(p.entity_id, {}).get("CARDTYPE") == int(CardType.HERO):
+            self._resolve_heroes()
         # WR-02: SHOW_ENTITY-into-HAND fallback (multiplayer games where both
         # players have lo != 0 and the AI heuristic at CREATE_GAME could not
         # disambiguate).
@@ -566,39 +661,80 @@ class GameEngine:
         the dict (keyed by entity_id) implicitly dedupes — there is exactly
         one bookkeeping entry per entity, so duplicate hand entries are
         impossible by construction.
+
+        Gap-closure 03-07: also rebuilds player_deck (live remaining-deck
+        for the friendly player) and derives player_deck_count /
+        opponent_deck_count from per-controller ZONE==DECK counts. NUM_CARDS
+        _IN_DECK is NOT exposed as a GameTag in hearthstone.enums, so the
+        count must be computed here.
         """
         if self._current_state is None:
             return
         opponent_hand_entities: List[GameEntity] = []
+        player_deck_entities: List[GameEntity] = []
+        player_deck_count = 0
+        opponent_deck_count = 0
+        deck_zone = int(Zone.DECK)
+        hand_zone = int(Zone.HAND)
         for eid, ent in self._entities.items():
             zone = ent.get("ZONE")
             controller = ent.get("CONTROLLER")
-            if zone != int(Zone.HAND):
+            if controller is None:
                 continue
-            if controller is None or controller == self._friendly_player_id:
+            controller_int = int(controller)
+            if zone == deck_zone:
+                if controller_int == self._friendly_player_id:
+                    player_deck_count += 1
+                    card_id = ent.get("card_id", "") or ""
+                    base = self._lookup_card(card_id) if card_id else None
+                    drawn_turn_raw = ent.get("drawn_turn", -1)
+                    drawn_turn = (
+                        drawn_turn_raw if isinstance(drawn_turn_raw, int) else -1
+                    )
+                    player_deck_entities.append(
+                        GameEntity(
+                            entity_id=eid,
+                            card_id=card_id,
+                            base_card=base,
+                            name=base.name if base else "",
+                            cost=base.cost if base else 0,
+                            current_attack=ent.get("ATK", 0) or 0,
+                            current_health=ent.get("HEALTH", 0) or 0,
+                            card_type=base.card_type if base else "",
+                            zone="DECK",
+                            zone_position=ent.get("ZONE_POSITION", 0) or 0,
+                            controller=controller_int,
+                            drawn_turn=drawn_turn,
+                            creation_lineage=ent.get("creation_lineage", "") or "",
+                        )
+                    )
+                else:
+                    opponent_deck_count += 1
                 continue
-            card_id = ent.get("card_id", "") or ""
-            base = self._lookup_card(card_id) if card_id else None
-            drawn_turn_raw = ent.get("drawn_turn", -1)
-            drawn_turn = drawn_turn_raw if isinstance(drawn_turn_raw, int) else -1
-            opponent_hand_entities.append(
-                GameEntity(
-                    entity_id=eid,
-                    card_id=card_id,
-                    base_card=base,
-                    name=base.name if base else "",
-                    cost=base.cost if base else 0,
-                    current_attack=ent.get("ATK", 0) or 0,
-                    current_health=ent.get("HEALTH", 0) or 0,
-                    card_type=base.card_type if base else "",
-                    zone="HAND",
-                    zone_position=ent.get("ZONE_POSITION", 0) or 0,
-                    controller=int(controller),
-                    drawn_turn=drawn_turn,
-                    creation_lineage=ent.get("creation_lineage", "") or "",
+            if zone == hand_zone and controller_int != self._friendly_player_id:
+                card_id = ent.get("card_id", "") or ""
+                base = self._lookup_card(card_id) if card_id else None
+                drawn_turn_raw = ent.get("drawn_turn", -1)
+                drawn_turn = drawn_turn_raw if isinstance(drawn_turn_raw, int) else -1
+                opponent_hand_entities.append(
+                    GameEntity(
+                        entity_id=eid,
+                        card_id=card_id,
+                        base_card=base,
+                        name=base.name if base else "",
+                        cost=base.cost if base else 0,
+                        current_attack=ent.get("ATK", 0) or 0,
+                        current_health=ent.get("HEALTH", 0) or 0,
+                        card_type=base.card_type if base else "",
+                        zone="HAND",
+                        zone_position=ent.get("ZONE_POSITION", 0) or 0,
+                        controller=controller_int,
+                        drawn_turn=drawn_turn,
+                        creation_lineage=ent.get("creation_lineage", "") or "",
+                    )
                 )
-            )
         opponent_hand_entities.sort(key=lambda e: e.zone_position)
+        player_deck_entities.sort(key=lambda e: e.zone_position)
         self._current_state = dataclasses.replace(
             self._current_state,
             player_played=tuple(self._player_played),
@@ -606,6 +742,9 @@ class GameEngine:
             player_drawn=tuple(self._player_drawn),
             opponent_drawn=tuple(self._opponent_drawn),
             opponent_hand=tuple(opponent_hand_entities),
+            player_deck=tuple(player_deck_entities),
+            player_deck_count=player_deck_count,
+            opponent_deck_count=opponent_deck_count,
         )
 
 

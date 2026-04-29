@@ -6,6 +6,28 @@ started: 2026-04-27T00:00:00Z
 updated: 2026-04-27T00:00:00Z
 ---
 
+## Prerequisites
+
+Before running the B-series accessibility checks, note these EXPECTED behaviors that are NOT defects:
+
+1. **Mana line is intentionally blank when no game is in progress (LIVE-07).**
+   The mana StaticText is constructed and present in the layout
+   (`stonereader/views/live_game.py:168-169`), but its label is bound
+   to `LiveGamePresenter.current_mana_summary()` which returns `""`
+   when `_current_state is None`. An empty `wx.StaticText` collapses
+   to ~0px and renders no glyphs — OCR will not see the line. This is
+   spec behavior. The mana line populates as soon as a Hearthstone
+   Constructed match begins (verify via test A9 / A11).
+
+2. **On panel entry, NVDA only reads the active zone — full structure walk requires Say-All or browse mode.**
+   The `D-17` zone-entry speech (`"Remaining deck zone: empty"` / similar)
+   fires once on focus enter. NVDA does NOT auto-walk siblings. To
+   verify the full panel layout (title → mana → 4 zone label/list
+   pairs in top-down order), press **NVDA+Down** (Say All) or activate
+   **browse mode** and traverse with arrow keys. This is documented in
+   `03-UI-SPEC.md:251` as "intentional and benign". Tests B2 / B4
+   directly cover the structure walk.
+
 ## Current Test
 
 [awaiting human testing]
