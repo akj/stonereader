@@ -80,7 +80,7 @@ Plans:
 - [x] 03-04-PLAN.md — Wave 2: GlobalHotkeyService (wx.Frame.RegisterHotKey wrapper)
 - [x] 03-05-PLAN.md — Wave 2: LiveGamePresenter (3 zones + auto-detection + speech)
 - [x] 03-06-PLAN.md — Wave 3: LiveGamePanel view + app wiring + manual checkpoint (NVDA/JAWS smoke deferred to HUMAN-UAT)
-- [ ] 03-07-PLAN.md — Gap closure: engine hero resolution + RESOURCES tag handling + player_deck rebuild (closes UAT test 8 vs-Innkeeper failure; LIVE-02/06/07/08 user-visible delivery)
+- [x] 03-07-PLAN.md — Gap closure: engine hero resolution + RESOURCES tag handling + player_deck rebuild (closes UAT test 8 vs-Innkeeper failure; LIVE-02/06/07/08 user-visible delivery)
 
 **UI hint**: yes
 

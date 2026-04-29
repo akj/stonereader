@@ -995,27 +995,27 @@ def _is_gamestate_line(line: str) -> bool:
 
 **If user disagreement with any of A1–A9:** the planner should turn it into an explicit decision before plans are written. A1 (process name case) and A2 (timestamped subdirs) are highest risk for "looks like it works in tests but fails on real Hearthstone."
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **`GameStarted` payload — should it include the player's saved-deck match?**
    - What we know: LIVE-08 (auto-detect saved deck) is a Phase 3 requirement, not Phase 2.
    - What's unclear: Should `GameStarted.player_deck_match: Optional[DeckSummary]` be on the event in Phase 2, or should Phase 3 do the matching against `cardsDrawnThisGame` independently?
-   - Recommendation: **Phase 2 emits raw `GameStarted` with hero classes, game_type, format_type only**. Phase 3 watches `CardDrawn` events and runs match logic against saved decks. Keeps Phase 2 free of `db.py` coupling.
+   - RESOLVED: **Phase 2 emits raw `GameStarted` with hero classes, game_type, format_type only**. Phase 3 watches `CardDrawn` events and runs match logic against saved decks. Keeps Phase 2 free of `db.py` coupling.
 
 2. **Should the engine retain previous `GameState` snapshots for diffing in Phase 3?**
    - What we know: D-15 says "no packet history retained." Doesn't address state history.
    - What's unclear: Phase 3 will want diffs ("the new card on opponent's board is X"). Should the engine compute diffs and emit them as part of events, or should subscribers diff the snapshots they receive?
-   - Recommendation: **Engine emits both `(event, new_state)` to each subscriber**. Subscribers retain only the latest state (as a frozen dataclass, costs nothing). For diffs, Phase 3 either uses the typed event (which already says "what happened") or keeps the previous state in its own presenter.
+   - RESOLVED: **Engine emits `(event, state)` tuples to subscribers (Plan 02-07). No internal snapshot history retained — subscribers diff if they need to.**
 
 3. **What's the behavior on `CorruptLogError` (NUL bytes)?**
    - What we know: hslog raises this; we catch in `parser.py`.
    - What's unclear: Skip the line and continue, or invalidate the entire current game?
-   - Recommendation: **Skip line + log ERROR**. Mid-game NULs are usually a single sector going bad on disk; subsequent lines are typically clean. If 10+ NUL errors in a single game, escalate to "reset offset to EOF, abandon current game."
+   - RESOLVED: **Plan 02-05 — skip line, log at ERROR level, continue parsing. Raise `ParserError` only on uncaught exceptions from hslog.**
 
 4. **Process name on Battle.net cloud-stream / GeForce Now installs?**
    - What we know: Local Hearthstone is `Hearthstone.exe`.
    - What's unclear: Cloud streams might run as `Hearthstone-Win64-Shipping.exe` or similar. Out of scope for v1 per "Windows-only, screen-reader-only" but worth a note.
-   - Recommendation: **Assume `Hearthstone.exe` only**. Document in `_process_detect.py`. If a Phase 5 user reports cloud-streaming, we add to the constant list.
+   - RESOLVED: **Plan 02-03 — assume `Hearthstone.exe` only. Document the limitation in `_process_detect.py` docstring; cloud-streaming installs are out of v1 scope.**
 
 ## Environment Availability
 
