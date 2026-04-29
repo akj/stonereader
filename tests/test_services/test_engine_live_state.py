@@ -84,9 +84,9 @@ def test_player_deck_rebuilt_from_entities(power_log_fixture, card_db) -> None:
     assert all(e.zone == "DECK" for e in state.player_deck), (
         "player_deck entries must have zone == 'DECK'"
     )
-    assert all(
-        e.controller == engine._friendly_player_id for e in state.player_deck
-    ), "player_deck entries must be controlled by the friendly player"
+    assert all(e.controller == engine._friendly_player_id for e in state.player_deck), (
+        "player_deck entries must be controlled by the friendly player"
+    )
 
 
 def test_hero_class_resolved(power_log_fixture, card_db) -> None:
@@ -140,8 +140,7 @@ def test_mana_tags_advance(power_log_fixture, card_db) -> None:
         f"player_mana out of range: {state.player_mana} / {state.player_max_mana}"
     )
     assert 0 <= state.opponent_mana <= max(state.opponent_max_mana, 0), (
-        f"opponent_mana out of range: "
-        f"{state.opponent_mana} / {state.opponent_max_mana}"
+        f"opponent_mana out of range: {state.opponent_mana} / {state.opponent_max_mana}"
     )
     # RESOURCES_USED clamping: when RESOURCES_USED == RESOURCES, mana = 0.
     # In mid_game.log, the Innkeeper gets RESOURCES=1 then RESOURCES_USED=1,
@@ -184,6 +183,111 @@ def test_deck_counts_track_zone(power_log_fixture, card_db) -> None:
     assert state.player_deck_count == expected_player_count, (
         f"player_deck_count must be derived from _entities ZONE==DECK count: "
         f"published={state.player_deck_count}, derived={expected_player_count}"
+    )
+
+
+def test_pvp_fallback_rebuckets_heroes_and_mana(card_db) -> None:
+    """BL-01 / WR-01 regression: in PvP captures both players have lo != 0
+    so the AI heuristic at CREATE_GAME cannot disambiguate
+    `_friendly_player_id`. Hero entities and RESOURCES TAG_CHANGEs that
+    arrive BEFORE the SHOW_ENTITY-into-HAND fallback resolves the friendly
+    player are classified against the default `_friendly_player_id == 1`.
+    When the fallback later flips the friendly player to 2,
+    `_rebucket_from_entities` must re-resolve heroes (BL-01) AND re-derive
+    mana (WR-01) so both fields end up on the correct side.
+
+    Without the fix the test would observe the friendly's MAGE hero on
+    `state.opponent_hero` and friendly mana attributed to opponent.
+    """
+    from stonereader.services._packets import (
+        CreateGamePacket,
+        FullEntityPacket,
+        ShowEntityPacket,
+        TagChangePacket,
+    )
+
+    engine = GameEngine(card_db=card_db)
+    # Both players have lo != 0 → AI heuristic cannot disambiguate.
+    engine.apply(
+        CreateGamePacket(
+            packet_id=0,
+            game_entity_id=1,
+            players=(
+                (2, 1, "OpponentP1", 1, 1111),  # P1 entity 2: opponent (warrior)
+                (3, 2, "FriendlyP2", 2, 2222),  # P2 entity 3: friendly (mage)
+            ),
+        )
+    )
+    assert engine._friendly_player_id == 1, (
+        "AI heuristic should not resolve when both players have lo != 0"
+    )
+    assert engine._friendly_player_resolved is False
+
+    # Hero entities arrive AFTER CREATE_GAME but BEFORE the fallback fires.
+    # CONTROLLER=1 → recorded as friendly (incorrect: friendly is actually 2).
+    engine.apply(
+        FullEntityPacket(
+            packet_id=1,
+            entity_id=64,
+            card_id="HERO_01",  # Garrosh, WARRIOR — actually the OPPONENT
+            tags={"CARDTYPE": 3, "CONTROLLER": 1, "ZONE": 1},  # Zone.PLAY
+        )
+    )
+    engine.apply(
+        FullEntityPacket(
+            packet_id=2,
+            entity_id=66,
+            card_id="HERO_08",  # Jaina, MAGE — actually the FRIENDLY
+            tags={"CARDTYPE": 3, "CONTROLLER": 2, "ZONE": 1},
+        )
+    )
+    # RESOURCES on player entities BEFORE fallback. Player 1 (entity 2) sets
+    # RESOURCES=1 — currently classified as friendly.
+    engine.apply(TagChangePacket(packet_id=3, entity_id=2, tag="RESOURCES", value=1))
+
+    state_before = engine.current_state
+    assert state_before is not None
+    # Pre-fallback: heroes and mana attributed against default _friendly=1
+    assert state_before.player_hero.hero_class == "WARRIOR"
+    assert state_before.opponent_hero.hero_class == "MAGE"
+    assert state_before.player_max_mana == 1
+    assert state_before.opponent_max_mana == 0
+
+    # First SHOW_ENTITY into HAND with controller=2 fires the fallback,
+    # flipping _friendly_player_id from 1 → 2. _rebucket_from_entities must
+    # re-resolve heroes and re-derive mana from authoritative state.
+    engine.apply(
+        ShowEntityPacket(
+            packet_id=4,
+            entity_id=100,
+            card_id="CS2_023",
+            tags={"CONTROLLER": 2, "ZONE": int(Zone.HAND)},
+        )
+    )
+
+    assert engine._friendly_player_resolved is True
+    assert engine._friendly_player_id == 2
+    state_after = engine.current_state
+    assert state_after is not None
+    # BL-01: heroes must be re-attributed.
+    assert state_after.player_hero.hero_class == "MAGE", (
+        f"player_hero should be MAGE (friendly) after fallback, got "
+        f"{state_after.player_hero.hero_class!r}"
+    )
+    assert state_after.opponent_hero.hero_class == "WARRIOR", (
+        f"opponent_hero should be WARRIOR (opponent) after fallback, got "
+        f"{state_after.opponent_hero.hero_class!r}"
+    )
+    # WR-01: mana must be re-derived for the now-correct friendly side.
+    # Player 2 (friendly) had no RESOURCES set yet → 0 mana for player.
+    # Player 1 (opponent) had RESOURCES=1 → 1 max_mana for opponent.
+    assert state_after.player_max_mana == 0, (
+        f"player_max_mana should be 0 (friendly P2 has no RESOURCES), got "
+        f"{state_after.player_max_mana}"
+    )
+    assert state_after.opponent_max_mana == 1, (
+        f"opponent_max_mana should be 1 (opponent P1 had RESOURCES=1), got "
+        f"{state_after.opponent_max_mana}"
     )
 
 

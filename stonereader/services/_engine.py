@@ -167,7 +167,9 @@ class GameEngine:
         ):
             subject_eid = self._block_subjects[-1]  # INNERMOST subject
             subject_card_id = self._entities.get(subject_eid, {}).get("card_id", "")
-            subject_card = self._lookup_card(subject_card_id) if subject_card_id else None
+            subject_card = (
+                self._lookup_card(subject_card_id) if subject_card_id else None
+            )
             if subject_card:
                 ent["creation_lineage"] = subject_card.name
         # D-19: bookkeeping changed → republish the snapshot so opponent_hand
@@ -338,7 +340,52 @@ class GameEngine:
         self._player_played = new_player_played
         self._opponent_played = new_opponent_played
 
+        # gap-closure 03-07 follow-up (BL-01): heroes were classified at
+        # FULL_ENTITY/CREATE_GAME time using the previous _friendly_player_id.
+        # Re-run the full hero pass so player_hero / opponent_hero swap when
+        # friendly flips from default 1 → real friendly player_id (multiplayer
+        # SHOW_ENTITY-into-HAND fallback path).
+        self._resolve_heroes()
+        # gap-closure 03-07 follow-up (WR-01): RESOURCES rows on the player
+        # entities still carry the correct PLAYER_ID; re-derive mana for both
+        # sides from authoritative state so any pre-resolution RESOURCES /
+        # RESOURCES_USED updates that wrote to the wrong side are corrected.
+        self._reapply_mana_from_entities()
+
         self._refresh_state()
+
+    def _reapply_mana_from_entities(self) -> None:
+        """Re-derive player/opponent mana from authoritative PLAYER_ID rows.
+
+        gap-closure 03-07 follow-up (WR-01): RESOURCES / RESOURCES_USED tag
+        changes that arrived before the SHOW_ENTITY-into-HAND fallback
+        resolved friendly_player_id were classified using the default
+        `_friendly_player_id == 1`. After the fallback flips the friendly
+        player_id, the mana fields on the published GameState are stale.
+        This helper walks each player entity row, reads RESOURCES /
+        RESOURCES_USED off the row, and re-attributes mana using the now-
+        resolved _friendly_player_id.
+        """
+        if self._current_state is None:
+            return
+        replacements: Dict[str, Any] = {}
+        for ent in self._entities.values():
+            player_id = ent.get("PLAYER_ID")
+            if player_id is None:
+                continue
+            resources = ent.get("RESOURCES", 0) or 0
+            resources_used = ent.get("RESOURCES_USED", 0) or 0
+            mana = max(0, resources - resources_used)
+            if int(player_id) == self._friendly_player_id:
+                replacements["player_mana"] = mana
+                replacements["player_max_mana"] = resources
+            else:
+                replacements["opponent_mana"] = mana
+                replacements["opponent_max_mana"] = resources
+        if replacements:
+            self._current_state = dataclasses.replace(
+                self._current_state, **replacements
+            )
 
     # ----------------------------------------------------------------- handlers
 
@@ -452,8 +499,7 @@ class GameEngine:
                     MulliganDone(timestamp=self._now(), turn=self._current_turn())
                 )
         elif (
-            p.tag in ("RESOURCES", "RESOURCES_USED")
-            and self._current_state is not None
+            p.tag in ("RESOURCES", "RESOURCES_USED") and self._current_state is not None
         ):
             # gap-closure 03-07: RESOURCES is the per-turn max mana the player
             # has access to (Hearthstone displays this as "Y" in the X/Y mana
