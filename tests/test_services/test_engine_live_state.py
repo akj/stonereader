@@ -84,6 +84,12 @@ def test_player_deck_rebuilt_from_entities(power_log_fixture, card_db) -> None:
     assert all(e.zone == "DECK" for e in state.player_deck), (
         "player_deck entries must have zone == 'DECK'"
     )
+    # WR-05: this is one of the rare tests that DOES read engine private
+    # state (`_friendly_player_id`). The contract under test is "every
+    # row in published `player_deck` belongs to the friendly player," and
+    # there is no public accessor for `_friendly_player_id` yet — adding
+    # one solely for tests is heavier than the coupling cost. If a
+    # `engine.snapshot_for_test()` accessor is added later, swap to it.
     assert all(e.controller == engine._friendly_player_id for e in state.player_deck), (
         "player_deck entries must be controlled by the friendly player"
     )
@@ -157,8 +163,14 @@ def test_deck_counts_track_zone(power_log_fixture, card_db) -> None:
     Note: a starting deck is 30 cards but mid-game shuffle effects (e.g.
     Tracking, Lab Recruiter, Excavate generators) can push the live deck
     count above 30. The captured mid_game.log includes such effects, so
-    the upper bound here is a generous 60 — the meaningful invariant is
-    the equality with the per-controller _entities count.
+    the upper bound here is a generous 60.
+
+    WR-05: previously cross-checked `state.player_deck_count` against an
+    iteration over `engine._entities`. That coupled the test tightly to
+    the engine's primary internal data structure. Cross-check now uses
+    the published `state.player_deck` tuple (also rebuilt by
+    `_refresh_state`) so the assertion stays meaningful while only
+    touching public state.
     """
     path = power_log_fixture("mid_game.log")
     engine = _replay(path, card_db=card_db)
@@ -174,15 +186,11 @@ def test_deck_counts_track_zone(power_log_fixture, card_db) -> None:
         f"opponent_deck_count not derived: {state.opponent_deck_count}"
     )
     assert state.opponent_deck_count <= 60
-    expected_player_count = sum(
-        1
-        for ent in engine._entities.values()
-        if ent.get("ZONE") == int(Zone.DECK)
-        and ent.get("CONTROLLER") == engine._friendly_player_id
-    )
-    assert state.player_deck_count == expected_player_count, (
-        f"player_deck_count must be derived from _entities ZONE==DECK count: "
-        f"published={state.player_deck_count}, derived={expected_player_count}"
+    # `player_deck` and `player_deck_count` are derived from the same
+    # _refresh_state pass; the count must equal the tuple length.
+    assert state.player_deck_count == len(state.player_deck), (
+        f"player_deck_count must equal len(player_deck): "
+        f"count={state.player_deck_count}, deck_rows={len(state.player_deck)}"
     )
 
 
