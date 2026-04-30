@@ -1,0 +1,3 @@
+# Power.log parsing over game-memory reading
+
+Hearthstone trackers can either tail `Power.log` (which the game writes when `log.config` has the right block) or read game memory directly via process injection. We chose `Power.log`: parsing is mechanical, the format has been stable across patches for years, and we never risk the client treating us as cheat software. The accepted trade-off is sub-second event latency versus instantaneous memory state, plus parser-maintenance work when Blizzard changes log shapes — both fine because StoneReader's accessibility-via-speech UX never needs millisecond-level reactivity.
