@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Callable, List, Optional
 
 from stonereader.models.game_state import GameState
-from stonereader.services._events import GameEvent
 from stonereader.speech_service import SpeechService
 
 
@@ -25,7 +24,7 @@ class MockSpeechService(SpeechService):
         return self.spoken[-1][0] if self.spoken else ""
 
 
-SubscriberCallback = Callable[[GameEvent, Optional[GameState]], None]
+SubscriberCallback = Callable[[Optional[GameState], GameState], None]
 
 
 class MockGameTracker:
@@ -33,7 +32,7 @@ class MockGameTracker:
 
     Mirrors the public surface from stonereader.services._tracker.GameTracker
     without needing real wx, hslog, or Power.log access. Tests drive
-    `dispatch(event, state)` directly to simulate engine emission.
+    `dispatch(prev, curr)` directly to simulate engine state publication.
 
     Idempotent subscribe and per-subscriber exception isolation match the
     production GameTracker._dispatch contract (Phase 2 D-02, Pitfall 3).
@@ -69,19 +68,19 @@ class MockGameTracker:
         self._current_state = state
 
     def dispatch(
-        self, event: GameEvent, state: Optional[GameState]
+        self, prev: Optional[GameState], curr: GameState
     ) -> None:
-        """Test helper: deliver an event to every subscriber synchronously.
+        """Test helper: deliver (prev, curr) to every subscriber synchronously.
 
         Mirrors `GameTracker._dispatch` exception-isolation: one raising
         subscriber does NOT prevent later subscribers from receiving the
-        event. The exception is captured in `self.caught_exceptions` so
+        pair. The exception is captured in `self.caught_exceptions` so
         tests can assert on isolation without losing the original error.
         """
-        self._current_state = state
+        self._current_state = curr
         for cb in list(self._subscribers):
             try:
-                cb(event, state)
+                cb(prev, curr)
             except Exception as exc:
                 # Capture for visibility (do NOT re-raise — production
                 # GameTracker._dispatch isolates subscribers identically).

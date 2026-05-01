@@ -3,14 +3,35 @@
 Covers:
 - subscribe/unsubscribe API (D-02)
 - subscriber exception isolation (Pitfall 3 / T-2-04)
-- process-gone resets tracker state (D-03)
+- process-gone publishes ABANDONED state (issue #5)
 - start/stop is idempotent and the wx.Timer reference clears (D-19 / LOG-05)
+
+Issue #5: subscribers receive (prev, curr) GameState pairs, not events.
 """
 from __future__ import annotations
 
+import dataclasses
 import logging
+from typing import Optional
 
 import pytest
+
+from stonereader.models.game_state import GameState, Hero
+
+
+def _make_running_state(turn: int = 1) -> GameState:
+    hero = Hero(id="?", name="?", health=30, armor=0, hero_power="", hero_class="")
+    return GameState(
+        turn=turn,
+        active_player_id=1,
+        player_board=(),
+        opponent_board=(),
+        player_hand=(),
+        opponent_hand=(),
+        player_hero=hero,
+        opponent_hero=hero,
+        game_state="RUNNING",
+    )
 
 
 def test_subscribe_unsubscribe():
@@ -18,7 +39,7 @@ def test_subscribe_unsubscribe():
 
     tracker = GameTracker()
 
-    def cb(event, state):
+    def cb(prev: Optional[GameState], curr: GameState) -> None:
         return None
 
     tracker.subscribe(cb)
@@ -33,50 +54,96 @@ def test_subscribe_unsubscribe():
 
 
 def test_subscriber_exception_does_not_break_others(caplog):
-    from stonereader.services import GameStarted, GameTracker
+    from stonereader.services import GameTracker
 
     tracker = GameTracker()
-    good_called = []
+    good_called: list[tuple[Optional[GameState], GameState]] = []
 
-    def bad(event, state):
+    def bad(prev: Optional[GameState], curr: GameState) -> None:
         raise RuntimeError("boom")
 
-    def good(event, state):
-        good_called.append(event)
+    def good(prev: Optional[GameState], curr: GameState) -> None:
+        good_called.append((prev, curr))
 
     tracker.subscribe(bad)
     tracker.subscribe(good)
 
-    event = GameStarted(
-        timestamp=0.0,
-        turn=0,
-        player_class="MAGE",
-        opponent_class="WARRIOR",
-        game_type="CASUAL",
-        format_type="STANDARD",
-    )
+    curr = _make_running_state()
     with caplog.at_level(logging.ERROR):
-        tracker._dispatch(event, None)
+        tracker._dispatch(None, curr)
 
-    assert len(good_called) == 1, "good subscriber must still receive event after bad raises"
+    assert len(good_called) == 1, "good subscriber must still receive pair after bad raises"
+    assert good_called[0] == (None, curr)
     assert any("subscriber raised" in rec.message for rec in caplog.records)
 
 
-def test_process_gone_resets_state(mock_process_detector):
+def test_process_gone_publishes_abandoned_state(mock_process_detector):
+    """Issue #5: when Hearthstone disappears mid-game, tracker dispatches a
+    final (running_prev, abandoned_curr) pair instead of a synthetic event.
+    """
     from stonereader.services import GameTracker
 
     tracker = GameTracker(process_detector=mock_process_detector)
 
-    # Simulate Hearthstone running — _provide_path records that running == True
+    received: list[tuple[Optional[GameState], GameState]] = []
+    tracker.subscribe(lambda prev, curr: received.append((prev, curr)))
+
+    # Simulate a running game by stashing a RUNNING state as last published.
+    running = _make_running_state(turn=7)
+    tracker._last_published = running
+
+    # Process running → not running.
     mock_process_detector.set_running(True, exe_dir=None)
     tracker._provide_path()
-    assert tracker._previously_running is True
+    mock_process_detector.set_running(False)
+    tracker._provide_path()
 
-    # Process gone — _provide_path returns None and flips _previously_running
+    assert len(received) == 1, f"expected one dispatch on process-gone, got {received}"
+    prev, curr = received[0]
+    assert prev is running
+    assert curr.game_state == "ABANDONED"
+    assert curr.turn == running.turn  # final state preserves prior turn
+    # Internal state clears so a fresh game can start cleanly.
+    assert tracker._last_published is None
+
+
+def test_process_gone_skips_dispatch_when_no_game_running(mock_process_detector):
+    """If no game was in progress, process-gone is silent (no synthetic state)."""
+    from stonereader.services import GameTracker
+
+    tracker = GameTracker(process_detector=mock_process_detector)
+
+    received: list[tuple[Optional[GameState], GameState]] = []
+    tracker.subscribe(lambda prev, curr: received.append((prev, curr)))
+
+    # No _last_published — nothing to abandon.
+    mock_process_detector.set_running(True, exe_dir=None)
+    tracker._provide_path()
     mock_process_detector.set_running(False)
     path = tracker._provide_path()
+
     assert path is None
-    assert tracker._previously_running is False
+    assert received == []
+
+
+def test_process_gone_skips_dispatch_for_completed_game(mock_process_detector):
+    """A COMPLETE game is already terminal; process-gone does not republish it."""
+    from stonereader.services import GameTracker
+
+    tracker = GameTracker(process_detector=mock_process_detector)
+
+    received: list[tuple[Optional[GameState], GameState]] = []
+    tracker.subscribe(lambda prev, curr: received.append((prev, curr)))
+
+    completed = dataclasses.replace(_make_running_state(turn=12), game_state="COMPLETE")
+    tracker._last_published = completed
+
+    mock_process_detector.set_running(True, exe_dir=None)
+    tracker._provide_path()
+    mock_process_detector.set_running(False)
+    tracker._provide_path()
+
+    assert received == []
 
 
 def test_start_stop_clean():

@@ -1,4 +1,7 @@
-"""Tests for stonereader.services._engine."""
+"""Tests for stonereader.services._engine.
+
+Issue #5: engine.apply() returns None; assertions read engine.current_state.
+"""
 
 from __future__ import annotations
 
@@ -10,13 +13,25 @@ import pytest
 pytest.importorskip("stonereader.services._engine")
 
 from stonereader.services._engine import GameEngine
-from stonereader.services._events import CardDrawn, GameStarted
 from stonereader.services._packets import (
     CreateGamePacket,
     FullEntityPacket,
     TagChangePacket,
 )
 from stonereader.services._parser import Parser
+
+
+def test_apply_returns_none():
+    """Issue #5: engine.apply is a pure mutator; subscribers diff state pairs."""
+    engine = GameEngine()
+    result = engine.apply(
+        CreateGamePacket(
+            packet_id=0,
+            game_entity_id=1,
+            players=((2, 1, "P1", 1, 1), (3, 2, "P2", 2, 2)),
+        )
+    )
+    assert result is None
 
 
 def test_emits_frozen_gamestate_snapshots():
@@ -39,19 +54,17 @@ def test_emits_frozen_gamestate_snapshots():
         raise AssertionError("GameState must be frozen")
 
 
-def test_card_drawn_controller_reflects_log_controller():
-    """CardDrawn.controller is the raw CONTROLLER tag value from the log.
+def test_drawn_card_controller_reflects_log_controller():
+    """state.opponent_drawn[i].controller is the raw CONTROLLER tag.
 
     WR-02: _friendly_player_id defaults to 1, so when the local player is
-    assigned CONTROLLER=2 by the server (coin-flip), their CardDrawn events
-    will show controller=2 — the engine currently cannot distinguish local
-    from opponent in that scenario.  This test documents the existing
-    behaviour so any future fix to _friendly_player_id can verify
-    it doesn't regress the raw-controller pass-through.
+    assigned CONTROLLER=2 by the server (coin-flip), the entity buckets
+    into opponent_drawn with the raw CONTROLLER tag (2). This test
+    documents the existing behaviour so any future fix to
+    _friendly_player_id can verify it doesn't regress raw-controller
+    pass-through.
     """
     engine = GameEngine()
-    # Player 2 / 3 are player entities; entity 10 is a card drawn by
-    # controller 2 (the second player).
     engine.apply(
         CreateGamePacket(
             packet_id=0,
@@ -69,55 +82,65 @@ def test_card_drawn_controller_reflects_log_controller():
         )
     )
     # Now entity 10 moves to HAND (Zone=3).
-    events = engine.apply(
+    engine.apply(
         TagChangePacket(packet_id=2, entity_id=10, tag="ZONE", value=3)
     )
-    drawn = [e for e in events if isinstance(e, CardDrawn)]
-    assert len(drawn) == 1, "Expected exactly one CardDrawn event"
-    # controller value is 2 — the raw CONTROLLER tag, not remapped to
-    # friendly/opponent.  When _friendly_player_id is correctly resolved
-    # this test should still pass because controller is always the raw tag.
-    assert drawn[0].controller == 2, (
-        f"CardDrawn.controller should be 2 (raw CONTROLLER tag), got {drawn[0].controller}"
+    state = engine.current_state
+    assert state is not None
+    drawn_for_eid = [pc for pc in state.opponent_drawn if pc.entity_id == 10]
+    assert len(drawn_for_eid) == 1, (
+        f"Expected one row for entity 10 in opponent_drawn; got {state.opponent_drawn}"
+    )
+    assert drawn_for_eid[0].controller == 2, (
+        f"controller should be 2 (raw CONTROLLER tag), got {drawn_for_eid[0].controller}"
     )
 
 
-def test_mid_game_fixture_emits_expected_events(power_log_fixture):
+def test_mid_game_fixture_publishes_running_state(power_log_fixture):
+    """mid_game.log contains CREATE_GAME → engine publishes a RUNNING state."""
     path = power_log_fixture("mid_game.log")  # skips if absent
     parser = Parser()
     engine = GameEngine()
-    events = []
     for line in path.read_text(encoding="utf-8").splitlines():
         for pkt in parser.feed_line(line):
-            events.extend(engine.apply(pkt))
-    assert any(isinstance(e, GameStarted) for e in events), (
-        "mid_game.log must contain CREATE_GAME and emit GameStarted"
+            engine.apply(pkt)
+    state = engine.current_state
+    assert state is not None, (
+        "mid_game.log must contain CREATE_GAME and publish a GameState"
     )
+    assert state.game_state == "RUNNING"
 
 
-def test_dual_source_fixture_no_duplicates(power_log_fixture):
-    # Real fixtures contain both PowerTaskList and GameState lines.
-    # Parser drops PowerTaskList; engine sees only GameState packets.
-    # Therefore: feeding the same fixture once vs feeding it once with
-    # PowerTaskList lines stripped must produce identical event counts.
+def test_dual_source_fixture_no_duplicate_state_changes(power_log_fixture):
+    """Real fixtures contain both PowerTaskList and GameState lines.
+
+    Parser drops PowerTaskList; engine sees only GameState packets. Feeding
+    the full fixture must produce the same final GameState as feeding only
+    the GameState-prefixed lines.
+    """
     path = power_log_fixture("mid_game.log")
     text = path.read_text(encoding="utf-8")
     # Run 1: full fixture
     p1, e1 = Parser(), GameEngine()
-    evs1 = []
     for line in text.splitlines():
         for pkt in p1.feed_line(line):
-            evs1.extend(e1.apply(pkt))
+            e1.apply(pkt)
     # Run 2: only GameState lines
     gs_only = "\n".join(line for line in text.splitlines() if "GameState." in line)
     p2, e2 = Parser(), GameEngine()
-    evs2 = []
     for line in gs_only.splitlines():
         for pkt in p2.feed_line(line):
-            evs2.extend(e2.apply(pkt))
-    assert len(evs1) == len(evs2), (
-        f"Duplicate detection failed: full={len(evs1)} GameState-only={len(evs2)}"
-    )
+            e2.apply(pkt)
+    s1, s2 = e1.current_state, e2.current_state
+    assert s1 is not None and s2 is not None
+    assert s1.turn == s2.turn
+    assert s1.game_state == s2.game_state
+    assert s1.player_deck_count == s2.player_deck_count
+    assert s1.opponent_deck_count == s2.opponent_deck_count
+    assert len(s1.player_drawn) == len(s2.player_drawn)
+    assert len(s1.opponent_drawn) == len(s2.opponent_drawn)
+    assert len(s1.player_played) == len(s2.player_played)
+    assert len(s1.opponent_played) == len(s2.opponent_played)
 
 
 def test_tick_under_50ms(power_log_fixture):

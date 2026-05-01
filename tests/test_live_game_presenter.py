@@ -5,10 +5,14 @@ Covers LIVE-01..08 (LIVE-09 lives in test_global_hotkey.py) plus D-07
 (silent during arrow-read), D-08/D-09 (lifecycle silence + baseline),
 LIVE-03 cards_drawn zone, drawn_turn==-1 fallback wording, and public
 accessors (per 03-REVIEWS.md HIGH #1, HIGH #3, MEDIUM #5).
+
+Issue #5: presenter consumes (prev, curr) GameState pairs and re-derives
+lifecycle via diff(); tests dispatch state pairs accordingly.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import sqlite3
 from typing import List, Optional, Tuple
 
@@ -22,12 +26,6 @@ from stonereader.models.game_state import (
 )
 from stonereader.presenters.live_game import (
     LiveGamePresenter,
-)
-from stonereader.services._events import (
-    CardDrawn,
-    GameEnded,
-    GameStarted,
-    TurnChanged,
 )
 from tests.conftest import MockGameTracker, MockSpeechService
 
@@ -195,29 +193,20 @@ def _make_legal_deck_30() -> List[Card]:
 
 
 def test_lifecycle_silence(tmp_path) -> None:
-    """GameStarted and GameEnded events do NOT cause any speech."""
+    """Lifecycle transitions (GameStarted/GameEnded via diff) do NOT cause speech."""
     presenter, speech, tracker, _db, _card_db = _make_presenter(tmp_path)
-    state = _make_state()
-    tracker.dispatch(
-        GameStarted(
-            timestamp=0.0,
-            turn=0,
-            player_class="",
-            opponent_class="",
-            game_type="",
-            format_type="",
-        ),
-        state,
+    running = _make_state()
+    # First publication: prev=None, curr=running → diff produces GameStarted.
+    tracker.dispatch(None, running)
+    # Game ends: RUNNING → COMPLETE → diff produces GameEnded.
+    completed = dataclasses.replace(
+        running,
+        game_state="COMPLETE",
+        player_playstate="WON",
+        opponent_playstate="LOST",
+        turn=10,
     )
-    tracker.dispatch(
-        GameEnded(
-            timestamp=1.0,
-            turn=10,
-            player_playstate="WON",
-            opponent_playstate="LOST",
-        ),
-        state,
-    )
+    tracker.dispatch(running, completed)
     assert speech.spoken == []
     assert presenter is not None  # silence linter — we constructed presenter for side-effects
 
@@ -236,7 +225,7 @@ def test_remaining_deck_speech_format(tmp_path) -> None:
             _make_entity(fireball),
         )
     )
-    tracker.dispatch(TurnChanged(timestamp=0.0, turn=1, active_player_id=1), state)
+    tracker.dispatch(state, state)
     presenter.jump_to_zone("remaining_deck")
     assert "Remaining deck zone" in speech.last_speech
     assert "Glacial Shard, 1 copy" in speech.last_speech
@@ -257,7 +246,7 @@ def test_remaining_deck_sort_order(tmp_path) -> None:
     state = _make_state(
         player_deck=(_make_entity(a), _make_entity(b), _make_entity(c))
     )
-    tracker.dispatch(TurnChanged(timestamp=0.0, turn=1, active_player_id=1), state)
+    tracker.dispatch(state, state)
     items = presenter.get_zone_items("remaining_deck")
     assert [it[0].name for it in items] == ["Bravo", "Alpha", "Charlie"]
 
@@ -325,18 +314,8 @@ def test_drawn_to_zero_visible(tmp_path) -> None:
             ),
         ),
     )
-    tracker.dispatch(
-        GameStarted(
-            timestamp=0.0,
-            turn=0,
-            player_class="MAGE",
-            opponent_class="WARRIOR",
-            game_type="RANKED",
-            format_type="STANDARD",
-        ),
-        state,
-    )
-    tracker.dispatch(TurnChanged(timestamp=0.0, turn=1, active_player_id=1), state)
+    tracker.dispatch(None, state)
+    tracker.dispatch(state, state)
     items = presenter.get_zone_items("remaining_deck")
     # cards[0] should be listed with count=1 (2 original - 1 drawn).
     first_row = next(it for it in items if it[0].id == first.id)
@@ -380,7 +359,7 @@ def test_cards_drawn_zone(tmp_path) -> None:
             ),
         ),
     )
-    tracker.dispatch(TurnChanged(timestamp=0.0, turn=3, active_player_id=1), state)
+    tracker.dispatch(state, state)
     items = presenter.get_zone_items("cards_drawn")
     # Most recent first: Fireball (turn 3) then Glacial (turn 1).
     assert len(items) == 2
@@ -411,7 +390,7 @@ def test_opponent_hand_speech_format(tmp_path) -> None:
             _make_opponent_hand_entity(reno, position=3, drawn_turn=5, lineage=""),
         )
     )
-    tracker.dispatch(TurnChanged(timestamp=0.0, turn=5, active_player_id=2), state)
+    tracker.dispatch(state, state)
     presenter.jump_to_zone("opponent_hand")
     assert "Position 1, unknown, drawn turn 2" in speech.last_speech
     presenter.move_in_zone(1)
@@ -431,7 +410,7 @@ def test_drawn_turn_unknown_speech(tmp_path) -> None:
             _make_opponent_hand_entity(None, position=1, drawn_turn=-1, lineage=""),
         )
     )
-    tracker.dispatch(TurnChanged(timestamp=0.0, turn=1, active_player_id=2), state)
+    tracker.dispatch(state, state)
     presenter.jump_to_zone("opponent_hand")
     assert "drawn turn unknown" in speech.last_speech
     assert "drawn turn -1" not in speech.last_speech
@@ -455,7 +434,7 @@ def test_opponent_played_speech_format(tmp_path) -> None:
             ),
         )
     )
-    tracker.dispatch(TurnChanged(timestamp=0.0, turn=6, active_player_id=2), state)
+    tracker.dispatch(state, state)
     presenter.jump_to_zone("opponent_played")
     assert "Turn 6, Reno Jackson" in speech.last_speech
 
@@ -470,7 +449,7 @@ def test_opponent_hand_count(tmp_path) -> None:
             _make_opponent_hand_entity(None, position=3),
         )
     )
-    tracker.dispatch(TurnChanged(timestamp=0.0, turn=1, active_player_id=2), state)
+    tracker.dispatch(state, state)
     items = presenter.get_zone_items("opponent_hand")
     assert len(items) == 3
 
@@ -486,7 +465,7 @@ def test_announce_opponent_hand_count(tmp_path) -> None:
     e2 = _make_opponent_hand_entity(None, position=2)
     e3 = _make_opponent_hand_entity(None, position=3)
     state = _make_state(opponent_hand=(e1, e2, None, e3))
-    tracker.dispatch(TurnChanged(timestamp=0.0, turn=1, active_player_id=2), state)
+    tracker.dispatch(state, state)
     presenter.announce_opponent_hand_count()
     # Count non-None entries -> 3.
     assert speech.last_speech == "Opponent has 3 cards."
@@ -498,7 +477,7 @@ def test_announce_deck_counts(tmp_path) -> None:
     presenter.announce_deck_counts()
     assert speech.last_speech == "No game in progress."
     state = _make_state(player_deck_count=18, opponent_deck_count=22)
-    tracker.dispatch(TurnChanged(timestamp=0.0, turn=1, active_player_id=1), state)
+    tracker.dispatch(state, state)
     presenter.announce_deck_counts()
     assert speech.last_speech == "18 left, opponent 22."
 
@@ -513,7 +492,7 @@ def test_mana_query(tmp_path) -> None:
         opponent_mana=2,
         opponent_max_mana=5,
     )
-    tracker.dispatch(TurnChanged(timestamp=0.0, turn=1, active_player_id=1), state)
+    tracker.dispatch(state, state)
     assert presenter.current_mana_summary() == "You 4/7, opponent 2/5"
 
 
@@ -557,51 +536,21 @@ def test_auto_deck_detection(tmp_path) -> None:
     state = _make_state(player_deck=tuple(deck_entities))
 
     # Case A: 0 matches (no decks saved).
-    tracker.dispatch(
-        GameStarted(
-            timestamp=0.0,
-            turn=0,
-            player_class="MAGE",
-            opponent_class="WARRIOR",
-            game_type="RANKED",
-            format_type="STANDARD",
-        ),
-        state,
-    )
-    tracker.dispatch(TurnChanged(timestamp=0.0, turn=1, active_player_id=1), state)
+    tracker.dispatch(None, state)
+    tracker.dispatch(state, state)
     # Public accessor read (per 03-REVIEWS.md HIGH #3).
     assert presenter.detected_deck_name() is None
 
     # Case B: exactly 1 match.
     save_deck(db, "Legal Deck A", "MAGE", "Standard", deckstring_a)
-    tracker.dispatch(
-        GameStarted(
-            timestamp=0.0,
-            turn=0,
-            player_class="MAGE",
-            opponent_class="WARRIOR",
-            game_type="RANKED",
-            format_type="STANDARD",
-        ),
-        state,
-    )
-    tracker.dispatch(TurnChanged(timestamp=0.0, turn=1, active_player_id=1), state)
+    tracker.dispatch(None, state)
+    tracker.dispatch(state, state)
     assert presenter.detected_deck_name() == "Legal Deck A"
 
     # Case C: 2+ matches.
     save_deck(db, "Legal Deck B", "MAGE", "Standard", deckstring_a)
-    tracker.dispatch(
-        GameStarted(
-            timestamp=0.0,
-            turn=0,
-            player_class="MAGE",
-            opponent_class="WARRIOR",
-            game_type="RANKED",
-            format_type="STANDARD",
-        ),
-        state,
-    )
-    tracker.dispatch(TurnChanged(timestamp=0.0, turn=1, active_player_id=1), state)
+    tracker.dispatch(None, state)
+    tracker.dispatch(state, state)
     assert presenter.detected_deck_name() is None
 
 
@@ -616,39 +565,17 @@ def test_detection_resets_per_game(tmp_path) -> None:
     presenter._detection_attempted = True
     presenter._detected_deck_name = "Stale Deck"
     presenter._original_deck_cards = ()
-    tracker.dispatch(
-        GameStarted(
-            timestamp=0.0,
-            turn=0,
-            player_class="",
-            opponent_class="",
-            game_type="",
-            format_type="",
-        ),
-        _make_state(),
-    )
+    tracker.dispatch(None, _make_state())
     assert presenter._detection_attempted is False
     assert presenter.detected_deck_name() is None
     assert presenter._original_deck_cards is None
 
 
-def test_silent_during_event(tmp_path) -> None:
-    """_on_game_event NEVER calls SpeechService -- even for non-lifecycle events."""
+def test_silent_during_state_publication(tmp_path) -> None:
+    """_on_state NEVER calls SpeechService -- subscriber callbacks are silent (D-07)."""
     presenter, speech, tracker, _db, _card_db = _make_presenter(tmp_path)
     state = _make_state(player_deck_count=15)
-    glacial = _make_card("CS2_023", "Glacial Shard")
-    tracker.dispatch(
-        CardDrawn(
-            timestamp=0.0,
-            turn=1,
-            entity_id=10,
-            card_id=glacial.id,
-            base_card=glacial,
-            name="Glacial Shard",
-            controller=1,
-        ),
-        state,
-    )
+    tracker.dispatch(state, state)
     assert speech.spoken == []
     assert presenter is not None
 
@@ -664,12 +591,12 @@ def test_cursor_preserves_across_render(tmp_path) -> None:
     state = _make_state(
         player_deck=(_make_entity(a), _make_entity(b), _make_entity(c))
     )
-    tracker.dispatch(TurnChanged(timestamp=0.0, turn=1, active_player_id=1), state)
+    tracker.dispatch(state, state)
     presenter.jump_to_zone("remaining_deck")
     presenter.move_in_zone(1)  # cursor=1 (Bravo)
     # Public accessor (per 03-REVIEWS.md HIGH #3).
     assert presenter.cursor_for_zone("remaining_deck") == 1
-    tracker.dispatch(TurnChanged(timestamp=0.0, turn=2, active_player_id=2), state)
+    tracker.dispatch(state, state)
     assert presenter.cursor_for_zone("remaining_deck") == 1
 
 
@@ -713,7 +640,7 @@ def test_public_accessors_no_private_access(tmp_path) -> None:
         player_hero_class="MAGE",
         opponent_hero_class="WARRIOR",
     )
-    tracker.dispatch(TurnChanged(timestamp=0.0, turn=1, active_player_id=1), state)
+    tracker.dispatch(state, state)
 
     title = presenter.current_title()
     assert "MAGE" in title

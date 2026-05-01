@@ -6,7 +6,7 @@ Zones (D-05 + LIVE-03 cards_drawn per 03-REVIEWS.md HIGH #1):
     opponent_played — PlayedCard list; D-15 format.
     cards_drawn    — PlayedCard list, most-recent-first; LIVE-03 ("cards drawn this game").
 
-Subscriber contract (D-07): _on_game_event NEVER calls SpeechService. Speech
+Subscriber contract (D-07): _on_state NEVER calls SpeechService. Speech
 only happens via user-initiated paths (navigate_to_zone / move_in_zone /
 announce_deck_counts / announce_opponent_hand_count / jump_to_zone /
 read_detail_lines).
@@ -38,9 +38,9 @@ from stonereader.models.deck import Deck, DeckSummary
 from stonereader.models.game_state import GameState, PlayedCard
 from stonereader.presenters.base import BasePresenter, ZoneNavigationMixin
 from stonereader.services import GameTracker
+from stonereader.services._diff import diff
 from stonereader.services._events import (
     GameEnded,
-    GameEvent,
     GameStarted,
 )
 from stonereader.speech_service import SpeechService
@@ -102,20 +102,25 @@ class LiveGamePresenter(ZoneNavigationMixin, BasePresenter):
         self._on_state_changed: Optional[Callable[[], None]] = None
         self._on_title_changed: Optional[Callable[[str], None]] = None
         # Subscribe to tracker.
-        self._tracker.subscribe(self._on_game_event)
+        self._tracker.subscribe(self._on_state)
 
     # ---------------------------------------------- Lifecycle / Subscription
 
     def cleanup(self) -> None:
         """Unsubscribe from tracker. Idempotent."""
-        self._tracker.unsubscribe(self._on_game_event)
+        self._tracker.unsubscribe(self._on_state)
 
-    def _on_game_event(
-        self, event: GameEvent, state: Optional[GameState]
+    def _on_state(
+        self, prev: Optional[GameState], curr: GameState
     ) -> None:
-        """Subscriber entrypoint. NEVER calls speech (D-07)."""
-        self._current_state = state
-        if isinstance(event, GameStarted):
+        """Subscriber entrypoint (issue #5). NEVER calls speech (D-07).
+
+        Lifecycle branches re-derive via diff(prev, curr); the presenter
+        does not depend on the engine constructing GameStarted/GameEnded.
+        """
+        self._current_state = curr
+        events = diff(prev, curr)
+        if any(isinstance(ev, GameStarted) for ev in events):
             self._detected_deck_name = None
             self._detection_attempted = False
             self._original_deck_cards = None
@@ -123,19 +128,18 @@ class LiveGamePresenter(ZoneNavigationMixin, BasePresenter):
                 self._zone_cursors[zone] = 0
             self._notify_view()
             return
-        if isinstance(event, GameEnded):
+        if any(isinstance(ev, GameEnded) for ev in events):
             self._notify_view()
             return
         if (
             not self._detection_attempted
-            and state is not None
-            and state.game_type not in _NON_CONSTRUCTED_GAME_TYPES
+            and curr.game_type not in _NON_CONSTRUCTED_GAME_TYPES
         ):
             revealed_count = sum(
-                1 for e in state.player_deck if e.card_id
+                1 for e in curr.player_deck if e.card_id
             )
             if revealed_count >= 30:
-                self._run_auto_detection(state)
+                self._run_auto_detection(curr)
                 self._detection_attempted = True
         self._notify_view()
 
