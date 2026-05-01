@@ -10,7 +10,13 @@ from typing import Any, Callable, Dict, List, Optional
 from hearthstone.enums import CardType, FormatType, GameType, Zone
 
 from stonereader.models.card import Card, CardDatabase
-from stonereader.models.game_state import GameEntity, GameState, Hero, PlayedCard
+from stonereader.models.game_state import (
+    AttackInProgress,
+    GameEntity,
+    GameState,
+    Hero,
+    PlayedCard,
+)
 from stonereader.services._events import (
     AttackStarted,
     CardDrawn,
@@ -504,6 +510,10 @@ class GameEngine:
         elif p.tag == "MULLIGAN_STATE" and p.value == _MULLIGAN_DONE:
             if not self._mulligan_done_emitted:
                 self._mulligan_done_emitted = True
+                if self._current_state is not None:
+                    self._current_state = dataclasses.replace(
+                        self._current_state, mulligan_complete=True
+                    )
                 events.append(
                     MulliganDone(timestamp=self._now(), turn=self._current_turn())
                 )
@@ -647,25 +657,50 @@ class GameEngine:
     def _on_block_start(self, p: BlockStartPacket) -> List[GameEvent]:
         self._block_stack.append(p.block_type)
         self._block_subjects.append(p.entity_id)
+        self._mirror_block_stack()
         if p.block_type == "ATTACK":
             ent = self._entities.get(p.entity_id, {})
+            attacker_controller = ent.get("CONTROLLER", 0)
+            defender_entity_id = p.target_id or 0
+            if self._current_state is not None:
+                self._current_state = dataclasses.replace(
+                    self._current_state,
+                    attack_in_progress=AttackInProgress(
+                        attacker_entity_id=p.entity_id,
+                        defender_entity_id=defender_entity_id,
+                        attacker_controller=attacker_controller,
+                    ),
+                )
             return [
                 AttackStarted(
                     timestamp=self._now(),
                     turn=self._current_turn(),
                     attacker_entity_id=p.entity_id,
-                    defender_entity_id=p.target_id or 0,
-                    attacker_controller=ent.get("CONTROLLER", 0),
+                    defender_entity_id=defender_entity_id,
+                    attacker_controller=attacker_controller,
                 )
             ]
         return []
 
-    def _on_block_end(self, _p: BlockEndPacket) -> List[GameEvent]:
+    def _on_block_end(self, p: BlockEndPacket) -> List[GameEvent]:
         if self._block_stack:
             self._block_stack.pop()
         if self._block_subjects:
             self._block_subjects.pop()
+        self._mirror_block_stack()
+        if p.block_type == "ATTACK" and self._current_state is not None:
+            self._current_state = dataclasses.replace(
+                self._current_state, attack_in_progress=None
+            )
         return []
+
+    def _mirror_block_stack(self) -> None:
+        """Issue #3: keep GameState.block_stack in lockstep with self._block_stack."""
+        if self._current_state is None:
+            return
+        self._current_state = dataclasses.replace(
+            self._current_state, block_stack=tuple(self._block_stack)
+        )
 
     def _on_show_entity(self, p: ShowEntityPacket) -> List[GameEvent]:
         ent = self._entities.get(p.entity_id, {})

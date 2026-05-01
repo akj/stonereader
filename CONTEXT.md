@@ -44,6 +44,19 @@ _Avoid_: "current game", "active game"
 A **Game** that has finished, loaded from an HSReplay XML file. The **User** navigates turn-by-turn through a `ReplayState`, which wraps `Tuple[GameState, ...]`.
 _Avoid_: "recording", "log" (`Power.log` is a different thing)
 
+**Game event**:
+An observable happening in a **Game** that downstream consumers can react to —
+e.g. a card was drawn, a minion died, the turn flipped, the game ended.
+**Game-mode-agnostic**: the same event types describe what happened whether the
+**Game** is a **Live game** or a **Replay**. Derived from a pair of `GameState`
+snapshots by a pure diff function, so the **Live game** pipeline (engine apply
+→ new state → diff vs previous) and the **Replay** pipeline (User advances
+turn → diff `states[i]` vs `states[i+1]`) produce **Game events** of the same
+shape. Distinct from a **Packet**, which is a `Power.log`-specific input the
+engine consumes; **Game events** are an output the rest of the system consumes.
+_Avoid_: "narration event" (names a single consumer's purpose), "engine event"
+(too narrow — Replays produce them too without an engine)
+
 ## Relationships
 
 - A UI **zone** either projects from a game **Zone** (e.g., the Remaining Deck zone is `Zone.DECK` minus draws) or is *synthesised* (Cards Drawn, Opponent Played) and corresponds to no single game **Zone**.
@@ -51,6 +64,7 @@ _Avoid_: "recording", "log" (`Power.log` is a different thing)
 - One **Card** → many **Entities** (two Fireballs in a deck = two Entities pointing at the same Fireball **Card**). `CardDatabase` holds **Cards**; `GameState` holds **Entities**.
 - A game has exactly one **Friendly Player** and one **Opponent** from the **User**'s perspective. Hearthstone's `player_id` (1 or 2) is server-assigned and only maps to Friendly/Opponent after resolution.
 - In a **Live game**, the **Friendly Player** is always the **User**'s side. In a **Replay**, the **Friendly Player** is whoever the replay was recorded from — which may or may not be the **User** (the User might be watching someone else's replay). `ReplayState.friendly_player_id` is captured from the replay metadata, not from the User's identity.
+- A **Game event** is always derivable from a pair of `GameState` snapshots; consumers never need access to **Packets**, the engine's internal block stack, or hslog/HSReplay APIs. Cases where a packet-level fact is needed for a **Game event** (block context for "was played from hand," mulligan completion timing, attack-in-progress) are lifted onto `GameState` itself so the diff function can recover them.
 
 ## Flagged ambiguities
 

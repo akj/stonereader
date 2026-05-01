@@ -77,6 +77,20 @@ class PlayedCard:
 
 
 @dataclass(frozen=True)
+class AttackInProgress:
+    """Issue #3: attack-block context lifted onto GameState.
+
+    Set when a BlockType.ATTACK opens, cleared when it closes. Carries the same
+    payload AttackStarted/DamageDealt use today so a future pure diff function
+    can recover those events without engine internals.
+    """
+
+    attacker_entity_id: int
+    defender_entity_id: int
+    attacker_controller: int
+
+
+@dataclass(frozen=True)
 class GameState:
     """Represents a moment in game time."""
 
@@ -118,7 +132,11 @@ class GameState:
     ] = ()  # opponent draws may have unknown card_id
 
     # NEW (Phase 2) — drives game lifecycle queries
-    game_state: str = "RUNNING"  # "RUNNING" | "COMPLETE"
+    # "RUNNING" while play is in progress, "COMPLETE" on PLAYSTATE WON/LOST/TIED.
+    # "ABANDONED" is a valid value at the model layer (used by a future tracker
+    # switch and Replay loaders for the Hearthstone-disappeared case); the engine
+    # itself does not produce it today.
+    game_state: str = "RUNNING"
     game_type: str = ""  # "RANKED" | "CASUAL" | "ARENA" | "BATTLEGROUNDS" | ""
     format_type: str = ""  # "STANDARD" | "WILD" | "CLASSIC" | "TWIST" | ""
     player_playstate: str = ""  # "" | "PLAYING" | "WON" | "LOST" | "TIED"
@@ -126,3 +144,12 @@ class GameState:
 
     # NEW (Phase 2) — drives auto-deck-detect (LIVE-08, deferred to Phase 3 but cheap to capture)
     player_starting_hand: Tuple[GameEntity, ...] = ()
+
+    # Issue #3: packet-level context lifted onto GameState so a future pure diff
+    # function can recover the same GameEvents without engine internals.
+    # Mirrors GameEngine._block_stack — top of the stack is the innermost open block.
+    block_stack: Tuple[str, ...] = ()
+    # Issue #3: True once both players have finished their mulligan.
+    mulligan_complete: bool = False
+    # Issue #3: present while a BlockType.ATTACK is open; None otherwise.
+    attack_in_progress: Optional[AttackInProgress] = None
