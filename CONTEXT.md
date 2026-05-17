@@ -40,8 +40,12 @@ _Avoid_: "match"
 A **Game** in progress. Source: `Power.log` real-time tail. State updates as events arrive. Tracking starts on `CREATE_GAME` and resets on game end.
 _Avoid_: "current game", "active game"
 
+**Live game timeline**:
+The navigable history of a **Live game** while it is in progress.
+_Avoid_: "live replay"
+
 **Replay**:
-A **Game** that has finished, loaded from an HSReplay XML file. The **User** navigates turn-by-turn through a `ReplayState`, which wraps `Tuple[GameState, ...]`.
+A **Game** that has finished, loaded from a persisted source such as HSReplay XML or a StoneReader-saved game record. The **User** navigates turn-by-turn through a `ReplayState`, which wraps `Tuple[GameState, ...]`.
 _Avoid_: "recording", "log" (`Power.log` is a different thing)
 
 **Game event**:
@@ -64,9 +68,13 @@ _Avoid_: "narration event" (names a single consumer's purpose), "engine event"
 - One **Card** → many **Entities** (two Fireballs in a deck = two Entities pointing at the same Fireball **Card**). `CardDatabase` holds **Cards**; `GameState` holds **Entities**.
 - A game has exactly one **Friendly Player** and one **Opponent** from the **User**'s perspective. Hearthstone's `player_id` (1 or 2) is server-assigned and only maps to Friendly/Opponent after resolution.
 - In a **Live game**, the **Friendly Player** is always the **User**'s side. In a **Replay**, the **Friendly Player** is whoever the replay was recorded from — which may or may not be the **User** (the User might be watching someone else's replay). `ReplayState.friendly_player_id` is captured from the replay metadata, not from the User's identity.
+- A **Live game timeline** and a **Replay** are both navigable histories of a **Game**, but only a **Replay** is loaded from a persisted finished-game source.
+- After a **Live game** ends normally, its **Live game timeline** is automatically persisted as a **Replay**.
+- An abandoned **Live game** is not persisted as a **Replay** because StoneReader did not observe a complete game result.
 - A **Game event** is always derivable from a pair of `GameState` snapshots; consumers never need access to **Packets**, the engine's internal block stack, or hslog/HSReplay APIs. Cases where a packet-level fact is needed for a **Game event** (block context for "was played from hand," mulligan completion timing, attack-in-progress) are lifted onto `GameState` itself so the diff function can recover them.
 
 ## Flagged ambiguities
 
 - **Zone vs zone**: capital-Z `Zone` is the Hearthstone enum (`hearthstone.enums.Zone`); lowercase `zone` is the StoneReader UI navigable list. Both appear in the code — the imported `Zone` enum in `services/_engine.py` etc., and the `_*_ZONE` constants in `presenters/`. In prose, always pair the lowercase `zone` with its proper noun ("the Remaining Deck zone") so it's never bare.
 - **Player vs Friendly Player**: code uses `player_` as shorthand for "Friendly Player" in attribute names; in prose, prefer "Friendly Player" so it doesn't collide with the generic Hearthstone idea of "a player" (there are two). When referring to either side abstractly, say "side." `player_id` (1 or 2) is the Hearthstone server-slot; it only maps to Friendly/Opponent after `FriendlyPlayerExporter` resolution.
+- **Live game timeline vs Replay**: "live replay" was rejected because external Hearthstone tools use **Replay** for finished-game review and "live" language for in-progress information.
