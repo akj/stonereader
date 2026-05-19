@@ -61,6 +61,10 @@ engine consumes; **Game events** are an output the rest of the system consumes.
 _Avoid_: "narration event" (names a single consumer's purpose), "engine event"
 (too narrow — Replays produce them too without an engine)
 
+**Hearthstone Access** (or **HSA**):
+The third-party Hearthstone accessibility mod (hearthstoneaccess.com), used as StoneReader's canonical reference for keyboard navigation conventions. StoneReader's **Replay** viewer and Card Library/Browser mirror HSA's key conventions — including its internal inconsistencies — so that HSA users carry muscle memory across. See ADR-0003.
+_Avoid_: "the mod", "HearthstoneAccess" (single word), generic "accessibility mod"
+
 ## Relationships
 
 - A UI **zone** either projects from a game **Zone** (e.g., the Remaining Deck zone is `Zone.DECK` minus draws) or is *synthesised* (Cards Drawn, Opponent Played) and corresponds to no single game **Zone**.

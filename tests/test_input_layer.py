@@ -130,3 +130,22 @@ def test_input_layer_delete_key_dispatches():
     layer._on_char_hook(event)
     assert called == ["delete"]
     frame.Destroy()
+
+
+def test_key_spec_tab():
+    assert _key_spec_from_event(_make_key_event(wx.WXK_TAB)) == "tab"
+
+
+def test_key_spec_shift_tab():
+    assert _key_spec_from_event(_make_key_event(wx.WXK_TAB, shift=True)) == "shift+tab"
+
+
+def test_key_spec_page_up_down():
+    assert _key_spec_from_event(_make_key_event(wx.WXK_PAGEUP)) == "pageup"
+    assert _key_spec_from_event(_make_key_event(wx.WXK_PAGEDOWN)) == "pagedown"
+
+
+def test_key_spec_digit_keys():
+    assert _key_spec_from_event(_make_key_event(ord("3"))) == "3"
+    assert _key_spec_from_event(_make_key_event(ord("0"))) == "0"
+    assert _key_spec_from_event(_make_key_event(ord("9"))) == "9"

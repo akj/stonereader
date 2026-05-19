@@ -31,7 +31,14 @@ _KEY_NAMES: Dict[int, str] = {
     wx.WXK_END: "end",
     wx.WXK_SPACE: "space",
     wx.WXK_DELETE: "delete",
+    wx.WXK_TAB: "tab",
+    wx.WXK_PAGEUP: "pageup",
+    wx.WXK_PAGEDOWN: "pagedown",
 }
+
+# Named special keys that DO take a `shift+` prefix when Shift is held.
+# Other named keys (arrows, enter, home, etc.) ignore Shift.
+_SHIFTABLE_NAMED_KEYS = {"tab"}
 
 
 def _key_spec_from_event(event: wx.KeyEvent) -> str:
@@ -42,9 +49,14 @@ def _key_spec_from_event(event: wx.KeyEvent) -> str:
         name = chr(keycode).lower()
     if name is None:
         return ""
-    # Shift prefix for letter keys only — not arrows, enter, etc.
-    if event.ShiftDown() and name not in _KEY_NAMES.values():
-        name = f"shift+{name}"
+    # Shift prefix applies to typeable chars (letters/digits) and to named keys
+    # in _SHIFTABLE_NAMED_KEYS (currently just Tab). Arrows/enter/home etc.
+    # ignore Shift so existing bindings stay matched when Shift is incidentally
+    # held.
+    if event.ShiftDown():
+        is_named = name in _KEY_NAMES.values()
+        if not is_named or name in _SHIFTABLE_NAMED_KEYS:
+            name = f"shift+{name}"
     return name
 
 

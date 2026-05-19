@@ -6,9 +6,12 @@ from typing import Any, Callable, Sequence
 
 from stonereader.models.card import Card, CardDatabase
 from stonereader.presenters.base import BasePresenter, ZoneNavigationMixin
+from stonereader.presenters.card_library import CATEGORY_TO_FILTER
 from stonereader.speech_service import SpeechService
 
 _RESULTS_ZONE = "results"
+_CATEGORY_ORDER = list(CATEGORY_TO_FILTER.keys())
+_PAGE_SIZE = 10
 
 
 class CardBrowserPresenter(ZoneNavigationMixin, BasePresenter):
@@ -29,12 +32,88 @@ class CardBrowserPresenter(ZoneNavigationMixin, BasePresenter):
         super().__init__(speech)
         self._card_db = card_db
         self._category_label = category_label
-        self._filters = {"card_class": card_class_filter} if card_class_filter else None
+        try:
+            self._class_index = _CATEGORY_ORDER.index(category_label)
+        except ValueError:
+            self._class_index = 0
+        self._class_filter = card_class_filter
+        self._mana_filter: int | None = None
+        self._filters = self._build_filters()
         self._results: list[Card] = self._card_db.search_cards(filters=self._filters)
         self._init_navigation([_RESULTS_ZONE])
         self._on_state_changed: Callable[[list[Card], int], None] | None = None
         self._on_status_changed: Callable[[str], None] | None = None
         self._on_request_search: Callable[[], str | None] | None = None
+
+    def _build_filters(self) -> dict[str, Any] | None:
+        f: dict[str, Any] = {}
+        if self._class_filter:
+            f["card_class"] = self._class_filter
+        if self._mana_filter is not None:
+            if self._mana_filter == 9:
+                f["min_cost"] = 9
+            else:
+                f["cost"] = self._mana_filter
+        return f or None
+
+    def _recompute_results(self) -> None:
+        self._filters = self._build_filters()
+        self._results = self._card_db.search_cards(filters=self._filters)
+        self._zone_cursors[_RESULTS_ZONE] = 0
+        self._detail_cursor = -1
+
+    def _build_status_string(self) -> str:
+        parts = [self._category_label]
+        if self._mana_filter is not None:
+            mana_label = "9+ mana" if self._mana_filter == 9 else f"{self._mana_filter} mana"
+            parts.append(mana_label)
+        count = len(self._results)
+        parts.append(f"{count} card" if count == 1 else f"{count} cards")
+        return ", ".join(parts)
+
+    def _emit_status(self) -> None:
+        status = self._build_status_string()
+        self._speech.speak(status)
+        if self._on_status_changed is not None:
+            self._on_status_changed(status)
+
+    def cycle_class(self, direction: int) -> None:
+        """Advance (+1) or retreat (-1) the active class with wrap-around."""
+        self._class_index = (self._class_index + direction) % len(_CATEGORY_ORDER)
+        label = _CATEGORY_ORDER[self._class_index]
+        self._category_label = label
+        self._class_filter = CATEGORY_TO_FILTER[label]
+        self._recompute_results()
+        self._emit_status()
+        self._notify_view()
+
+    def apply_mana_filter(self, digit: int) -> None:
+        """Single-select mana-cost filter.
+
+        Press digit -> filter to that cost. Press same digit again -> clear.
+        Press different digit -> replace. "9" matches cost >= 9.
+        """
+        if self._mana_filter == digit:
+            self._mana_filter = None
+        else:
+            self._mana_filter = digit
+        self._recompute_results()
+        self._emit_status()
+        self._notify_view()
+
+    def page(self, direction: int) -> None:
+        """Move the results cursor by _PAGE_SIZE in `direction`, clamping."""
+        if not self._results:
+            return
+        cursor = self._zone_cursors.get(_RESULTS_ZONE, 0)
+        cursor = max(0, min(cursor + direction * _PAGE_SIZE, len(self._results) - 1))
+        self._zone_cursors[_RESULTS_ZONE] = cursor
+        self._detail_cursor = 0
+        item = self._results[cursor]
+        self._speech.speak(
+            self._format_item_speech(item, cursor + 1, len(self._results))
+        )
+        self._notify_view()
 
     def get_zone_items(self, zone_name: str) -> Sequence[Any]:
         if zone_name == _RESULTS_ZONE:
@@ -116,14 +195,21 @@ class CardBrowserPresenter(ZoneNavigationMixin, BasePresenter):
         return card.name
 
     def get_key_map(self) -> dict[str, Callable[[], None]]:
-        return {
+        key_map: dict[str, Callable[[], None]] = {
             "left": lambda: self.move_in_zone(-1),
             "right": lambda: self.move_in_zone(1),
             "down": self._read_detail_down,
             "up": self._read_detail_up,
             "home": self.jump_to_first,
             "end": self.jump_to_last,
+            "tab": lambda: self.cycle_class(1),
+            "shift+tab": lambda: self.cycle_class(-1),
+            "pagedown": lambda: self.page(1),
+            "pageup": lambda: self.page(-1),
         }
+        for digit in range(10):
+            key_map[str(digit)] = lambda d=digit: self.apply_mana_filter(d)
+        return key_map
 
     def _read_detail_down(self) -> None:
         item = self._current_item()
