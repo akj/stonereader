@@ -33,6 +33,30 @@ CREATE TABLE IF NOT EXISTS games (
 );
 """
 
+# Replay metadata (v2). Replay CONTENT lives in .hsreplay files, not the DB.
+_SCHEMA_V2 = """
+CREATE TABLE IF NOT EXISTS replays (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    file_path TEXT NOT NULL,
+    checksum TEXT NOT NULL UNIQUE,
+    source TEXT NOT NULL,
+    friendly_class TEXT NOT NULL,
+    opponent_class TEXT NOT NULL,
+    result TEXT NOT NULL,
+    turns INTEGER NOT NULL,
+    game_type TEXT NOT NULL DEFAULT '',
+    format_type TEXT NOT NULL DEFAULT '',
+    deck_name TEXT,
+    deck_id INTEGER,
+    played_at TIMESTAMP NOT NULL,
+    duration_seconds INTEGER,
+    imported_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+REPLAY_SOURCES = ("live_auto", "manual_import")
+REPLAY_RESULTS = ("WON", "LOST", "TIED", "UNKNOWN")
+
 
 def get_connection(db_path: str | None = None) -> sqlite3.Connection:
     """Open a SQLite connection. Defaults to ~/.stonereader/stonereader.db."""
@@ -55,12 +79,19 @@ def get_schema_version(conn: sqlite3.Connection) -> int:
 
 
 def init_db(conn: sqlite3.Connection) -> None:
-    """Create tables if they don't exist. Idempotent."""
+    """Create/migrate tables to the latest schema version. Idempotent.
+
+    Migrates v1 -> v2 in place without dropping existing decks/games data.
+    """
     version = get_schema_version(conn)
-    if version >= 1:
+    if version >= 2:
         return
-    conn.executescript(_SCHEMA_V1)
-    conn.execute("INSERT OR REPLACE INTO schema_version (version) VALUES (?)", (1,))
+    if version == 0:
+        conn.executescript(_SCHEMA_V1)
+    conn.executescript(_SCHEMA_V2)
+    # version is the PRIMARY KEY, so clear stale rows before recording the new one.
+    conn.execute("DELETE FROM schema_version")
+    conn.execute("INSERT INTO schema_version (version) VALUES (?)", (2,))
     conn.commit()
 
 
