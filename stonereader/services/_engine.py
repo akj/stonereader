@@ -108,6 +108,24 @@ class GameEngine:
         self._friendly_player_resolved = False
         self._friendly_player_id = 1
 
+    def force_friendly_player(self, player_id: int) -> None:
+        """Authoritatively pin the friendly player_id (used by replay loading).
+
+        A replay's friendly side is known from metadata (FriendlyPlayerExporter),
+        not heuristics. CREATE_GAME calls reset() and re-runs the live AI
+        heuristic, which can disagree with the recorded side (e.g. a Player-2
+        replay). The replay loader calls this AFTER the CREATE_GAME packet to
+        override that result and mark resolution final so the SHOW_ENTITY
+        fallback cannot change it. Re-buckets already-recorded rows when the id
+        actually changes. No-op for an out-of-range player_id.
+        """
+        if player_id not in (1, 2):
+            return
+        if player_id != self._friendly_player_id:
+            self._friendly_player_id = player_id
+            self._rebucket_from_entities()
+        self._friendly_player_resolved = True
+
     def apply(self, packet: Packet) -> None:
         """Apply a packet, mutating internal state and republishing current_state.
 

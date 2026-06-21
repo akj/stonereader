@@ -14,13 +14,16 @@ Pipeline
 2. Friendly player from ``FriendlyPlayerExporter`` (authoritative replay
    metadata — the recorded local side).
 3. ``translate_packet_tree`` -> canonical internal ``Packet`` list.
-4. Feed packets through a ``GameEngine`` pre-seeded with the recorded friendly
-   player id so ``player_*`` / ``opponent_*`` zones orient to the right side.
+4. Feed packets through a ``GameEngine``; immediately after the CREATE_GAME
+   packet, ``force_friendly_player`` pins the recorded friendly side (CREATE_GAME
+   resets + re-runs the live heuristic, which can disagree) so ``player_*`` /
+   ``opponent_*`` zones orient correctly. ``active_player_id`` is normalised to
+   the 1=friendly / 2=opponent contract.
 5. Capture ``current_state`` after each packet, collapsing only consecutive
    identical snapshots. Deterministic.
 
-GameTag re-resolution (loader boundary adapter)
------------------------------------------------
+Round-trip enum re-resolution (loader boundary adapter)
+-------------------------------------------------------
 When an hslog ``PacketTree`` is round-tripped through HSReplay XML
 (``from_packet_tree`` -> ``to_xml`` -> ``from_xml_file`` -> ``to_packet_tree``),
 the resulting ``TagChange.tag`` and ``FullEntity``/``ShowEntity``/``CreateGame``
@@ -42,10 +45,11 @@ no real speech — keeping it reusable and unit-testable.
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
-from hearthstone.enums import GameTag
+from hearthstone.enums import BlockType, GameTag
 from hslog import packets as hslog_packets
 from hslog.export import FriendlyPlayerExporter
 from hsreplay.document import HSReplayDocument
@@ -54,6 +58,7 @@ from stonereader.models.game_state import GameState
 from stonereader.models.replay import ReplayState
 from stonereader.services._engine import GameEngine
 from stonereader.services._hslog_translator import translate_packet_tree
+from stonereader.services._packets import CreateGamePacket
 
 
 class ReplayLoadError(Exception):
@@ -78,27 +83,33 @@ def load_replay(path: Path) -> ReplayState:
     tree = _load_first_tree(path)
     friendly_player_id = _export_friendly_player(tree)
 
-    # Re-resolve int GameTag identifiers (round-trip artefact) to enums so the
-    # shared translator produces enum-NAME-keyed tags the engine understands.
-    _resolve_gametags(tree)
+    # Re-resolve round-trip artefacts (int GameTag AND int BlockType identifiers)
+    # back to enums so the shared translator produces the same enum-NAME-keyed
+    # tags and block-type names the engine + diff seam expect.
+    _resolve_enums(tree)
 
     packets = translate_packet_tree(tree)
     if not packets:
         raise ReplayLoadError(f"no packets translated from replay: {path}")
 
-    engine = GameEngine()
-    # Friendly player is authoritative from the replay metadata: pin it so the
-    # engine orients player_* / opponent_* zones to the recorded local side and
-    # does not re-run its live heuristics.
-    engine._friendly_player_id = friendly_player_id
-    engine._friendly_player_resolved = True
+    # Map each player ENTITY id -> its server player_id (1/2), recovered from the
+    # CREATE_GAME packet. Used to normalize active_player_id to the documented
+    # 1=friendly / 2=opponent contract (see services/_events.py).
+    entity_to_pid = _player_entity_pids(packets)
 
+    engine = GameEngine()
     states: List[GameState] = []
     for pkt in packets:
         engine.apply(pkt)
+        if isinstance(pkt, CreateGamePacket):
+            # CREATE_GAME just reset the engine and re-ran the live AI heuristic;
+            # override it with the authoritative recorded friendly side so
+            # player_* / opponent_* zones orient correctly (incl. Player-2 replays).
+            engine.force_friendly_player(friendly_player_id)
         current = engine.current_state
         if current is None:
             continue
+        current = _normalize_active_player(current, entity_to_pid, friendly_player_id)
         # Dedupe only CONSECUTIVE identical snapshots (deterministic).
         if states and states[-1] == current:
             continue
@@ -149,19 +160,25 @@ def _export_friendly_player(tree: Any) -> int:
     return 1
 
 
-def _resolve_gametags(tree: Any) -> None:
-    """Convert int GameTag identifiers in a round-tripped tree to GameTag enums.
+def _resolve_enums(tree: Any) -> None:
+    """Convert round-tripped int identifiers back to enums, in place.
 
-    Mutates the tree in place. After a HSReplay XML round-trip, hslog yields
-    ``TagChange.tag`` and the ``(tag, value)`` pairs inside
-    ``CreateGame``/``FullEntity``/``ShowEntity``/``ChangeEntity`` ``.tags`` as
-    plain ints. The shared translator names tags via ``GameTag.name``, so bare
-    ints stringify to their decimal text and the engine no longer recognises
-    them. Re-resolving to enums restores parity with the live parse.
+    After a HSReplay XML round-trip, hslog yields raw ints where the live parse
+    yields enums, in TWO places that the engine + diff seam are sensitive to:
 
-    Unknown int identifiers (tags not in the GameTag enum) are left as-is; the
-    translator already tolerates them and the engine ignores tags it does not
-    handle.
+    1. ``TagChange.tag`` and the ``(tag, value)`` pairs inside
+       ``CreateGame``/``FullEntity``/``ShowEntity``/``ChangeEntity`` ``.tags``
+       come back as int ``GameTag`` ids. The translator names tags via
+       ``GameTag.name``; a bare int stringifies to its decimal text, so the
+       engine's string-keyed handlers (``"ZONE"``/``"CONTROLLER"``/...) no-op.
+    2. ``Block.type`` comes back as an int ``BlockType`` id. The translator
+       names it via ``BlockType.name``; a bare int stringifies to e.g. ``"7"``
+       instead of ``"PLAY"``, so the engine/diff checks for ``"PLAY"``,
+       ``"POWER"`` and ``"ATTACK"`` never match — replay event drilldown then
+       silently drops card-play, attack and damage events.
+
+    Re-resolving both restores parity with a freshly-parsed live tree. Unknown
+    int identifiers are left as-is (idempotent and lossless).
     """
     _walk_resolve(getattr(tree, "packets", []) or [])
 
@@ -169,6 +186,7 @@ def _resolve_gametags(tree: Any) -> None:
 def _walk_resolve(nodes: Any) -> None:
     for node in nodes:
         if isinstance(node, hslog_packets.Block):
+            node.type = _to_blocktype(getattr(node, "type", None))
             _walk_resolve(getattr(node, "packets", []) or [])
         elif isinstance(node, hslog_packets.TagChange):
             node.tag = _to_gametag(node.tag)
@@ -211,6 +229,59 @@ def _to_gametag(tag: Any) -> Any:
         return GameTag(int(tag))
     except (ValueError, TypeError):
         return tag
+
+
+def _to_blocktype(value: Any) -> Any:
+    """Coerce an int BlockType identifier to a BlockType enum; pass through else.
+
+    Already-resolved enums and unknown identifiers are returned unchanged
+    (idempotent and lossless), mirroring :func:`_to_gametag`.
+    """
+    if value is None or isinstance(value, BlockType):
+        return value
+    try:
+        return BlockType(int(value))
+    except (ValueError, TypeError):
+        return value
+
+
+def _player_entity_pids(packets: List[Any]) -> Dict[int, int]:
+    """Map each player ENTITY id -> its server player_id from CREATE_GAME.
+
+    The translated ``CreateGamePacket.players`` are ``(entity_id, player_id,
+    name, hi, lo)`` tuples (same shape the engine's friendly heuristic unpacks).
+    """
+    mapping: Dict[int, int] = {}
+    for pkt in packets:
+        if isinstance(pkt, CreateGamePacket):
+            for player in pkt.players:
+                try:
+                    entity_id, player_id = player[0], player[1]
+                except (IndexError, TypeError):
+                    continue
+                mapping[int(entity_id)] = int(player_id)
+            break
+    return mapping
+
+
+def _normalize_active_player(
+    state: GameState, entity_to_pid: Dict[int, int], friendly_player_id: int
+) -> GameState:
+    """Remap ``active_player_id`` to the 1=friendly / 2=opponent contract.
+
+    The engine records ``active_player_id`` as the active player's ENTITY id
+    (2/3), but the documented contract (services/_events.py) and the viewer/diff
+    consumers expect 1 = friendly, 2 = opponent. Translate via the recorded
+    player-entity -> player_id map. Non-player active ids (e.g. the pre-turn
+    default) are left untouched.
+    """
+    pid = entity_to_pid.get(state.active_player_id)
+    if pid is None:
+        return state
+    relative = 1 if pid == friendly_player_id else 2
+    if relative == state.active_player_id:
+        return state
+    return dataclasses.replace(state, active_player_id=relative)
 
 
 # Quiet "unused import" warnings for symbols referenced only in type hints.

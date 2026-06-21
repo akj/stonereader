@@ -131,7 +131,9 @@ def test_mixed_timing_fallback() -> None:
     # Pre-resolution: card A (controller 2) drawn.
     engine.apply(
         FullEntityPacket(
-            packet_id=1, entity_id=100, card_id="A_CARD",
+            packet_id=1,
+            entity_id=100,
+            card_id="A_CARD",
             tags={"CONTROLLER": 2, "ZONE": 2},  # 2 = DECK
         )
     )
@@ -141,7 +143,9 @@ def test_mixed_timing_fallback() -> None:
     # Pre-resolution: card B (controller 1) drawn.
     engine.apply(
         FullEntityPacket(
-            packet_id=3, entity_id=101, card_id="B_CARD",
+            packet_id=3,
+            entity_id=101,
+            card_id="B_CARD",
             tags={"CONTROLLER": 1, "ZONE": 2},
         )
     )
@@ -151,13 +155,17 @@ def test_mixed_timing_fallback() -> None:
     # Trigger fallback: SHOW_ENTITY for an entity with controller 2 into HAND.
     engine.apply(
         FullEntityPacket(
-            packet_id=5, entity_id=200, card_id="",
+            packet_id=5,
+            entity_id=200,
+            card_id="",
             tags={"CONTROLLER": 2, "ZONE": 0},
         )
     )
     engine.apply(
         ShowEntityPacket(
-            packet_id=6, entity_id=200, card_id="MULLIGAN_CARD",
+            packet_id=6,
+            entity_id=200,
+            card_id="MULLIGAN_CARD",
             tags={"CONTROLLER": 2, "ZONE": 3},
         )
     )
@@ -166,7 +174,9 @@ def test_mixed_timing_fallback() -> None:
     # Post-resolution: card C (controller 2) drawn.
     engine.apply(
         FullEntityPacket(
-            packet_id=7, entity_id=102, card_id="C_CARD",
+            packet_id=7,
+            entity_id=102,
+            card_id="C_CARD",
             tags={"CONTROLLER": 2, "ZONE": 2},
         )
     )
@@ -176,7 +186,9 @@ def test_mixed_timing_fallback() -> None:
     # Post-resolution: card D (controller 1) drawn.
     engine.apply(
         FullEntityPacket(
-            packet_id=9, entity_id=103, card_id="D_CARD",
+            packet_id=9,
+            entity_id=103,
+            card_id="D_CARD",
             tags={"CONTROLLER": 1, "ZONE": 2},
         )
     )
@@ -233,3 +245,44 @@ def test_reconnect_resolves_friendly(power_log_fixture) -> None:
     # Final state: friendly is 1 (vs-AI capture).
     assert engine._friendly_player_id == 1
     assert engine._friendly_player_resolved is True
+
+
+# --- force_friendly_player (replay loading; codex review finding) -------------
+
+
+def _vs_ai_create() -> CreateGamePacket:
+    """A CREATE_GAME whose AI heuristic resolves friendly = player 1."""
+    return CreateGamePacket(
+        packet_id=0,
+        game_entity_id=1,
+        players=(
+            (2, 1, "LocalPlayer", 144115198130930503, 1),
+            (3, 2, "AI Innkeeper", 0, 0),
+        ),
+    )
+
+
+def test_force_friendly_player_overrides_heuristic() -> None:
+    """A replay's friendly side is authoritative metadata. force_friendly_player
+    must override the engine's CREATE_GAME heuristic result and mark it final so
+    the SHOW_ENTITY fallback cannot change it. (Without this, the loader's
+    pre-seed was wiped by CREATE_GAME's reset() and Player-2 replays could be
+    oriented from the wrong side.)
+    """
+    engine = GameEngine()
+    engine.apply(_vs_ai_create())
+    assert engine._friendly_player_id == 1  # heuristic picked player 1
+
+    engine.force_friendly_player(2)  # e.g. a Player-2 replay
+    assert engine._friendly_player_id == 2
+    assert engine._friendly_player_resolved is True
+
+
+def test_force_friendly_player_ignores_out_of_range() -> None:
+    """Out-of-range player ids are a no-op (defensive)."""
+    engine = GameEngine()
+    engine.apply(_vs_ai_create())
+    before = engine._friendly_player_id
+    engine.force_friendly_player(0)
+    engine.force_friendly_player(99)
+    assert engine._friendly_player_id == before

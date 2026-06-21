@@ -26,11 +26,41 @@ from hslog.export import FriendlyPlayerExporter
 from hsreplay.document import HSReplayDocument
 
 from stonereader.services._diff import diff
+from stonereader.services._engine import GameEngine
 from stonereader.services._events import GameEnded, GameStarted
+from stonereader.services._parser import Parser
 from stonereader.services._replay_loader import ReplayLoadError, load_replay
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "log"
 SOURCE_LOG = "game_end.log"
+
+
+def _live_states(log_name: str = SOURCE_LOG):
+    """Drive the LIVE pipeline (Parser -> GameEngine) over a fixture."""
+    path = FIXTURE_DIR / log_name
+    parser = Parser()
+    engine = GameEngine()
+    states = []
+    last = None
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            for pkt in parser.feed_line(line.rstrip("\n")):
+                engine.apply(pkt)
+                cur = engine.current_state
+                if cur is not None and cur is not last:
+                    states.append(cur)
+                    last = cur
+    return states
+
+
+def _event_type_counts(states):
+    counts: dict[str, int] = {}
+    prev = None
+    for s in states:
+        for ev in diff(prev, s):
+            counts[type(ev).__name__] = counts.get(type(ev).__name__, 0) + 1
+        prev = s
+    return counts
 
 
 def _source_tree():
@@ -161,3 +191,46 @@ def test_empty_packet_tree_raises_replay_load_error(tmp_path: Path) -> None:
     )
     with pytest.raises(ReplayLoadError):
         load_replay(empty)
+
+
+# --- Round-trip fidelity regressions (codex review findings) ------------------
+
+
+def test_block_types_resolved_to_names_not_ints(tmp_path: Path) -> None:
+    """Finding: HSReplay XML round-trips Block.type as ints, so block_stack held
+    numeric strings ('7') instead of names ('PLAY'). The diff seam's
+    block_stack[-1] == 'PLAY' / 'POWER' / 'ATTACK' checks then never matched and
+    replay event drilldown silently dropped card-play / attack / damage events.
+    The loader must re-resolve Block.type to enum names.
+    """
+    states = load_replay(_write_hsreplay(tmp_path)).states
+    seen = {b for s in states for b in s.block_stack}
+    assert seen, "fixture should open at least one block"
+    # No raw numeric block-type strings survive.
+    assert not any(b.isdigit() for b in seen), f"unresolved int block types: {seen}"
+    # Real block-type names appear (this fixture opens PLAY and POWER blocks).
+    assert "PLAY" in seen
+
+
+def test_replay_event_stream_matches_live(tmp_path: Path) -> None:
+    """The PRD contract: a replayed game produces the SAME diff-derived GameEvent
+    stream it did live. Regression guard for the round-trip enum-resolution: any
+    divergence (e.g. int block types, int GameTags) shows up as a mismatch here.
+    """
+    replay_counts = _event_type_counts(load_replay(_write_hsreplay(tmp_path)).states)
+    live_counts = _event_type_counts(_live_states())
+    assert replay_counts == live_counts
+
+
+def test_active_player_id_normalized_to_friendly_contract(tmp_path: Path) -> None:
+    """Finding: active_player_id is recorded as a player ENTITY id (2/3), but the
+    documented contract (services/_events.py) and the viewer expect 1=friendly /
+    2=opponent. The loader normalizes it so consumers can rely on the contract.
+    """
+    replay = load_replay(_write_hsreplay(tmp_path))
+    values = {s.active_player_id for s in replay.states}
+    assert values, "expected some states"
+    # Only contract values remain (1 friendly, 2 opponent); no raw entity ids (3+).
+    assert values <= {1, 2}, f"unnormalized active_player_id values: {values}"
+    # At least one turn is attributed to each side for a full two-player game.
+    assert 2 in values, "a full game should have at least one opponent turn"
