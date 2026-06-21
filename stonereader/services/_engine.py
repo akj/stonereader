@@ -53,11 +53,12 @@ _PLAYSTATE_NAMES: Dict[int, str] = {
 _MULLIGAN_DONE = 4
 
 # Stat tags whose value feeds an entity's published current_attack/current_health
-# (and, for DAMAGE under an ATTACK/POWER block, the diff seam's DamageDealt). A
-# change to any of these must republish the snapshot so the tracker/loader sees
-# the delta while the block context is still open — otherwise the new snapshot is
-# identical to the prior one and the damage/stat change is silently lost.
-_STAT_TAGS = frozenset({"DAMAGE", "ATK", "HEALTH", "DURABILITY"})
+# (and, for DAMAGE under an ATTACK/POWER block, the diff seam's DamageDealt), or
+# the display Hero's health/armor (DAMAGE/HEALTH/ARMOR on a hero entity). A change
+# to any of these must republish the snapshot so the tracker/loader sees the delta
+# while the block context is still open — otherwise the new snapshot is identical
+# to the prior one and the damage/stat change is silently lost.
+_STAT_TAGS = frozenset({"DAMAGE", "ATK", "HEALTH", "DURABILITY", "ARMOR"})
 
 # Tags that reshape the zone projection — which side an entity is bucketed to
 # (CONTROLLER, e.g. Mind Control), its order within a zone (ZONE_POSITION), or
@@ -267,9 +268,14 @@ class GameEngine:
                 continue
             # WR-02: use `is None` rather than `or` so a legitimate HEALTH=0
             # in the log (e.g. SHOW_ENTITY rebroadcast after lethal) is
-            # preserved instead of being clamped back to 30.
+            # preserved instead of being clamped back to 30. Hero.health is the
+            # CURRENT remaining health (max HEALTH minus accumulated DAMAGE) so
+            # the replay viewer speaks a damaged hero's real total, not its max.
             health_raw = ent.get("HEALTH")
-            health = 30 if health_raw is None else int(health_raw)
+            max_health = 30 if health_raw is None else int(health_raw)
+            damage_raw = ent.get("DAMAGE")
+            damage = 0 if damage_raw is None else int(damage_raw)
+            health = max_health - damage
             armor_raw = ent.get("ARMOR")
             armor = 0 if armor_raw is None else int(armor_raw)
             hero = Hero(
@@ -554,13 +560,18 @@ class GameEngine:
             and prev != p.value
             and self._current_state is not None
         ):
-            # A stat (DAMAGE/ATK/HEALTH/DURABILITY) or projection-shaping
+            # A stat (DAMAGE/ATK/HEALTH/DURABILITY/ARMOR) or projection-shaping
             # (CONTROLLER/ZONE_POSITION/CARDTYPE) change only mutated _entities
             # above; republish so the new stats / re-bucketed zones (and any
             # DamageDealt under an open ATTACK/POWER block) reach the
             # tracker/loader before the block closes. Guarded on an actual value
             # change to avoid redundant snapshots when hslog re-emits a tag.
             self._refresh_state()
+            if ent.get("CARDTYPE") == int(CardType.HERO):
+                # _refresh_state only re-projects zones; rebuild the display Hero
+                # so its health (max - DAMAGE) and armor track a hero's
+                # DAMAGE/HEALTH/ARMOR change the replay viewer speaks.
+                self._resolve_heroes()
 
     def _handle_zone_change(self, eid: int, prev: Any, new_zone: int) -> None:
         ent = self._entities.get(eid, {})

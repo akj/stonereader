@@ -324,6 +324,59 @@ def test_face_damage_under_attack_block_drives_damage_dealt():
     assert dealt[0].target_controller == 2
 
 
+def test_hero_damage_and_armor_sync_display_hero():
+    """A hero's DAMAGE / ARMOR change must keep the display Hero in sync:
+    Hero.health is the current total (max HEALTH minus DAMAGE) and an armor-only
+    change republishes. Otherwise the replay viewer speaks the initial values for
+    a damaged or armored hero (codex review round 10).
+    """
+    try:
+        card_db = CardDatabase.load()
+    except Exception:  # pragma: no cover - environment-dependent fallback
+        pytest.skip("CardDatabase unavailable (cardxml missing)")
+
+    engine = GameEngine(card_db=card_db)
+    engine.apply(
+        CreateGamePacket(
+            packet_id=0,
+            game_entity_id=1,
+            players=((2, 1, "P1", 1, 1), (3, 2, "P2", 2, 2)),
+        )
+    )
+    # HERO_08 (Jaina) is a real hero card so _resolve_heroes resolves it.
+    engine.apply(
+        FullEntityPacket(
+            packet_id=1,
+            entity_id=64,
+            card_id="HERO_08",
+            tags={
+                "CONTROLLER": 1,
+                "ZONE": 1,
+                "CARDTYPE": 3,
+                "HEALTH": 30,
+                "DAMAGE": 0,
+                "ARMOR": 0,
+            },
+        )
+    )
+    assert engine.current_state is not None
+    assert engine.current_state.player_hero.health == 30
+    assert engine.current_state.player_hero.armor == 0
+
+    # Face damage: the display hero's current health drops.
+    engine.apply(TagChangePacket(packet_id=2, entity_id=64, tag="DAMAGE", value=6))
+    assert engine.current_state.player_hero.health == 24
+
+    # An armor-only change must still republish and update the model.
+    before_armor = engine.current_state
+    engine.apply(TagChangePacket(packet_id=3, entity_id=64, tag="ARMOR", value=5))
+    after_armor = engine.current_state
+    assert after_armor is not None
+    assert after_armor is not before_armor, "ARMOR change must republish a new snapshot"
+    assert after_armor.player_hero.armor == 5
+    assert after_armor.player_hero.health == 24  # unchanged by the armor gain
+
+
 def test_location_in_play_projected_to_board():
     """A CardType.LOCATION in PLAY occupies a board slot and must appear on the
     board projection, not be dropped like a non-minion/non-weapon (codex round 7).
