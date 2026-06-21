@@ -749,6 +749,7 @@ class GameEngine:
         removed_zone = int(Zone.REMOVEDFROMGAME)
         minion_type = int(CardType.MINION)
         weapon_type = int(CardType.WEAPON)
+        location_type = int(CardType.LOCATION)
         for eid, ent in self._entities.items():
             zone = ent.get("ZONE")
             controller = ent.get("CONTROLLER")
@@ -772,7 +773,11 @@ class GameEngine:
                 target.append(self._entity_view(eid, ent, "SECRET", controller_int))
             elif zone == play_zone:
                 ctype = ent.get("CARDTYPE")
-                if ctype == minion_type:
+                # Minions AND Locations occupy board slots in PLAY — project both
+                # onto the board so they appear in live/replay board views and a
+                # location's PLAY→GRAVEYARD depletion is visible to the diff (as a
+                # CardRemoved, since the MinionDied gate is card_type=="MINION").
+                if ctype == minion_type or ctype == location_type:
                     target = player_board if is_friendly else opponent_board
                     target.append(self._entity_view(eid, ent, "PLAY", controller_int))
                 elif ctype == weapon_type:

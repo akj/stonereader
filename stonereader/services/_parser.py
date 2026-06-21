@@ -102,8 +102,8 @@ class Parser:
         self._walk(tree.packets, out)
         return out
 
-    def _walk(self, hslog_pkts: Any, out: List[Packet]) -> None:
-        """Recursively walk hslog packets and translate unseen ones.
+    def _walk(self, hslog_pkts: Any, out: List[Packet]) -> bool:
+        """Recursively walk hslog packets and translate unseen ones, IN ORDER.
 
         Per-packet translation and packet construction are delegated to
         :mod:`stonereader.services._hslog_translator` (the shared, pure
@@ -111,9 +111,19 @@ class Parser:
         live-incremental concerns hslog forces on us: deferring emission while
         a packet is still being built, deduping via py-id, and emitting a
         block's BlockEnd on the walk where the block has closed.
+
+        Emission is strictly tree-ordered: the walk HALTS at the first packet
+        that is not ready yet — a CreateGame/entity packet hslog is still
+        building, or a block whose BlockEnd cannot be emitted yet. Halting
+        (rather than skipping ahead) keeps a later sibling, or a block's own
+        BlockEnd, from jumping in front of a deferred child; otherwise the live
+        stream diverges from ``translate_packet_tree`` over the same tree and the
+        engine processes packets outside their block context. The deferred
+        packet settles on a later line and the next walk resumes from it.
+
+        Returns True if the walk halted (the caller must stop too), False if it
+        reached the end of this packet list.
         """
-        # Compute index of the last packet so we can detect "is the in-progress
-        # CreateGame still trailing or has hslog moved on".
         pkts_list = list(hslog_pkts)
         for idx, hp in enumerate(pkts_list):
             pyid = id(hp)
@@ -122,8 +132,10 @@ class Parser:
                 # Recurse into block children even if the block itself was seen,
                 # because new children may have been appended since last walk.
                 if isinstance(hp, hslog_packets.Block):
-                    self._walk(hp.packets, out)
-                    self._maybe_emit_block_end(hp, pyid, out)
+                    if self._walk(hp.packets, out):
+                        return True
+                    if not self._maybe_emit_block_end(hp, pyid, out):
+                        return True
                 continue
             # Defer CreateGame emission until subsequent packets exist OR the
             # hslog parser state confirms we've moved past Player parsing.
@@ -133,7 +145,7 @@ class Parser:
             if isinstance(hp, hslog_packets.CreateGame) and is_last:
                 if self._create_game_still_building(hp):
                     self._pending_create_game_pyid = pyid
-                    continue
+                    return True
             # gap-closure 03-07 (Rule 3): same defer pattern for FullEntity,
             # ShowEntity, and ChangeEntity. hslog appends `tag=...` rows to
             # the in-progress entity packet on subsequent lines, so emitting
@@ -154,21 +166,24 @@ class Parser:
                 )
                 and self._entity_packet_still_building(hp)
             ):
-                continue
+                return True
             self._seen_ids.add(pyid)
             if pyid == self._pending_create_game_pyid:
                 self._pending_create_game_pyid = None
             if isinstance(hp, hslog_packets.Block):
                 # Emit BlockStart, walk children, then BlockEnd once closed.
                 out.append(translator.make_block_start(hp, self._next_id()))
-                self._walk(hp.packets, out)
-                self._maybe_emit_block_end(hp, pyid, out)
+                if self._walk(hp.packets, out):
+                    return True
+                if not self._maybe_emit_block_end(hp, pyid, out):
+                    return True
             else:
                 translated = translator.translate_packet(hp, self._next_id)
                 if translated is not None:
                     out.append(translated)
+        return False
 
-    def _maybe_emit_block_end(self, hp: Any, pyid: int, out: List[Packet]) -> None:
+    def _maybe_emit_block_end(self, hp: Any, pyid: int, out: List[Packet]) -> bool:
         """Emit a Block's BlockEndPacket once, on the walk where it has closed.
 
         A block's BlockStart is emitted the first time the block is seen, but
@@ -178,13 +193,19 @@ class Parser:
         observes ``ended`` true, guarded by ``_emitted_block_ends`` so it fires
         exactly once. This makes the live stream balance its BlockStart /
         BlockEnd pairs, matching ``translate_packet_tree`` over the same tree.
+
+        Returns True if the block is closed (BlockEnd emitted now or on a prior
+        walk), False if it must stay open because hslog has not parsed its
+        BLOCK_END yet — the caller halts so nothing after the block emits ahead
+        of its (possibly still-arriving) children or its own BlockEnd.
         """
         if pyid in self._emitted_block_ends:
-            return
+            return True
         if not getattr(hp, "ended", False):
-            return
+            return False
         self._emitted_block_ends.add(pyid)
         out.append(translator.make_block_end(hp, self._next_id()))
+        return True
 
     def _entity_packet_still_building(self, hp: Any) -> bool:
         """True if hslog's parser is still appending tag rows to this packet.

@@ -240,6 +240,32 @@ def test_damage_under_attack_block_republishes_and_drives_damage_dealt():
     assert engine.current_state is same
 
 
+def test_location_in_play_projected_to_board():
+    """A CardType.LOCATION in PLAY occupies a board slot and must appear on the
+    board projection, not be dropped like a non-minion/non-weapon (codex round 7).
+    """
+    engine = GameEngine()
+    engine.apply(
+        CreateGamePacket(
+            packet_id=0,
+            game_entity_id=1,
+            players=((2, 1, "P1", 1, 1), (3, 2, "P2", 2, 2)),
+        )
+    )
+    # CARDTYPE 39 = LOCATION, controlled by the friendly player, in PLAY (ZONE 1).
+    engine.apply(
+        FullEntityPacket(
+            packet_id=1,
+            entity_id=15,
+            card_id="CATA_301",
+            tags={"CONTROLLER": 1, "ZONE": 1, "CARDTYPE": 39, "HEALTH": 3},
+        )
+    )
+    state = engine.current_state
+    assert state is not None
+    assert [e.entity_id for e in state.player_board] == [15]
+
+
 def test_mid_game_fixture_publishes_running_state(power_log_fixture):
     """mid_game.log contains CREATE_GAME → engine publishes a RUNNING state."""
     path = power_log_fixture("mid_game.log")  # skips if absent
