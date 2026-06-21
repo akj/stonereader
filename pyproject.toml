@@ -9,9 +9,10 @@ dependencies = [
     "hearthstone>=9.15.8",
     "hearthstone-data>=221175.1",
     "hslog>=1.18.0,<2",
+    "hsreplay>=1.16.2",
     "pip",
     "psutil>=7.0,<8",
-    "setuptools>=80.9.0",
+    "setuptools>=80.9.0,<81",
     "wxpython>=4.2.5",
 ]
 
