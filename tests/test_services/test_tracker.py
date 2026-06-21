@@ -8,6 +8,7 @@ Covers:
 
 Issue #5: subscribers receive (prev, curr) GameState pairs, not events.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -72,7 +73,9 @@ def test_subscriber_exception_does_not_break_others(caplog):
     with caplog.at_level(logging.ERROR):
         tracker._dispatch(None, curr)
 
-    assert len(good_called) == 1, "good subscriber must still receive pair after bad raises"
+    assert len(good_called) == 1, (
+        "good subscriber must still receive pair after bad raises"
+    )
     assert good_called[0] == (None, curr)
     assert any("subscriber raised" in rec.message for rec in caplog.records)
 
@@ -168,3 +171,49 @@ def test_start_stop_clean():
             frame.Destroy()
     finally:
         app.Destroy()
+
+
+# --- PRD #7: raw-line / reset fan-out seam (used by the replay recorder) ------
+
+
+def test_add_raw_subscriber_forwards_lines_before_parsing():
+    from stonereader.services import GameTracker
+
+    tracker = GameTracker()
+    seen: list[list[str]] = []
+    tracker.add_raw_subscriber(lambda lines: seen.append(list(lines)), lambda: None)
+
+    # Non-Power.log lines produce no packets, isolating the raw fan-out.
+    tracker._on_lines(["alpha", "beta"])
+
+    assert seen == [["alpha", "beta"]]
+
+
+def test_add_raw_subscriber_forwards_reset():
+    from stonereader.services import GameTracker
+
+    tracker = GameTracker()
+    resets: list[int] = []
+    tracker.add_raw_subscriber(lambda lines: None, lambda: resets.append(1))
+
+    tracker._on_watcher_reset()
+
+    assert resets == [1]
+
+
+def test_raw_line_listener_exception_is_isolated(caplog):
+    from stonereader.services import GameTracker
+
+    tracker = GameTracker()
+    good_seen: list[list[str]] = []
+    tracker.add_raw_subscriber(
+        lambda lines: (_ for _ in ()).throw(RuntimeError("boom")), lambda: None
+    )
+    tracker.add_raw_subscriber(
+        lambda lines: good_seen.append(list(lines)), lambda: None
+    )
+
+    with caplog.at_level(logging.ERROR):
+        tracker._on_lines(["x"])  # must not raise
+
+    assert good_seen == [["x"]], "a raising raw listener must not break others"
