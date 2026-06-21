@@ -375,6 +375,13 @@ class ReplayViewerPresenter(ZoneNavigationMixin, BasePresenter):
         if isinstance(item, Hero):
             self._read_hero_detail(item, direction)
             return
+        # Played/drawn zones hold PlayedCard rows; detail-nav reads the Card
+        # behind them (mirrors LiveGamePresenter). Without this, Up/Down in the
+        # P/Shift+P/N/Shift+N zones would silently do nothing.
+        if isinstance(item, PlayedCard):
+            if item.base_card is not None:
+                super().read_detail_lines(item.base_card, direction)
+                return
         super().read_detail_lines(item, direction)
 
     def _read_hero_detail(self, hero: Any, direction: int) -> None:

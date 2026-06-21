@@ -313,3 +313,93 @@ def test_existing_engine_invariants_preserved(power_log_fixture, card_db) -> Non
     assert isinstance(state.player_drawn, tuple)
     assert isinstance(state.opponent_drawn, tuple)
     assert isinstance(state.opponent_hand, tuple)
+
+
+# --- codex review round 3 regressions -----------------------------------------
+
+
+def test_conceded_game_records_real_result(power_log_fixture, card_db) -> None:
+    """PRD #18 / codex: PlayState value 8 is CONCEDED, not TIED. game_end.log is
+    a concession (Player1 -> CONCEDED -> LOST; the AI -> WON), so the friendly
+    result must be LOST, never 'TIED'. A conceding side LOST; the other WON.
+    """
+    engine = _replay(power_log_fixture("game_end.log"), card_db=card_db)
+    state = engine.current_state
+    assert state is not None
+    assert state.game_state == "COMPLETE"
+    assert state.player_playstate == "LOST", "friendly conceded -> LOST, not TIED"
+    assert state.opponent_playstate == "WON"
+
+
+def test_play_and_hand_zones_projected(power_log_fixture, card_db) -> None:
+    """codex: _refresh_state must project every navigable Zone. game_end.log has
+    board minions and cards in both hands."""
+    # Replay, capturing each snapshot so we can assert max occupancy over time.
+    parser = Parser()
+    engine = GameEngine(card_db=card_db)
+    states = []
+    text = power_log_fixture("game_end.log").read_text(encoding="utf-8")
+    for line in text.splitlines():
+        for pkt in parser.feed_line(line):
+            engine.apply(pkt)
+            if engine.current_state is not None:
+                states.append(engine.current_state)
+    assert max(len(s.opponent_board) for s in states) >= 1, (
+        "opponent board never filled"
+    )
+    assert max(len(s.player_hand) for s in states) >= 1, "friendly hand never filled"
+    assert max(len(s.opponent_hand) for s in states) >= 1, "opponent hand never filled"
+
+
+def test_board_entity_health_subtracts_damage() -> None:
+    """codex: published current_health must be HEALTH - DAMAGE (minions) and
+    DURABILITY - DAMAGE (weapons), not raw HEALTH."""
+    from hearthstone.enums import CardType
+    from stonereader.services._packets import CreateGamePacket, FullEntityPacket
+
+    engine = GameEngine()
+    engine.apply(
+        CreateGamePacket(
+            packet_id=0,
+            game_entity_id=1,
+            players=((2, 1, "Me", 1, 1), (3, 2, "AI", 0, 0)),
+        )
+    )  # AI heuristic -> friendly is player 1
+    # A friendly 4/5 minion that has already taken 2 damage.
+    engine.apply(
+        FullEntityPacket(
+            packet_id=1,
+            entity_id=50,
+            card_id="CS2_182",
+            tags={
+                "CONTROLLER": 1,
+                "ZONE": int(Zone.PLAY),
+                "CARDTYPE": int(CardType.MINION),
+                "ATK": 4,
+                "HEALTH": 5,
+                "DAMAGE": 2,
+            },
+        )
+    )
+    # A friendly weapon with 3 durability.
+    engine.apply(
+        FullEntityPacket(
+            packet_id=2,
+            entity_id=51,
+            card_id="CS2_106",
+            tags={
+                "CONTROLLER": 1,
+                "ZONE": int(Zone.PLAY),
+                "CARDTYPE": int(CardType.WEAPON),
+                "ATK": 3,
+                "DURABILITY": 3,
+            },
+        )
+    )
+    state = engine.current_state
+    assert state is not None
+    assert len(state.player_board) == 1
+    assert state.player_board[0].current_health == 3, "5 HEALTH - 2 DAMAGE"
+    assert state.player_board[0].current_attack == 4
+    assert state.player_weapon is not None
+    assert state.player_weapon.current_health == 3, "weapon durability"

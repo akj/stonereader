@@ -38,7 +38,16 @@ from stonereader.services._packets import (
 logger = logging.getLogger(__name__)
 
 
-_PLAYSTATE_NAMES: Dict[int, str] = {1: "PLAYING", 4: "WON", 5: "LOST", 8: "TIED"}
+# hearthstone.enums.PlayState values. NOTE: 6 = TIED, 8 = CONCEDED (a conceding
+# player has LOST). An earlier mapping mislabeled 8 as TIED and omitted 6, so
+# conceded games — the common way games end — were recorded as ties.
+_PLAYSTATE_NAMES: Dict[int, str] = {
+    1: "PLAYING",
+    4: "WON",
+    5: "LOST",
+    6: "TIED",
+    8: "CONCEDED",
+}
 
 # Mulligan DONE state (hearthstone.enums.Mulligan.DONE = 4)
 _MULLIGAN_DONE = 4
@@ -559,29 +568,43 @@ class GameEngine:
         self._refresh_state()
 
     def _handle_playstate(self, eid: int, value: int) -> None:
+        """Resolve the game outcome from a single terminal PLAYSTATE change.
+
+        Only ONE side's PLAYSTATE is typically observed at the lethal/concede
+        moment (and the engine caps at the first terminal via _game_ended), so
+        both sides' results are INFERRED from it. The side is determined by the
+        PLAYSTATE entity's PLAYER_ID (recorded at CREATE_GAME) vs the friendly
+        player id — comparing the raw entity id would misattribute the result.
+        CONCEDED means that side LOST.
+        """
         name = _PLAYSTATE_NAMES.get(value, "")
         if (
-            value in (4, 5, 8)
-            and self._current_state is not None
-            and not self._game_ended
+            name not in ("WON", "LOST", "TIED", "CONCEDED")
+            or self._current_state is None
+            or self._game_ended
         ):
-            self._game_ended = True
-            new_player_state = (
-                name
-                if eid == self._friendly_player_id
-                else self._current_state.player_playstate
-            )
-            new_opponent_state = (
-                name
-                if eid != self._friendly_player_id
-                else self._current_state.opponent_playstate
-            )
-            self._current_state = dataclasses.replace(
-                self._current_state,
-                game_state="COMPLETE",
-                player_playstate=new_player_state,
-                opponent_playstate=new_opponent_state,
-            )
+            return
+        self._game_ended = True
+        pid = self._entities.get(eid, {}).get("PLAYER_ID")
+        is_friendly = pid is not None and int(pid) == self._friendly_player_id
+        if name == "TIED":
+            player_outcome = opponent_outcome = "TIED"
+        else:
+            side_won = name == "WON"  # LOST / CONCEDED => that side lost
+            if is_friendly:
+                player_outcome, opponent_outcome = (
+                    ("WON", "LOST") if side_won else ("LOST", "WON")
+                )
+            else:
+                opponent_outcome, player_outcome = (
+                    ("WON", "LOST") if side_won else ("LOST", "WON")
+                )
+        self._current_state = dataclasses.replace(
+            self._current_state,
+            game_state="COMPLETE",
+            player_playstate=player_outcome,
+            opponent_playstate=opponent_outcome,
+        )
 
     def _on_block_start(self, p: BlockStartPacket) -> None:
         self._block_stack.append(p.block_type)
@@ -653,6 +676,9 @@ class GameEngine:
         drawn_turn_raw = ent.get("drawn_turn", -1)
         drawn_turn = drawn_turn_raw if isinstance(drawn_turn_raw, int) else -1
         tags = {k: v for k, v in ent.items() if isinstance(v, int)}
+        # Live health = base (minion HEALTH, or weapon DURABILITY) minus DAMAGE.
+        base_hp = (ent.get("HEALTH", 0) or 0) or (ent.get("DURABILITY", 0) or 0)
+        current_health = base_hp - (ent.get("DAMAGE", 0) or 0)
         return GameEntity(
             entity_id=eid,
             card_id=card_id,
@@ -660,7 +686,7 @@ class GameEngine:
             name=base.name if base else "",
             cost=base.cost if base else 0,
             current_attack=ent.get("ATK", 0) or 0,
-            current_health=ent.get("HEALTH", 0) or 0,
+            current_health=current_health,
             card_type=base.card_type if base else "",
             zone=zone_name,
             zone_position=ent.get("ZONE_POSITION", 0) or 0,

@@ -559,3 +559,21 @@ def test_your_deck_zone() -> None:
     presenter.jump_to_turn_number(3)
     deck = presenter.get_zone_items("your_deck")
     assert [e.name for e in deck] == ["Chillwind Yeti"]
+
+
+def test_played_zone_detail_navigation_reads_card() -> None:
+    """codex: played/drawn zones hold PlayedCard rows; Up/Down must read the
+    Card behind them. The base mixin only extracts Card/tuple/GameEntity, so
+    without the viewer's PlayedCard handling these zones' detail nav was silent.
+    """
+    presenter, speech, _replay = _make_presenter()
+    presenter.jump_to_turn_number(3)
+    key_map = presenter.get_key_map()
+    key_map["p"]()  # your_played zone -> first row is Stonetusk Boar
+    before = len(speech.spoken)
+    key_map["down"]()  # detail nav into the PlayedCard's Card
+    new_lines = [text for text, _interrupt in speech.spoken[before:]]
+    assert new_lines, "Up/Down in the played zone must speak a detail line"
+    assert any(line in set(_BOAR.detail_lines()) for line in new_lines), (
+        f"expected a Stonetusk Boar detail line, got {new_lines!r}"
+    )
