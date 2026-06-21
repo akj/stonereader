@@ -213,6 +213,13 @@ class ReplayRecorder:
 
         A tz-aware ``_current_date`` is required so the emitted HSReplay
         timestamps are real datetimes that round-trip.
+
+        Per-line parse drift is tolerated: a single line hslog cannot parse (a
+        ``NoSuchEnum`` / ``ParsingError`` after a Hearthstone patch) is logged
+        and skipped, mirroring the live ``Parser.feed_line``. Without this, one
+        bad line would raise out of the whole reparse and ``_flush_complete``
+        would drop an otherwise-complete game — even though live tracking, which
+        skips the same line, finished the game fine.
         """
         # Local import keeps hslog as a file-parsing-edge dependency, mirroring
         # the loader: the recorder module imports it only when it parses.
@@ -220,8 +227,17 @@ class ReplayRecorder:
 
         parser = LogParser()
         parser._current_date = self._now()
+        skipped = 0
         for line in self._buffer:
-            parser.read_line(line)
+            try:
+                parser.read_line(line)
+            except Exception:
+                skipped += 1
+        if skipped:
+            logger.warning(
+                "recorder: skipped %d unparseable log line(s) while saving replay",
+                skipped,
+            )
         return list(parser.games)
 
     @staticmethod

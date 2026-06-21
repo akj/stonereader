@@ -13,6 +13,7 @@ temp sqlite db + replay dir.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -256,6 +257,39 @@ def test_second_complete_dispatch_does_not_clobber_preserved_next_game(
     recorder.on_state(complete, complete)
     assert len(store.all_replays()) == 1  # no partial next-game save
     assert recorder._buffer == preserved  # preserved head intact
+
+
+def test_parse_drift_line_does_not_drop_completed_game(tmp_path: Path, caplog) -> None:
+    """A single unparseable log line (hslog NoSuchEnum/ParsingError after a
+    Hearthstone patch) must be skipped, not discard the whole completed game —
+    mirroring the live parser's per-line tolerance (codex review round 8).
+    """
+    store = _make_store(tmp_path)
+    recorder = _recorder(store)
+
+    # A TAG_CHANGE referencing an unknown GameTag makes hslog raise on this line.
+    drift = (
+        "D 12:56:56.9882048 GameState.DebugPrintPower() - "
+        "TAG_CHANGE Entity=GameEntity tag=NEW_TAG value=1"
+    )
+    lines = _fixture_lines()
+    buffer = lines[:300] + [drift] + lines[300:]
+    recorder.on_lines(buffer)
+
+    prev = _make_state(game_state="RUNNING", player_playstate="PLAYING")
+    curr = _make_state(
+        game_state="COMPLETE", player_playstate="LOST", opponent_playstate="WON"
+    )
+    with caplog.at_level(logging.WARNING):
+        recorder.on_state(prev, curr)
+
+    # The completed game was saved despite the drift line.
+    replays = store.all_replays()
+    assert len(replays) == 1
+    assert replays[0].result == "LOST"
+    # The drift line was tolerated (skipped + logged), not allowed to drop it.
+    assert "skipped" in caplog.text
+    assert "unparseable" in caplog.text
 
 
 def test_buffer_cleared_after_save_prevents_double_save(tmp_path: Path) -> None:
