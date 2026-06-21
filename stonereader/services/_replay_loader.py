@@ -70,23 +70,30 @@ class ReplayLoadError(Exception):
     """
 
 
-def load_replay(path: Path) -> ReplayState:
+def load_replay(path: Path, card_db: Any = None) -> ReplayState:
     """Load an HSReplay XML file into a :class:`ReplayState`.
 
     Parses the document, replays it through the shared translation + engine
     pipeline, and returns the ordered sequence of ``GameState`` snapshots with
     the recorded friendly player id.
 
+    ``card_db`` (a ``CardDatabase``) is threaded into the ``GameEngine`` so the
+    reconstructed states carry resolved card names, costs, types and hero data —
+    without it the viewer would speak bare card ids and ``?`` heroes.
+
     Raises :class:`ReplayLoadError` for invalid XML or an empty / corrupt
     packet tree.
     """
     tree = _load_first_tree(path)
-    friendly_player_id = _export_friendly_player(tree)
 
     # Re-resolve round-trip artefacts (int GameTag AND int BlockType identifiers)
     # back to enums so the shared translator produces the same enum-NAME-keyed
-    # tags and block-type names the engine + diff seam expect.
+    # tags and block-type names the engine + diff seam expect. This MUST run
+    # before friendly-player export: FriendlyPlayerExporter inspects
+    # GameTag.CONTROLLER / GameTag.ZONE, which are still ints until resolved.
     _resolve_enums(tree)
+
+    friendly_player_id = _export_friendly_player(tree)
 
     packets = translate_packet_tree(tree)
     if not packets:
@@ -97,7 +104,7 @@ def load_replay(path: Path) -> ReplayState:
     # 1=friendly / 2=opponent contract (see services/_events.py).
     entity_to_pid = _player_entity_pids(packets)
 
-    engine = GameEngine()
+    engine = GameEngine(card_db=card_db)
     states: List[GameState] = []
     for pkt in packets:
         engine.apply(pkt)

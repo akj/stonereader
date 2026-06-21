@@ -503,7 +503,7 @@ class StoneReaderApp(wx.App):
             from stonereader.views.replay_viewer import ReplayViewerPanel
 
             try:
-                replay_state = load_replay(Path(meta.file_path))  # type: ignore[attr-defined]
+                replay_state = load_replay(Path(meta.file_path), card_db=card_db)  # type: ignore[attr-defined]
             except ReplayLoadError:
                 speech.speak("Could not open replay; the file may be invalid.")
                 return

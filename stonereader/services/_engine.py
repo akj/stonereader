@@ -640,94 +640,123 @@ class GameEngine:
         # a no-op for future zone-bookkeeping if needed.
         return
 
+    def _entity_view(
+        self, eid: int, ent: Dict[str, Any], zone_name: str, controller_int: int
+    ) -> GameEntity:
+        """Build a published GameEntity from internal bookkeeping for `eid`.
+
+        Carries the int GameTag map (ATK/HEALTH/DAMAGE/...) through as ``tags``
+        so the pure diff seam can recover DamageDealt etc. from board entities.
+        """
+        card_id = ent.get("card_id", "") or ""
+        base = self._lookup_card(card_id) if card_id else None
+        drawn_turn_raw = ent.get("drawn_turn", -1)
+        drawn_turn = drawn_turn_raw if isinstance(drawn_turn_raw, int) else -1
+        tags = {k: v for k, v in ent.items() if isinstance(v, int)}
+        return GameEntity(
+            entity_id=eid,
+            card_id=card_id,
+            base_card=base,
+            name=base.name if base else "",
+            cost=base.cost if base else 0,
+            current_attack=ent.get("ATK", 0) or 0,
+            current_health=ent.get("HEALTH", 0) or 0,
+            card_type=base.card_type if base else "",
+            zone=zone_name,
+            zone_position=ent.get("ZONE_POSITION", 0) or 0,
+            controller=controller_int,
+            drawn_turn=drawn_turn,
+            tags=tags,
+            creation_lineage=ent.get("creation_lineage", "") or "",
+        )
+
     def _refresh_state(self) -> None:
         """Rebuild the published snapshot from internal bookkeeping.
 
-        D-19: reconstructs opponent_hand from self._entities. Iteration over
-        the dict (keyed by entity_id) implicitly dedupes — there is exactly
-        one bookkeeping entry per entity, so duplicate hand entries are
-        impossible by construction.
-
-        Gap-closure 03-07: also rebuilds player_deck (live remaining-deck
-        for the friendly player) and derives player_deck_count /
-        opponent_deck_count from per-controller ZONE==DECK counts. NUM_CARDS
-        _IN_DECK is NOT exposed as a GameTag in hearthstone.enums, so the
-        count must be computed here.
+        Projects every navigable Zone from self._entities onto GameState so the
+        Live surface AND the Replay viewer (PRD #7) can inspect them:
+          - PLAY-zone MINIONs  -> player_board / opponent_board
+          - PLAY-zone WEAPONs  -> player_weapon / opponent_weapon (0-or-1)
+          - HAND               -> player_hand / opponent_hand
+          - SECRET             -> player_secrets / opponent_secrets
+          - DECK               -> player_deck (friendly) + per-side deck counts
+        Heroes are refined separately (CARDTYPE==HERO pass). Iteration over the
+        entity dict (keyed by entity_id) implicitly dedupes — exactly one
+        bookkeeping entry per entity. NUM_CARDS_IN_DECK is not a GameTag, so the
+        deck counts are computed here.
         """
         if self._current_state is None:
             return
-        opponent_hand_entities: List[GameEntity] = []
+        player_board: List[GameEntity] = []
+        opponent_board: List[GameEntity] = []
+        player_hand: List[GameEntity] = []
+        opponent_hand: List[GameEntity] = []
+        player_secrets: List[GameEntity] = []
+        opponent_secrets: List[GameEntity] = []
+        player_weapons: List[GameEntity] = []
+        opponent_weapons: List[GameEntity] = []
         player_deck_entities: List[GameEntity] = []
         player_deck_count = 0
         opponent_deck_count = 0
+        play_zone = int(Zone.PLAY)
         deck_zone = int(Zone.DECK)
         hand_zone = int(Zone.HAND)
+        secret_zone = int(Zone.SECRET)
+        minion_type = int(CardType.MINION)
+        weapon_type = int(CardType.WEAPON)
         for eid, ent in self._entities.items():
             zone = ent.get("ZONE")
             controller = ent.get("CONTROLLER")
             if controller is None:
                 continue
             controller_int = int(controller)
+            is_friendly = controller_int == self._friendly_player_id
             if zone == deck_zone:
-                if controller_int == self._friendly_player_id:
+                if is_friendly:
                     player_deck_count += 1
-                    card_id = ent.get("card_id", "") or ""
-                    base = self._lookup_card(card_id) if card_id else None
-                    drawn_turn_raw = ent.get("drawn_turn", -1)
-                    drawn_turn = (
-                        drawn_turn_raw if isinstance(drawn_turn_raw, int) else -1
-                    )
                     player_deck_entities.append(
-                        GameEntity(
-                            entity_id=eid,
-                            card_id=card_id,
-                            base_card=base,
-                            name=base.name if base else "",
-                            cost=base.cost if base else 0,
-                            current_attack=ent.get("ATK", 0) or 0,
-                            current_health=ent.get("HEALTH", 0) or 0,
-                            card_type=base.card_type if base else "",
-                            zone="DECK",
-                            zone_position=ent.get("ZONE_POSITION", 0) or 0,
-                            controller=controller_int,
-                            drawn_turn=drawn_turn,
-                            creation_lineage=ent.get("creation_lineage", "") or "",
-                        )
+                        self._entity_view(eid, ent, "DECK", controller_int)
                     )
                 else:
                     opponent_deck_count += 1
-                continue
-            if zone == hand_zone and controller_int != self._friendly_player_id:
-                card_id = ent.get("card_id", "") or ""
-                base = self._lookup_card(card_id) if card_id else None
-                drawn_turn_raw = ent.get("drawn_turn", -1)
-                drawn_turn = drawn_turn_raw if isinstance(drawn_turn_raw, int) else -1
-                opponent_hand_entities.append(
-                    GameEntity(
-                        entity_id=eid,
-                        card_id=card_id,
-                        base_card=base,
-                        name=base.name if base else "",
-                        cost=base.cost if base else 0,
-                        current_attack=ent.get("ATK", 0) or 0,
-                        current_health=ent.get("HEALTH", 0) or 0,
-                        card_type=base.card_type if base else "",
-                        zone="HAND",
-                        zone_position=ent.get("ZONE_POSITION", 0) or 0,
-                        controller=controller_int,
-                        drawn_turn=drawn_turn,
-                        creation_lineage=ent.get("creation_lineage", "") or "",
-                    )
-                )
-        opponent_hand_entities.sort(key=lambda e: e.zone_position)
-        player_deck_entities.sort(key=lambda e: e.zone_position)
+            elif zone == hand_zone:
+                target = player_hand if is_friendly else opponent_hand
+                target.append(self._entity_view(eid, ent, "HAND", controller_int))
+            elif zone == secret_zone:
+                target = player_secrets if is_friendly else opponent_secrets
+                target.append(self._entity_view(eid, ent, "SECRET", controller_int))
+            elif zone == play_zone:
+                ctype = ent.get("CARDTYPE")
+                if ctype == minion_type:
+                    target = player_board if is_friendly else opponent_board
+                    target.append(self._entity_view(eid, ent, "PLAY", controller_int))
+                elif ctype == weapon_type:
+                    target = player_weapons if is_friendly else opponent_weapons
+                    target.append(self._entity_view(eid, ent, "PLAY", controller_int))
+        for lst in (
+            player_board,
+            opponent_board,
+            player_hand,
+            opponent_hand,
+            player_secrets,
+            opponent_secrets,
+            player_deck_entities,
+        ):
+            lst.sort(key=lambda e: e.zone_position)
         self._current_state = dataclasses.replace(
             self._current_state,
+            player_board=tuple(player_board),
+            opponent_board=tuple(opponent_board),
+            player_hand=tuple(player_hand),
+            opponent_hand=tuple(opponent_hand),
+            player_secrets=tuple(player_secrets),
+            opponent_secrets=tuple(opponent_secrets),
+            player_weapon=player_weapons[0] if player_weapons else None,
+            opponent_weapon=opponent_weapons[0] if opponent_weapons else None,
             player_played=tuple(self._player_played),
             opponent_played=tuple(self._opponent_played),
             player_drawn=tuple(self._player_drawn),
             opponent_drawn=tuple(self._opponent_drawn),
-            opponent_hand=tuple(opponent_hand_entities),
             player_deck=tuple(player_deck_entities),
             player_deck_count=player_deck_count,
             opponent_deck_count=opponent_deck_count,

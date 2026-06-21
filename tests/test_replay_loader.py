@@ -234,3 +234,38 @@ def test_active_player_id_normalized_to_friendly_contract(tmp_path: Path) -> Non
     assert values <= {1, 2}, f"unnormalized active_player_id values: {values}"
     # At least one turn is attributed to each side for a full two-player game.
     assert 2 in values, "a full game should have at least one opponent turn"
+
+
+def test_all_navigable_zones_projected(tmp_path: Path) -> None:
+    """Finding: GameEngine._refresh_state only projected opponent hand + friendly
+    deck, so the replay viewer's board/hand/secret/weapon zones stayed empty even
+    when the replay contained those entities. The engine now projects every
+    navigable zone; game_end.log has board minions and cards in both hands.
+    """
+    states = load_replay(_write_hsreplay(tmp_path)).states
+    assert max(len(s.opponent_board) for s in states) >= 1, "opponent board empty"
+    assert max(len(s.player_hand) for s in states) >= 1, "friendly hand empty"
+    assert max(len(s.opponent_hand) for s in states) >= 1, "opponent hand empty"
+
+
+def test_card_db_resolves_names_and_heroes(tmp_path: Path) -> None:
+    """Finding: load_replay built the GameEngine without a card database, so cards
+    were spoken as bare ids and heroes stayed '?'. Threading card_db resolves
+    names; without it, names are empty (contrast guard).
+    """
+    from stonereader.models.card import CardDatabase
+
+    path = _write_hsreplay(tmp_path)
+    card_db = CardDatabase.load()
+
+    with_db = load_replay(path, card_db=card_db)
+    board_names = [e.name for s in with_db.states for e in s.opponent_board if e.name]
+    assert board_names, "expected at least one resolved board minion name"
+    hero_names = {s.player_hero.name for s in with_db.states}
+    assert any(n and n != "?" for n in hero_names), "friendly hero name unresolved"
+
+    without_db = load_replay(path)
+    board_names_nodb = [
+        e.name for s in without_db.states for e in s.opponent_board if e.name
+    ]
+    assert not board_names_nodb, "names should not resolve without a card_db"
