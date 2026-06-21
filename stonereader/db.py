@@ -134,3 +134,67 @@ def delete_deck(conn: sqlite3.Connection, deck_id: int) -> None:
     """Delete a deck by id."""
     conn.execute("DELETE FROM decks WHERE id = ?", (deck_id,))
     conn.commit()
+
+
+# --- Replay metadata CRUD (v2) ---
+
+_REPLAY_COLUMNS = (
+    "file_path",
+    "checksum",
+    "source",
+    "friendly_class",
+    "opponent_class",
+    "result",
+    "turns",
+    "game_type",
+    "format_type",
+    "deck_name",
+    "deck_id",
+    "played_at",
+    "duration_seconds",
+)
+
+
+def insert_replay(conn: sqlite3.Connection, **fields: object) -> int:
+    """Insert a replay metadata row and return its id.
+
+    Accepts the writable replay columns as keyword arguments (``id`` and
+    ``imported_at`` are assigned by SQLite). ``game_type`` and ``format_type``
+    default to '' to match the schema; ``deck_name``, ``deck_id`` and
+    ``duration_seconds`` default to NULL.
+    """
+    values = {col: fields.get(col) for col in _REPLAY_COLUMNS}
+    if values["game_type"] is None:
+        values["game_type"] = ""
+    if values["format_type"] is None:
+        values["format_type"] = ""
+    placeholders = ", ".join("?" for _ in _REPLAY_COLUMNS)
+    columns = ", ".join(_REPLAY_COLUMNS)
+    cursor = conn.execute(
+        f"INSERT INTO replays ({columns}) VALUES ({placeholders})",
+        tuple(values[col] for col in _REPLAY_COLUMNS),
+    )
+    conn.commit()
+    return cursor.lastrowid  # type: ignore[return-value]
+
+
+def get_all_replays(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Return all replay rows, newest first (played_at DESC, id DESC)."""
+    return conn.execute(
+        "SELECT * FROM replays ORDER BY played_at DESC, id DESC"
+    ).fetchall()
+
+
+def get_replay_by_checksum(
+    conn: sqlite3.Connection, checksum: str
+) -> sqlite3.Row | None:
+    """Return the replay row with the given checksum, or None."""
+    return conn.execute(
+        "SELECT * FROM replays WHERE checksum = ?", (checksum,)
+    ).fetchone()
+
+
+def delete_replay(conn: sqlite3.Connection, replay_id: int) -> None:
+    """Delete a replay metadata row by id."""
+    conn.execute("DELETE FROM replays WHERE id = ?", (replay_id,))
+    conn.commit()
