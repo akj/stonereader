@@ -326,6 +326,30 @@ def test_hand_to_graveyard_emits_card_removed() -> None:
     assert events[0].controller == 2
 
 
+def test_play_to_removed_from_game_emits_card_removed() -> None:
+    """A board entity removed directly from the game (PLAY → REMOVEDFROMGAME,
+    e.g. a transform/removal effect) is a CardRemoved, never a MinionDied, and
+    must not be silently dropped now that terminal-zone entities are visited."""
+    on_board = _entity(
+        entity_id=32, zone="PLAY", card_id="EX1_001", controller=1, card_type="MINION"
+    )
+    removed = _entity(
+        entity_id=32,
+        zone="REMOVEDFROMGAME",
+        card_id="EX1_001",
+        controller=1,
+        card_type="MINION",
+    )
+    prev = _state(turn=5, player_board=(on_board,))
+    curr = _state(turn=5, graveyard=(removed,))
+    events = diff(prev, curr)
+    assert [e for e in events if isinstance(e, MinionDied)] == []
+    removed_events = [e for e in events if isinstance(e, CardRemoved)]
+    assert len(removed_events) == 1
+    assert removed_events[0].entity_id == 32
+    assert removed_events[0].controller == 1
+
+
 def test_deck_to_removed_from_game_emits_card_removed() -> None:
     """REMOVEDFROMGAME from a non-PLAY zone is a CardRemoved (e.g. mill, transform)."""
     in_deck = _entity(entity_id=41, zone="DECK", card_id="CS2_023", controller=1)

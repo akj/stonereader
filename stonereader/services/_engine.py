@@ -52,6 +52,13 @@ _PLAYSTATE_NAMES: Dict[int, str] = {
 # Mulligan DONE state (hearthstone.enums.Mulligan.DONE = 4)
 _MULLIGAN_DONE = 4
 
+# Stat tags whose value feeds an entity's published current_attack/current_health
+# (and, for DAMAGE under an ATTACK/POWER block, the diff seam's DamageDealt). A
+# change to any of these must republish the snapshot so the tracker/loader sees
+# the delta while the block context is still open — otherwise the new snapshot is
+# identical to the prior one and the damage/stat change is silently lost.
+_STAT_TAGS = frozenset({"DAMAGE", "ATK", "HEALTH", "DURABILITY"})
+
 
 class GameEngine:
     """Pure Packet → GameState reducer.
@@ -531,6 +538,15 @@ class GameEngine:
                         opponent_mana=mana,
                         opponent_max_mana=resources,
                     )
+        elif (
+            p.tag in _STAT_TAGS and prev != p.value and self._current_state is not None
+        ):
+            # A DAMAGE/ATK/HEALTH/DURABILITY change only mutated _entities above;
+            # republish so the new stats (and any DamageDealt under an open
+            # ATTACK/POWER block) reach the tracker/loader before the block
+            # closes. Guarded on an actual value change to avoid redundant
+            # snapshots when hslog re-emits an unchanged tag.
+            self._refresh_state()
 
     def _handle_zone_change(self, eid: int, prev: Any, new_zone: int) -> None:
         ent = self._entities.get(eid, {})

@@ -15,8 +15,9 @@ pytest.importorskip("stonereader.services._engine")
 from stonereader.models.card import CardDatabase
 from stonereader.services._diff import diff
 from stonereader.services._engine import GameEngine
-from stonereader.services._events import MinionDied
+from stonereader.services._events import DamageDealt, MinionDied
 from stonereader.services._packets import (
+    BlockStartPacket,
     CreateGamePacket,
     FullEntityPacket,
     TagChangePacket,
@@ -180,6 +181,63 @@ def test_dead_minion_drives_minion_died_end_to_end():
     assert len(deaths) == 1
     assert deaths[0].entity_id == 10
     assert deaths[0].controller == 1
+
+
+def test_damage_under_attack_block_republishes_and_drives_damage_dealt():
+    """A DAMAGE TagChange under an open ATTACK block must republish the snapshot
+    so the diff seam emits DamageDealt while the block context is still open.
+
+    Before refreshing on stat tags the snapshot was identical to the prior one
+    (curr is prev), so the tracker/loader never saw the delta and combat damage
+    was silently dropped from replay drilldown (PRD #7 / codex review round 6).
+    """
+    engine = GameEngine()
+    engine.apply(
+        CreateGamePacket(
+            packet_id=0,
+            game_entity_id=1,
+            players=((2, 1, "P1", 1, 1), (3, 2, "P2", 2, 2)),
+        )
+    )
+    engine.apply(
+        FullEntityPacket(
+            packet_id=1,
+            entity_id=10,
+            card_id="a",
+            tags={"CONTROLLER": 1, "ZONE": 1, "CARDTYPE": 4, "HEALTH": 3, "ATK": 3},
+        )
+    )
+    engine.apply(
+        FullEntityPacket(
+            packet_id=2,
+            entity_id=20,
+            card_id="b",
+            tags={"CONTROLLER": 2, "ZONE": 1, "CARDTYPE": 4, "HEALTH": 4, "ATK": 2},
+        )
+    )
+    engine.apply(
+        BlockStartPacket(packet_id=3, block_type="ATTACK", entity_id=10, target_id=20)
+    )
+    prev = engine.current_state
+    assert prev is not None
+    assert prev.attack_in_progress is not None
+
+    # The defender takes 3 damage under the open ATTACK block.
+    engine.apply(TagChangePacket(packet_id=4, entity_id=20, tag="DAMAGE", value=3))
+    curr = engine.current_state
+    assert curr is not None
+    assert curr is not prev, "a DAMAGE change must republish a new snapshot"
+
+    dealt = [e for e in diff(prev, curr) if isinstance(e, DamageDealt)]
+    assert len(dealt) == 1
+    assert dealt[0].target_entity_id == 20
+    assert dealt[0].amount == 3
+    assert dealt[0].target_controller == 2
+
+    # Re-applying the SAME DAMAGE value must not republish a redundant snapshot.
+    same = engine.current_state
+    engine.apply(TagChangePacket(packet_id=5, entity_id=20, tag="DAMAGE", value=3))
+    assert engine.current_state is same
 
 
 def test_mid_game_fixture_publishes_running_state(power_log_fixture):

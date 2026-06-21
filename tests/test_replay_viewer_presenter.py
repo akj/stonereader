@@ -365,6 +365,36 @@ def test_event_zone_steps_and_changes_resolved_state() -> None:
     assert [e.name for e in board] == ["Stonetusk Boar"]
 
 
+def test_selected_event_state_persists_across_zone_switch() -> None:
+    """After selecting an event, switching to a board/hand zone (B/G/C/...) must
+    keep reading from that event's post_state, not snap back to end-of-turn —
+    otherwise the drilldown can't be used to inspect the board AT the event
+    (codex review round 6).
+    """
+    presenter, _speech, _replay = _make_presenter()
+    key_map = presenter.get_key_map()
+
+    # Select the first turn-1 event (GameStarted: post_state t1a, empty board).
+    key_map["y"]()
+    assert presenter._current_zone == "events"
+
+    # Switch to the board zone to inspect it AT the selected event.
+    key_map["b"]()
+    assert presenter._current_zone == "your_board"
+    # The event's post_state (t1a) has an empty board — NOT the end-of-turn state
+    # (t1c) where the Boar has since been played.
+    assert presenter.get_zone_items("your_board") == []
+
+    # Once the event selection is cleared (turn change), zones fall back to the
+    # end-of-turn state, where the Boar is on the board.
+    presenter.next_turn()
+    presenter.prev_turn()  # back to turn 1; _event_index reset to -1
+    assert presenter._current_zone == "your_board"  # zone persists across turns
+    assert [e.name for e in presenter.get_zone_items("your_board")] == [
+        "Stonetusk Boar"
+    ]
+
+
 def test_event_drilldown_resolved_differs_between_states() -> None:
     """Resolved state differs between turn-level and a specific event."""
     presenter, _speech, _replay = _make_presenter()

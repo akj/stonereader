@@ -176,13 +176,17 @@ class ReplayViewerPresenter(ZoneNavigationMixin, BasePresenter):
     def _resolved_state(self) -> Optional[GameState]:
         """The GameState all zones read from.
 
-        If an event is selected in the events zone, use that event's
-        post_state; otherwise use the current turn's end-of-turn state.
+        If an event is selected (in this turn), every zone reads from that
+        event's post_state — including after the user switches to a board/hand
+        zone (B/G/C/...) to inspect the board AT that event. The selection
+        persists until the turn changes or the event cursor is cleared (both
+        reset ``_event_index`` to -1), at which point zones fall back to the
+        current turn's end-of-turn state.
         """
         if not self._turn_numbers:
             return None
         events = self._events_for_current_turn()
-        if self._current_zone == _EVENTS and 0 <= self._event_index < len(events):
+        if 0 <= self._event_index < len(events):
             return events[self._event_index][1]
         return self._end_of_turn.get(self._current_turn())
 
