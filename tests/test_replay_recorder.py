@@ -226,6 +226,38 @@ def test_next_game_in_same_batch_saves_completed_not_partial(tmp_path: Path) -> 
     assert any("CREATE_GAME" in line for line in recorder._buffer)
 
 
+def test_second_complete_dispatch_does_not_clobber_preserved_next_game(
+    tmp_path: Path,
+) -> None:
+    """A finished game can publish several COMPLETE snapshots (trailing packets
+    after the terminal PLAYSTATE keep game_state=COMPLETE). Only the transition
+    into COMPLETE flushes; a later COMPLETE→COMPLETE must NOT re-flush against —
+    and clear — the preserved next-game head.
+    """
+    store = _make_store(tmp_path)
+    recorder = _recorder(store)
+
+    finished = _fixture_lines()
+    next_head = (FIXTURE_DIR / NEXT_LOG).read_text(encoding="utf-8").splitlines()[:120]
+    recorder.on_lines(finished + next_head)
+
+    running = _make_state(game_state="RUNNING", player_playstate="PLAYING")
+    complete = _make_state(
+        game_state="COMPLETE", player_playstate="LOST", opponent_playstate="WON"
+    )
+
+    # Transition into COMPLETE: saves the finished game, preserves the next head.
+    recorder.on_state(running, complete)
+    assert len(store.all_replays()) == 1
+    preserved = list(recorder._buffer)
+    assert preserved, "next game's buffered head must be preserved"
+
+    # A second COMPLETE snapshot (e.g. a trailing BLOCK_END) must be ignored.
+    recorder.on_state(complete, complete)
+    assert len(store.all_replays()) == 1  # no partial next-game save
+    assert recorder._buffer == preserved  # preserved head intact
+
+
 def test_buffer_cleared_after_save_prevents_double_save(tmp_path: Path) -> None:
     """After a COMPLETE save, a second COMPLETE with no new lines saves nothing new."""
     store = _make_store(tmp_path)

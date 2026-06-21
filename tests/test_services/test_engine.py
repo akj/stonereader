@@ -12,6 +12,7 @@ import pytest
 
 pytest.importorskip("stonereader.services._engine")
 
+from stonereader.models.card import CardDatabase
 from stonereader.services._diff import diff
 from stonereader.services._engine import GameEngine
 from stonereader.services._events import MinionDied
@@ -99,13 +100,13 @@ def test_drawn_card_controller_reflects_log_controller():
     )
 
 
-def test_dead_minion_projected_to_graveyard_drives_minion_died():
-    """A PLAY→GRAVEYARD minion must be projected into state.graveyard so the
-    pure diff seam can still see the death and emit MinionDied.
+def test_terminal_zone_entity_projected_to_graveyard():
+    """A PLAY→GRAVEYARD entity must be projected into state.graveyard (with its
+    terminal zone name) so the pure diff seam can still visit it.
 
     Before this projection the dead entity left every navigable zone, so the
     diff loop never visited it and the replay event drilldown silently dropped
-    deaths (PRD #7 / codex review round 4).
+    deaths/removals (PRD #7 / codex review round 4).
     """
     engine = GameEngine()
     engine.apply(
@@ -120,7 +121,7 @@ def test_dead_minion_projected_to_graveyard_drives_minion_died():
         FullEntityPacket(
             packet_id=1,
             entity_id=10,
-            card_id="CS2_023",
+            card_id="EX1_001",
             tags={"CONTROLLER": 1, "ZONE": 1, "CARDTYPE": 4, "HEALTH": 3},
         )
     )
@@ -129,13 +130,51 @@ def test_dead_minion_projected_to_graveyard_drives_minion_died():
     assert [e.entity_id for e in prev.player_board] == [10]
     assert prev.graveyard == ()
 
-    # The minion dies: ZONE -> GRAVEYARD (4).
+    # The entity leaves play: ZONE -> GRAVEYARD (4).
     engine.apply(TagChangePacket(packet_id=2, entity_id=10, tag="ZONE", value=4))
     curr = engine.current_state
     assert curr is not None
     # It left the board and is now projected into the graveyard with the right zone.
     assert curr.player_board == ()
     assert [(e.entity_id, e.zone) for e in curr.graveyard] == [(10, "GRAVEYARD")]
+
+
+def test_dead_minion_drives_minion_died_end_to_end():
+    """End-to-end: a resolved MINION dying (PLAY→GRAVEYARD) projects into the
+    graveyard and the diff seam emits MinionDied. The card type must resolve for
+    the diff to distinguish a death from a removal, so this needs the
+    CardDatabase (PRD #7 / codex review rounds 4-5).
+    """
+    try:
+        card_db = CardDatabase.load()
+    except Exception:  # pragma: no cover - environment-dependent fallback
+        pytest.skip("CardDatabase unavailable (cardxml missing)")
+
+    engine = GameEngine(card_db=card_db)
+    engine.apply(
+        CreateGamePacket(
+            packet_id=0,
+            game_entity_id=1,
+            players=((2, 1, "P1", 1, 1), (3, 2, "P2", 2, 2)),
+        )
+    )
+    # EX1_001 (Lightwarden) is a real MINION; CARDTYPE=4 places it on the board.
+    engine.apply(
+        FullEntityPacket(
+            packet_id=1,
+            entity_id=10,
+            card_id="EX1_001",
+            tags={"CONTROLLER": 1, "ZONE": 1, "CARDTYPE": 4, "HEALTH": 3},
+        )
+    )
+    prev = engine.current_state
+    assert prev is not None
+
+    engine.apply(TagChangePacket(packet_id=2, entity_id=10, tag="ZONE", value=4))
+    curr = engine.current_state
+    assert curr is not None
+    # The projected graveyard entity carries the resolved MINION card type.
+    assert [e.card_type for e in curr.graveyard] == ["MINION"]
 
     deaths = [e for e in diff(prev, curr) if isinstance(e, MinionDied)]
     assert len(deaths) == 1

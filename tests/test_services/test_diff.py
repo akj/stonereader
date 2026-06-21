@@ -42,6 +42,7 @@ def _entity(
     card_id: str = "",
     name: str = "",
     controller: int = 1,
+    card_type: str = "",
     tags: Optional[dict] = None,
 ) -> GameEntity:
     return GameEntity(
@@ -52,7 +53,7 @@ def _entity(
         cost=0,
         current_attack=0,
         current_health=0,
-        card_type="",
+        card_type=card_type,
         zone=zone,
         zone_position=0,
         controller=controller,
@@ -258,12 +259,22 @@ def test_entity_entering_play_without_play_block_does_not_emit_card_played() -> 
 
 
 def test_play_to_graveyard_emits_minion_died() -> None:
-    """A board entity that goes from zone="PLAY" to zone="GRAVEYARD" produces MinionDied."""
+    """A MINION that goes from zone="PLAY" to zone="GRAVEYARD" produces MinionDied."""
     alive = _entity(
-        entity_id=30, zone="PLAY", card_id="CS2_023", name="Bloodfen", controller=1
+        entity_id=30,
+        zone="PLAY",
+        card_id="CS2_023",
+        name="Bloodfen",
+        controller=1,
+        card_type="MINION",
     )
     dead = _entity(
-        entity_id=30, zone="GRAVEYARD", card_id="CS2_023", name="Bloodfen", controller=1
+        entity_id=30,
+        zone="GRAVEYARD",
+        card_id="CS2_023",
+        name="Bloodfen",
+        controller=1,
+        card_type="MINION",
     )
     prev = _state(turn=5, player_board=(alive,))
     curr = _state(turn=5, player_board=(dead,))
@@ -273,6 +284,30 @@ def test_play_to_graveyard_emits_minion_died() -> None:
     assert ev.entity_id == 30
     assert ev.name == "Bloodfen"
     assert ev.controller == 1
+
+
+def test_play_to_graveyard_weapon_emits_card_removed_not_minion_died() -> None:
+    """A non-minion (e.g. a destroyed WEAPON) going PLAY → GRAVEYARD is a
+    CardRemoved, never a MinionDied — terminal-zone entities are now visited by
+    the diff, so the GRAVEYARD branch must be gated by card type."""
+    equipped = _entity(
+        entity_id=31, zone="PLAY", card_id="CS2_106", controller=1, card_type="WEAPON"
+    )
+    destroyed = _entity(
+        entity_id=31,
+        zone="GRAVEYARD",
+        card_id="CS2_106",
+        controller=1,
+        card_type="WEAPON",
+    )
+    prev = _state(turn=5, player_weapon=equipped)
+    curr = _state(turn=5, graveyard=(destroyed,))
+    events = diff(prev, curr)
+    assert [e for e in events if isinstance(e, MinionDied)] == []
+    removed = [e for e in events if isinstance(e, CardRemoved)]
+    assert len(removed) == 1
+    assert removed[0].entity_id == 31
+    assert removed[0].controller == 1
 
 
 # ------------------------------------------------------------------ CardRemoved
@@ -305,9 +340,18 @@ def test_deck_to_removed_from_game_emits_card_removed() -> None:
 
 
 def test_play_to_graveyard_does_not_double_emit_card_removed() -> None:
-    """PLAY → GRAVEYARD is MinionDied, not CardRemoved. Each transition emits exactly one event."""
-    alive = _entity(entity_id=30, zone="PLAY", card_id="CS2_023", controller=1)
-    dead = _entity(entity_id=30, zone="GRAVEYARD", card_id="CS2_023", controller=1)
+    """A MINION PLAY → GRAVEYARD is MinionDied, not CardRemoved. Each transition
+    emits exactly one event."""
+    alive = _entity(
+        entity_id=30, zone="PLAY", card_id="CS2_023", controller=1, card_type="MINION"
+    )
+    dead = _entity(
+        entity_id=30,
+        zone="GRAVEYARD",
+        card_id="CS2_023",
+        controller=1,
+        card_type="MINION",
+    )
     prev = _state(turn=5, player_board=(alive,))
     curr = _state(turn=5, player_board=(dead,))
     removed = [e for e in diff(prev, curr) if isinstance(e, CardRemoved)]

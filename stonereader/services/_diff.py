@@ -165,16 +165,32 @@ def diff(prev: Optional[GameState], curr: GameState) -> Sequence[GameEvent]:
                 )
             )
         elif curr_ent.zone == "GRAVEYARD" and prev_zone == "PLAY":
-            events.append(
-                MinionDied(
-                    timestamp=0.0,
-                    turn=turn,
-                    entity_id=curr_ent.entity_id,
-                    card_id=curr_ent.card_id,
-                    name=curr_ent.name,
-                    controller=curr_ent.controller,
+            if curr_ent.card_type == "MINION":
+                events.append(
+                    MinionDied(
+                        timestamp=0.0,
+                        turn=turn,
+                        entity_id=curr_ent.entity_id,
+                        card_id=curr_ent.card_id,
+                        name=curr_ent.name,
+                        controller=curr_ent.controller,
+                    )
                 )
-            )
+            else:
+                # A non-minion leaving PLAY for the graveyard (a destroyed
+                # weapon, a dead hero, a depleted location) is a removal, not a
+                # minion death. Without this gate the GRAVEYARD branch reports
+                # MinionDied for every PLAY-zone entity, now that terminal-zone
+                # entities are projected and visited by the diff.
+                events.append(
+                    CardRemoved(
+                        timestamp=0.0,
+                        turn=turn,
+                        entity_id=curr_ent.entity_id,
+                        card_id=curr_ent.card_id,
+                        controller=curr_ent.controller,
+                    )
+                )
         elif (
             curr_ent.zone in _TERMINAL_ENTITY_ZONES
             and prev_zone not in _TERMINAL_ENTITY_ZONES

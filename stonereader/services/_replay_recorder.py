@@ -146,18 +146,26 @@ class ReplayRecorder:
     # ------------------------------------------------------------- Tracker hook
 
     def on_state(self, prev: Optional[GameState], curr: GameState) -> None:
-        """Flush on COMPLETE, drop on ABANDONED, otherwise keep buffering.
+        """Flush on the transition into COMPLETE, drop on ABANDONED, else buffer.
 
-        - COMPLETE: build XML from the buffer and persist; clear buffer after.
+        - COMPLETE (only when prev was NOT already COMPLETE): build XML from the
+          buffer and persist; trim the buffer after.
         - ABANDONED: clear the buffer and save nothing.
         - anything else (RUNNING, prev is None, etc.): keep accumulating; the
           new game's CREATE_GAME lines are already in the buffer via on_lines.
+
+        A finished game can publish SEVERAL COMPLETE snapshots — trailing packets
+        after the terminal PLAYSTATE (e.g. BLOCK_END) still mutate other fields
+        while game_state stays COMPLETE. Re-flushing on those would, when the
+        next game's CREATE_GAME is already buffered, serialise that partial next
+        game and drop its preserved head. The first COMPLETE already saved the
+        finished game, so flush ONLY on the RUNNING/None -> COMPLETE transition.
         """
         game_state = getattr(curr, "game_state", "")
         if game_state == "ABANDONED":
             self._buffer.clear()
             return
-        if game_state == "COMPLETE":
+        if game_state == "COMPLETE" and getattr(prev, "game_state", "") != "COMPLETE":
             self._flush_complete(curr)
 
     # ------------------------------------------------------------- Internals
