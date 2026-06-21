@@ -18,11 +18,13 @@ from pathlib import Path
 
 from stonereader.db import get_connection, init_db
 from stonereader.models.game_state import GameState, Hero
+from stonereader.services._replay_loader import load_replay
 from stonereader.services._replay_recorder import ReplayRecorder
 from stonereader.services._replay_store import ReplayStore
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "log"
 SOURCE_LOG = "game_end.log"
+NEXT_LOG = "match_start.log"
 
 FIXED_NOW = datetime(2026, 6, 20, tzinfo=timezone.utc)
 
@@ -184,6 +186,44 @@ def test_unparseable_buffer_saves_nothing(tmp_path: Path) -> None:
     recorder.on_state(prev, curr)
 
     assert store.all_replays() == []
+
+
+def test_next_game_in_same_batch_saves_completed_not_partial(tmp_path: Path) -> None:
+    """One watcher tick carrying the finished game's tail + the next game's
+    CREATE_GAME must save the COMPLETED game (not the partial new one), and keep
+    the next game's already-buffered head so it can still be saved later.
+    """
+    store = _make_store(tmp_path)
+    recorder = _recorder(store)
+
+    finished = _fixture_lines()  # game_end.log: friendly concedes -> LOST
+    next_head = (FIXTURE_DIR / NEXT_LOG).read_text(encoding="utf-8").splitlines()[:120]
+    # A single batch: the finishing game's lines AND the next game's opening.
+    recorder.on_lines(finished + next_head)
+
+    prev = _make_state(game_state="RUNNING", player_playstate="PLAYING")
+    curr = _make_state(
+        game_state="COMPLETE", player_playstate="LOST", opponent_playstate="WON"
+    )
+    recorder.on_state(prev, curr)
+
+    # Exactly one replay, recording the COMPLETED game's result.
+    replays = store.all_replays()
+    assert len(replays) == 1
+    assert replays[0].result == "LOST"
+
+    # The saved file is the COMPLETED game: loading it must reach a terminal
+    # state. A partial next-game save would never reach COMPLETE.
+    files = list((tmp_path / "replays").rglob("*.hsreplay"))
+    assert len(files) == 1
+    state = load_replay(files[0])
+    assert state.states[-1].game_state == "COMPLETE"
+    assert state.states[-1].player_playstate == "LOST"
+
+    # The next game's buffered head survived the clear (so it can be saved when
+    # IT completes) rather than being discarded with the finished game.
+    assert recorder._buffer, "next game's buffered head must be preserved"
+    assert any("CREATE_GAME" in line for line in recorder._buffer)
 
 
 def test_buffer_cleared_after_save_prevents_double_save(tmp_path: Path) -> None:

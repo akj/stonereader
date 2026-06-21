@@ -197,6 +197,26 @@ def test_announce_entry_includes_count(tmp_path) -> None:
     assert "3" in speech.last_speech
 
 
+def test_cursor_move_notifies_view(tmp_path) -> None:
+    """left/right/home/end must fire on_changed so the view's selected row
+    tracks the presenter cursor (not just refresh/delete)."""
+    store = _make_store(tmp_path)
+    _seed(store)  # 3 replays, cursor starts at 0
+    presenter = ReplaysPresenter(MockSpeechService(), store)
+
+    seen: list[int] = []
+    presenter.set_on_changed(lambda: seen.append(presenter.cursor_for_zone("replays")))
+
+    key_map = presenter.get_key_map()
+    key_map["right"]()  # -> 1
+    key_map["end"]()  # -> 2 (last)
+    key_map["left"]()  # -> 1
+    key_map["home"]()  # -> 0
+
+    # Every cursor move notified the view with the new cursor position.
+    assert seen == [1, 2, 1, 0]
+
+
 def test_refresh_rereads_store(tmp_path) -> None:
     store = _make_store(tmp_path)
     _seed(store)

@@ -722,12 +722,15 @@ class GameEngine:
         player_weapons: List[GameEntity] = []
         opponent_weapons: List[GameEntity] = []
         player_deck_entities: List[GameEntity] = []
+        graveyard: List[GameEntity] = []
         player_deck_count = 0
         opponent_deck_count = 0
         play_zone = int(Zone.PLAY)
         deck_zone = int(Zone.DECK)
         hand_zone = int(Zone.HAND)
         secret_zone = int(Zone.SECRET)
+        graveyard_zone = int(Zone.GRAVEYARD)
+        removed_zone = int(Zone.REMOVEDFROMGAME)
         minion_type = int(CardType.MINION)
         weapon_type = int(CardType.WEAPON)
         for eid, ent in self._entities.items():
@@ -759,6 +762,14 @@ class GameEngine:
                 elif ctype == weapon_type:
                     target = player_weapons if is_friendly else opponent_weapons
                     target.append(self._entity_view(eid, ent, "PLAY", controller_int))
+            elif zone == graveyard_zone:
+                graveyard.append(
+                    self._entity_view(eid, ent, "GRAVEYARD", controller_int)
+                )
+            elif zone == removed_zone:
+                graveyard.append(
+                    self._entity_view(eid, ent, "REMOVEDFROMGAME", controller_int)
+                )
         for lst in (
             player_board,
             opponent_board,
@@ -769,6 +780,9 @@ class GameEngine:
             player_deck_entities,
         ):
             lst.sort(key=lambda e: e.zone_position)
+        # GRAVEYARD has no meaningful zone_position; order by entity_id so the
+        # projection (and therefore the diff seam) is deterministic.
+        graveyard.sort(key=lambda e: e.entity_id)
         self._current_state = dataclasses.replace(
             self._current_state,
             player_board=tuple(player_board),
@@ -786,6 +800,7 @@ class GameEngine:
             player_deck=tuple(player_deck_entities),
             player_deck_count=player_deck_count,
             opponent_deck_count=opponent_deck_count,
+            graveyard=tuple(graveyard),
         )
 
 

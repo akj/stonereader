@@ -12,11 +12,22 @@ Design — buffer-everything, segment on parse
 Rather than trying to track game boundaries from interleaved line/state
 ordering, the recorder simply accumulates all lines and lets hslog do the
 segmentation: a single :class:`hslog.LogParser` fed the whole buffer yields one
-``PacketTree`` per ``CREATE_GAME`` it sees, so the LAST tree is always the
-just-completed game. This is robust against the real pipeline's ordering (the
-COMPLETE ``GameState`` is published as the watcher's lines flow through the
-parser, so the game's lines are already buffered by the time ``on_state`` sees
-``COMPLETE``).
+``PacketTree`` per ``CREATE_GAME`` it sees. This is robust against the real
+pipeline's ordering (the COMPLETE ``GameState`` is published as the watcher's
+lines flow through the parser, so the game's lines are already buffered by the
+time ``on_state`` sees ``COMPLETE``).
+
+Selecting the right tree
+------------------------
+The LAST parsed tree is NOT necessarily the just-completed game: a single
+watcher tick can carry the finishing game's terminal lines *and* the next
+game's ``CREATE_GAME`` (the raw listener buffers the whole batch before the
+parser dispatches the first ``COMPLETE``). Taking ``games[-1]`` would then
+serialise the next, partial game under the completed game's metadata. So on
+``COMPLETE`` the recorder selects the FIRST tree that reached a terminal
+``PLAYSTATE`` and, when a later game has already started, preserves that game's
+buffered head (from its ``GameState`` ``CREATE_GAME`` line) instead of dropping
+it on the buffer clear.
 
 Lifecycle hooks (wired in app.py, NOT here):
   - ``on_lines``  : called by the watcher's ``on_lines`` — ALWAYS accumulates.
@@ -40,8 +51,9 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Callable, List, Optional
+from typing import Any, Callable, Iterator, List, Optional
 
+from hearthstone.enums import GameTag, PlayState
 from hsreplay.document import HSReplayDocument
 
 from stonereader.models.game_state import GameState
@@ -49,10 +61,58 @@ from stonereader.services._replay_store import ReplayStore
 
 logger = logging.getLogger(__name__)
 
+# A new game in the Power.log opens with this exact GameState marker, and hslog
+# segments PacketTrees on it (the indented ``PowerTaskList`` CREATE_GAME does
+# NOT start a new tree). Used to find where an already-buffered next game begins
+# so its head survives the post-save buffer clear.
+_GAME_CREATE_MARKER = "GameState.DebugPrintPower() - CREATE_GAME"
+
+# PLAYSTATE values that mark a finished game (mirrors GameEngine._handle_playstate:
+# CONCEDED counts as finished — that side simply lost).
+_TERMINAL_PLAYSTATES = frozenset(
+    int(s) for s in (PlayState.WON, PlayState.LOST, PlayState.TIED, PlayState.CONCEDED)
+)
+
 
 def _default_now() -> datetime:
     """Production clock: tz-aware UTC now (HSReplay timestamps must round-trip)."""
     return datetime.now(timezone.utc)
+
+
+def _iter_tree_packets(nodes: Any) -> Iterator[Any]:
+    """Depth-first walk over a PacketTree's nodes, descending into Blocks."""
+    from hslog import packets as hslog_packets
+
+    for node in nodes:
+        yield node
+        if isinstance(node, hslog_packets.Block):
+            yield from _iter_tree_packets(getattr(node, "packets", []) or [])
+
+
+def _game_is_complete(tree: Any) -> bool:
+    """True once a parsed game tree carries a terminal PLAYSTATE TagChange.
+
+    Matches the signal the engine uses to publish ``COMPLETE`` (a player's
+    PLAYSTATE going WON/LOST/TIED/CONCEDED), so the recorder selects the same
+    game the tracker just reported finished.
+    """
+    from hslog import packets as hslog_packets
+
+    for node in _iter_tree_packets(getattr(tree, "packets", []) or []):
+        if (
+            isinstance(node, hslog_packets.TagChange)
+            and node.tag == GameTag.PLAYSTATE
+            and _safe_int(node.value) in _TERMINAL_PLAYSTATES
+        ):
+            return True
+    return False
+
+
+def _safe_int(value: Any) -> Optional[int]:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 class ReplayRecorder:
@@ -103,17 +163,26 @@ class ReplayRecorder:
     # ------------------------------------------------------------- Internals
 
     def _flush_complete(self, curr: GameState) -> None:
-        """Parse the buffer, save the just-completed game, then clear the buffer.
+        """Parse the buffer, save the just-completed game, then trim the buffer.
 
         The whole body is failure-isolated: any parse / XML / store error is
         logged and swallowed so auto-save never propagates out of ``on_state``.
-        The buffer is cleared in ``finally`` either way — a broken game is
-        dropped rather than re-saved on the next state.
+        In ``finally`` the buffer is replaced with only the lines of a game that
+        started AFTER the one we saved (usually none) — a broken or completed
+        game is dropped rather than re-saved on the next state, but a next
+        game's already-buffered head is preserved so it can still be saved when
+        IT completes.
         """
+        keep_tail: List[str] = []
         try:
-            xml = self._build_xml()
-            if xml is None:
+            games = self._parse_games()
+            if not games:
                 return  # nothing parseable — save nothing, no raise
+            index = self._completed_game_index(games)
+            # Compute what to retain BEFORE saving so a save failure still
+            # preserves the next game's head (and still drops the saved one).
+            keep_tail = self._trailing_lines(index, len(games))
+            xml = HSReplayDocument.from_packet_tree([games[index]]).to_xml()
             self._store.save_xml(
                 xml,
                 source="live_auto",
@@ -129,14 +198,13 @@ class ReplayRecorder:
         except Exception:
             logger.exception("live replay auto-save failed; dropping game")
         finally:
-            self._buffer.clear()
+            self._buffer = keep_tail
 
-    def _build_xml(self) -> Optional[str]:
-        """Parse the buffered lines into HSReplay XML for the last game.
+    def _parse_games(self) -> List[Any]:
+        """Parse the buffered lines into hslog ``PacketTree`` games.
 
-        Returns ``None`` (rather than raising) when the buffer contains no
-        parseable game. A tz-aware ``_current_date`` is required so the emitted
-        HSReplay timestamps are real datetimes that round-trip.
+        A tz-aware ``_current_date`` is required so the emitted HSReplay
+        timestamps are real datetimes that round-trip.
         """
         # Local import keeps hslog as a file-parsing-edge dependency, mirroring
         # the loader: the recorder module imports it only when it parses.
@@ -146,10 +214,40 @@ class ReplayRecorder:
         parser._current_date = self._now()
         for line in self._buffer:
             parser.read_line(line)
-        if not parser.games:
-            return None
-        tree = parser.games[-1]  # the just-completed game (hslog segments games)
-        return HSReplayDocument.from_packet_tree([tree]).to_xml()
+        return list(parser.games)
+
+    @staticmethod
+    def _completed_game_index(games: List[Any]) -> int:
+        """Index of the just-completed game among the parsed trees.
+
+        The LAST tree may be a partial next game whose ``CREATE_GAME`` arrived in
+        the same watcher tick as this game's finish. Finished games are flushed
+        and trimmed out of the buffer in order, so the EARLIEST still-buffered
+        complete game is the one whose ``COMPLETE`` just fired. Falls back to the
+        last tree if none looks complete (defensive: the engine only reports
+        COMPLETE off a terminal PLAYSTATE, which is by then in the buffer).
+        """
+        for i, game in enumerate(games):
+            if _game_is_complete(game):
+                return i
+        return len(games) - 1
+
+    def _trailing_lines(self, index: int, num_games: int) -> List[str]:
+        """Buffer lines for a game that started after the one being saved.
+
+        Empty in the common case (the saved game is the last parsed tree — the
+        next game has not started yet). When a later game exists, retain from its
+        ``GameState`` ``CREATE_GAME`` line so its already-buffered head is not
+        lost when the buffer is replaced.
+        """
+        if index >= num_games - 1:
+            return []
+        create_idxs = [
+            i for i, line in enumerate(self._buffer) if _GAME_CREATE_MARKER in line
+        ]
+        if index + 1 < len(create_idxs):
+            return self._buffer[create_idxs[index + 1] :]
+        return []
 
     @staticmethod
     def _derive_result(curr: GameState) -> str:

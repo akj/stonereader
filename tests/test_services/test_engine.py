@@ -12,7 +12,9 @@ import pytest
 
 pytest.importorskip("stonereader.services._engine")
 
+from stonereader.services._diff import diff
 from stonereader.services._engine import GameEngine
+from stonereader.services._events import MinionDied
 from stonereader.services._packets import (
     CreateGamePacket,
     FullEntityPacket,
@@ -69,7 +71,10 @@ def test_drawn_card_controller_reflects_log_controller():
         CreateGamePacket(
             packet_id=0,
             game_entity_id=1,
-            players=((2, 1, "LocalPlayer", 144115198130930503, 1), (3, 2, "Opponent", 144115198130930504, 2)),
+            players=(
+                (2, 1, "LocalPlayer", 144115198130930503, 1),
+                (3, 2, "Opponent", 144115198130930504, 2),
+            ),
         )
     )
     # Register entity 10 as belonging to controller 2 with no zone yet.
@@ -82,9 +87,7 @@ def test_drawn_card_controller_reflects_log_controller():
         )
     )
     # Now entity 10 moves to HAND (Zone=3).
-    engine.apply(
-        TagChangePacket(packet_id=2, entity_id=10, tag="ZONE", value=3)
-    )
+    engine.apply(TagChangePacket(packet_id=2, entity_id=10, tag="ZONE", value=3))
     state = engine.current_state
     assert state is not None
     drawn_for_eid = [pc for pc in state.opponent_drawn if pc.entity_id == 10]
@@ -94,6 +97,50 @@ def test_drawn_card_controller_reflects_log_controller():
     assert drawn_for_eid[0].controller == 2, (
         f"controller should be 2 (raw CONTROLLER tag), got {drawn_for_eid[0].controller}"
     )
+
+
+def test_dead_minion_projected_to_graveyard_drives_minion_died():
+    """A PLAY→GRAVEYARD minion must be projected into state.graveyard so the
+    pure diff seam can still see the death and emit MinionDied.
+
+    Before this projection the dead entity left every navigable zone, so the
+    diff loop never visited it and the replay event drilldown silently dropped
+    deaths (PRD #7 / codex review round 4).
+    """
+    engine = GameEngine()
+    engine.apply(
+        CreateGamePacket(
+            packet_id=0,
+            game_entity_id=1,
+            players=((2, 1, "P1", 1, 1), (3, 2, "P2", 2, 2)),
+        )
+    )
+    # A friendly (CONTROLLER=1) minion (CARDTYPE=4) alive in PLAY (ZONE=1).
+    engine.apply(
+        FullEntityPacket(
+            packet_id=1,
+            entity_id=10,
+            card_id="CS2_023",
+            tags={"CONTROLLER": 1, "ZONE": 1, "CARDTYPE": 4, "HEALTH": 3},
+        )
+    )
+    prev = engine.current_state
+    assert prev is not None
+    assert [e.entity_id for e in prev.player_board] == [10]
+    assert prev.graveyard == ()
+
+    # The minion dies: ZONE -> GRAVEYARD (4).
+    engine.apply(TagChangePacket(packet_id=2, entity_id=10, tag="ZONE", value=4))
+    curr = engine.current_state
+    assert curr is not None
+    # It left the board and is now projected into the graveyard with the right zone.
+    assert curr.player_board == ()
+    assert [(e.entity_id, e.zone) for e in curr.graveyard] == [(10, "GRAVEYARD")]
+
+    deaths = [e for e in diff(prev, curr) if isinstance(e, MinionDied)]
+    assert len(deaths) == 1
+    assert deaths[0].entity_id == 10
+    assert deaths[0].controller == 1
 
 
 def test_mid_game_fixture_publishes_running_state(power_log_fixture):

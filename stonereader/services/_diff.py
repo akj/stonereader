@@ -61,6 +61,10 @@ def _iter_entities(state: GameState) -> Iterable[GameEntity]:
         yield state.player_weapon
     if state.opponent_weapon is not None:
         yield state.opponent_weapon
+    # Terminal-zone entities (GRAVEYARD / REMOVEDFROMGAME) — without these a
+    # PLAY→GRAVEYARD death or a *→terminal removal is never visited below, so
+    # MinionDied / CardRemoved would be silently dropped from the event stream.
+    yield from state.graveyard
 
 
 def _index_entities(state: GameState) -> Dict[int, GameEntity]:

@@ -104,8 +104,26 @@ class ReplaysPresenter(ZoneNavigationMixin, BasePresenter):
         else:
             cursor = 0
         self._zone_cursors[_REPLAYS_ZONE] = cursor
+        self._notify_changed()
+
+    def _notify_changed(self) -> None:
+        """Fire the view callback so its selected row tracks the presenter cursor."""
         if self._on_changed is not None:
             self._on_changed()
+
+    # -- navigation (notify the view so its selection follows the cursor) -
+
+    def move_in_zone(self, delta: int) -> None:
+        super().move_in_zone(delta)
+        self._notify_changed()
+
+    def jump_to_first(self) -> None:
+        super().jump_to_first()
+        self._notify_changed()
+
+    def jump_to_last(self) -> None:
+        super().jump_to_last()
+        self._notify_changed()
 
     def announce_entry(self) -> None:
         """Spoken on entering the screen: zone label + count (or empty)."""
