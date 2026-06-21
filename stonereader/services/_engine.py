@@ -59,6 +59,17 @@ _MULLIGAN_DONE = 4
 # identical to the prior one and the damage/stat change is silently lost.
 _STAT_TAGS = frozenset({"DAMAGE", "ATK", "HEALTH", "DURABILITY"})
 
+# Tags that reshape the zone projection — which side an entity is bucketed to
+# (CONTROLLER, e.g. Mind Control), its order within a zone (ZONE_POSITION), or
+# which board collection it lands in (CARDTYPE, e.g. a transform). They do not
+# pass through _handle_zone_change (ZONE does), so they must trigger a republish
+# of their own or the board/hand/secret/weapon projection goes stale.
+_PROJECTION_TAGS = frozenset({"CONTROLLER", "ZONE_POSITION", "CARDTYPE"})
+
+# Any of these, when their value actually changes, requires re-projecting and
+# republishing GameState from _on_tag_change.
+_REFRESH_TAGS = _STAT_TAGS | _PROJECTION_TAGS
+
 
 class GameEngine:
     """Pure Packet → GameState reducer.
@@ -539,13 +550,16 @@ class GameEngine:
                         opponent_max_mana=resources,
                     )
         elif (
-            p.tag in _STAT_TAGS and prev != p.value and self._current_state is not None
+            p.tag in _REFRESH_TAGS
+            and prev != p.value
+            and self._current_state is not None
         ):
-            # A DAMAGE/ATK/HEALTH/DURABILITY change only mutated _entities above;
-            # republish so the new stats (and any DamageDealt under an open
-            # ATTACK/POWER block) reach the tracker/loader before the block
-            # closes. Guarded on an actual value change to avoid redundant
-            # snapshots when hslog re-emits an unchanged tag.
+            # A stat (DAMAGE/ATK/HEALTH/DURABILITY) or projection-shaping
+            # (CONTROLLER/ZONE_POSITION/CARDTYPE) change only mutated _entities
+            # above; republish so the new stats / re-bucketed zones (and any
+            # DamageDealt under an open ATTACK/POWER block) reach the
+            # tracker/loader before the block closes. Guarded on an actual value
+            # change to avoid redundant snapshots when hslog re-emits a tag.
             self._refresh_state()
 
     def _handle_zone_change(self, eid: int, prev: Any, new_zone: int) -> None:
@@ -739,6 +753,8 @@ class GameEngine:
         opponent_weapons: List[GameEntity] = []
         player_deck_entities: List[GameEntity] = []
         graveyard: List[GameEntity] = []
+        player_hero_entity: Optional[GameEntity] = None
+        opponent_hero_entity: Optional[GameEntity] = None
         player_deck_count = 0
         opponent_deck_count = 0
         play_zone = int(Zone.PLAY)
@@ -750,6 +766,7 @@ class GameEngine:
         minion_type = int(CardType.MINION)
         weapon_type = int(CardType.WEAPON)
         location_type = int(CardType.LOCATION)
+        hero_type = int(CardType.HERO)
         for eid, ent in self._entities.items():
             zone = ent.get("ZONE")
             controller = ent.get("CONTROLLER")
@@ -783,6 +800,15 @@ class GameEngine:
                 elif ctype == weapon_type:
                     target = player_weapons if is_friendly else opponent_weapons
                     target.append(self._entity_view(eid, ent, "PLAY", controller_int))
+                elif ctype == hero_type:
+                    # Hero entity view (carries entity_id + DAMAGE) for the diff
+                    # seam's face-damage detection — distinct from the display
+                    # Hero model refined by _resolve_heroes.
+                    view = self._entity_view(eid, ent, "PLAY", controller_int)
+                    if is_friendly:
+                        player_hero_entity = view
+                    else:
+                        opponent_hero_entity = view
             elif zone == graveyard_zone:
                 graveyard.append(
                     self._entity_view(eid, ent, "GRAVEYARD", controller_int)
@@ -822,6 +848,8 @@ class GameEngine:
             player_deck_count=player_deck_count,
             opponent_deck_count=opponent_deck_count,
             graveyard=tuple(graveyard),
+            player_hero_entity=player_hero_entity,
+            opponent_hero_entity=opponent_hero_entity,
         )
 
 

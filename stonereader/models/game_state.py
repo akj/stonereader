@@ -161,3 +161,11 @@ class GameState:
     # replay event drilldown silently drops MinionDied / CardRemoved. Not
     # rendered by the live UI — a pure diff-seam input.
     graveyard: Tuple[GameEntity, ...] = ()
+
+    # PRD #7: GameEntity views of the two hero entities (CARDTYPE==HERO in PLAY),
+    # separate from the display-oriented player_hero / opponent_hero Hero models.
+    # They carry the hero's entity_id + DAMAGE tag so the diff seam can emit
+    # DamageDealt for face damage (an ATTACK/POWER block hitting a hero); without
+    # them _iter_entities never sees the hero and damage-to-face is dropped.
+    player_hero_entity: Optional[GameEntity] = None
+    opponent_hero_entity: Optional[GameEntity] = None

@@ -240,6 +240,90 @@ def test_damage_under_attack_block_republishes_and_drives_damage_dealt():
     assert engine.current_state is same
 
 
+def test_controller_change_rebuckets_board_projection():
+    """A CONTROLLER change (e.g. Mind Control) on a minion that stays in PLAY
+    must republish so the board projection moves it to the new side, not leave
+    it on the old side until an unrelated refresh (codex review round 9).
+    """
+    engine = GameEngine()
+    engine.apply(
+        CreateGamePacket(
+            packet_id=0,
+            game_entity_id=1,
+            players=((2, 1, "P1", 1, 1), (3, 2, "P2", 2, 2)),
+        )
+    )
+    engine.apply(
+        FullEntityPacket(
+            packet_id=1,
+            entity_id=20,
+            card_id="m",
+            tags={"CONTROLLER": 2, "ZONE": 1, "CARDTYPE": 4, "HEALTH": 3},
+        )
+    )
+    before = engine.current_state
+    assert before is not None
+    assert [e.entity_id for e in before.opponent_board] == [20]
+    assert before.player_board == ()
+
+    # Mind Control: CONTROLLER flips while the minion stays in PLAY (ZONE 1).
+    engine.apply(TagChangePacket(packet_id=2, entity_id=20, tag="CONTROLLER", value=1))
+    after = engine.current_state
+    assert after is not None
+    assert after is not before, "CONTROLLER change must republish a new snapshot"
+    assert after.opponent_board == ()
+    assert [e.entity_id for e in after.player_board] == [20]
+
+
+def test_face_damage_under_attack_block_drives_damage_dealt():
+    """An ATTACK block damaging a hero (face damage) must reach the diff as
+    DamageDealt — the hero entity is projected and visited by the diff seam
+    (codex review round 9).
+    """
+    engine = GameEngine()
+    engine.apply(
+        CreateGamePacket(
+            packet_id=0,
+            game_entity_id=1,
+            players=((2, 1, "P1", 1, 1), (3, 2, "P2", 2, 2)),
+        )
+    )
+    # Opponent hero (CARDTYPE 3 = HERO) in PLAY, plus a friendly attacker.
+    engine.apply(
+        FullEntityPacket(
+            packet_id=1,
+            entity_id=83,
+            card_id="HERO_01",
+            tags={"CONTROLLER": 2, "ZONE": 1, "CARDTYPE": 3, "HEALTH": 30, "DAMAGE": 0},
+        )
+    )
+    engine.apply(
+        FullEntityPacket(
+            packet_id=2,
+            entity_id=10,
+            card_id="m",
+            tags={"CONTROLLER": 1, "ZONE": 1, "CARDTYPE": 4, "HEALTH": 2, "ATK": 5},
+        )
+    )
+    engine.apply(
+        BlockStartPacket(packet_id=3, block_type="ATTACK", entity_id=10, target_id=83)
+    )
+    prev = engine.current_state
+    assert prev is not None
+    assert prev.opponent_hero_entity is not None
+    assert prev.opponent_hero_entity.entity_id == 83
+
+    # 5 damage to the opponent's face under the open ATTACK block.
+    engine.apply(TagChangePacket(packet_id=4, entity_id=83, tag="DAMAGE", value=5))
+    curr = engine.current_state
+    assert curr is not None
+    dealt = [e for e in diff(prev, curr) if isinstance(e, DamageDealt)]
+    assert len(dealt) == 1
+    assert dealt[0].target_entity_id == 83
+    assert dealt[0].amount == 5
+    assert dealt[0].target_controller == 2
+
+
 def test_location_in_play_projected_to_board():
     """A CardType.LOCATION in PLAY occupies a board slot and must appear on the
     board projection, not be dropped like a non-minion/non-weapon (codex round 7).

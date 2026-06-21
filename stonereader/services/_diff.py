@@ -65,6 +65,13 @@ def _iter_entities(state: GameState) -> Iterable[GameEntity]:
     # PLAY→GRAVEYARD death or a *→terminal removal is never visited below, so
     # MinionDied / CardRemoved would be silently dropped from the event stream.
     yield from state.graveyard
+    # Hero entities — without these a DAMAGE change on a hero under an ATTACK/
+    # POWER block (face damage) is never visited, so DamageDealt to face would
+    # be dropped from the event stream.
+    if state.player_hero_entity is not None:
+        yield state.player_hero_entity
+    if state.opponent_hero_entity is not None:
+        yield state.opponent_hero_entity
 
 
 def _index_entities(state: GameState) -> Dict[int, GameEntity]:

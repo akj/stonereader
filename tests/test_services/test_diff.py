@@ -440,6 +440,38 @@ def test_damage_tag_change_during_power_block_emits_damage_dealt() -> None:
     assert events[0].amount == 2
 
 
+def test_hero_face_damage_emits_damage_dealt() -> None:
+    """A hero's DAMAGE tag change under an ATTACK block (damage to face) produces
+    DamageDealt — hero entities must be part of the diff input, or attacks and
+    spells to face are silently dropped (codex review round 9)."""
+    healthy = _entity(
+        entity_id=64,
+        zone="PLAY",
+        card_id="HERO_01",
+        controller=2,
+        card_type="HERO",
+        tags={"DAMAGE": 0},
+    )
+    hurt = _entity(
+        entity_id=64,
+        zone="PLAY",
+        card_id="HERO_01",
+        controller=2,
+        card_type="HERO",
+        tags={"DAMAGE": 6},
+    )
+    aip = AttackInProgress(
+        attacker_entity_id=10, defender_entity_id=64, attacker_controller=1
+    )
+    prev = _state(turn=6, opponent_hero_entity=healthy, attack_in_progress=aip)
+    curr = _state(turn=6, opponent_hero_entity=hurt, attack_in_progress=aip)
+    events = [e for e in diff(prev, curr) if isinstance(e, DamageDealt)]
+    assert len(events) == 1
+    assert events[0].target_entity_id == 64
+    assert events[0].amount == 6
+    assert events[0].target_controller == 2
+
+
 def test_damage_tag_change_outside_attack_or_power_block_does_not_emit() -> None:
     """DAMAGE changes outside of an ATTACK/POWER block are NOT DamageDealt
     (e.g. board snapshots after a block has already closed)."""
