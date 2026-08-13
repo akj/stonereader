@@ -4,13 +4,15 @@
 
 Proposed. Lands incrementally: Card Library/Browser first (low-risk, independent of PRD #7); Replay second, blocking on a PRD #7 revision that incorporates the keymap and expanded zone inventory documented below.
 
+Corrected 2026-08-13 against the canonical HSA transcription (ticket #29): Y is not an unclaimed key, and HSA's mana filter is 0–7, not 0–9. Extended app-wide by ADR-0004.
+
 ## Context
 
 StoneReader's audience is screen-reader users on Windows, most of whom already use **Hearthstone Access** (HSA) — the third-party mod that wraps Hearthstone itself in a keyboard-only interface. HSA defines a deeply established keymap that its users have internalised: B for your board, G for opponent's board, V for your hero, F for opponent's hero, C for your hand, S for secrets, W for weapon, and so on.
 
 Every divergence between HSA and StoneReader's keyboard surfaces is friction for that audience — they reach for B and get nothing.
 
-HSA's keymap is internally inconsistent. Friendly/opponent pairs use different patterns: boards (B vs G) and heroes (V vs F) use distinct letters, while weapons (W / Shift+W), secrets (S / Shift+S), hand (C / Shift+C), deck (D / Shift+D), and mana (A / Shift+A) use a letter + Shift modifier. There is no governing rule; the pattern is accreted history. Numbers also have surface-dependent meaning in HSA: in-game they jump to items 1–10 in the current list, in My Collection they filter by mana cost. PRD #7's original draft had number keys switching **Replay** zones, which would have given numbers a third meaning unique to StoneReader.
+HSA's keymap is internally inconsistent. Friendly/opponent pairs use different patterns: boards (B vs G) and heroes (V vs F) use distinct letters, while weapons (W / Shift+W), secrets (S / Shift+S), hand (C / Shift+C), deck (D / Shift+D), and mana (A / Shift+A) use a letter + Shift modifier. There is no governing rule; the pattern is accreted history. The Shift modifier itself carries **two distinct meanings**: opponent-side (Shift+C/D/W/S/A) and skip-confirmation (Shift+E end turn; Battlegrounds Shift+U/F/R tavern actions) — future StoneReader surfaces must keep the two distinct rather than collapsing them into one "Shift rule". Numbers also have surface-dependent meaning in HSA: in-game they jump to items 1–10 in the current list, in My Collection they filter by mana cost (0–7). PRD #7's original draft had number keys switching **Replay** zones, which would have given numbers a third meaning unique to StoneReader.
 
 ## Decision
 
@@ -19,12 +21,12 @@ The **Replay** viewer and Card Library/Browser mirror HSA's exact key convention
 Specific rules that follow:
 
 - **Letter keys** switch to or announce specific game-state zones. Friendly/opponent pairs preserve HSA's case-by-case pattern: B/G for boards, V/F for heroes, Shift modifier for weapons/secrets/hand/deck/mana.
-- **Numbers** do positional jumps in Replay (jump to item 1–10 in the current zone) and mana-cost toggles in Card Browser (0–9, single-select with re-press to clear). Numbers never switch zones.
+- **Numbers** do positional jumps in Replay (jump to item 1–10 in the current zone) and mana-cost toggles in Card Browser (single-select with re-press to clear). HSA's filter is 0–7; StoneReader deliberately extends to 0–9 — 8 and 9 are unbound in HSA's collection, so the extension is purely additive (see ADR-0004 for the extension decision). Numbers never switch zones.
 - **Speak-only commands** in HSA (A, Shift+A, Shift+D, R, Shift+R) remain speak-only in StoneReader and do not change the active zone — they are drive-by queries.
 - **Count-only HSA commands where StoneReader has richer data** (D for your deck, Shift+C for opponent hand) are extended to navigable zones in **Replay**. The letter and Shift convention is preserved.
-- **Zones with no HSA equivalent** (events, played-this-game, drawn-this-game) get keys from HSA's "free" set — keys HSA uses for in-game actions that don't apply in Replay or Card Browser: Y for events, P / Shift+P for played, N / Shift+N for drawn.
+- **Zones with no HSA equivalent** (events, played-this-game, drawn-this-game) get keys checked against HSA's bindings. P / Shift+P for played and N / Shift+N for drawn are genuinely free (unbound in HSA). Y for events is **not** free — HSA binds Y in-game to opening the play-history log — but the binding stands on semantic fit: StoneReader's event stream is the closest analogue of that log. An earlier revision of this ADR wrongly cited Y as unclaimed; the "free key" justification must not be cited for Y.
 
-Canonical reference: <https://hearthstoneaccess.com/commands.html>
+Canonical reference: <https://hearthstoneaccess.com/commands.html>; in-repo transcription: `docs/research/hsa-commands-reference.md` (branch `research/hsa-command-reference`, ticket #26).
 
 ## Alternatives considered and rejected
 
