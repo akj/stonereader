@@ -28,6 +28,14 @@ _Avoid_: "list box", "menu screen"
 The **Widget type** for browsing items with depth: Left/Right move between items, Up/Down read the detail lines of the current item.
 _Avoid_: "card list", "browse mode"
 
+**Screen jump**:
+Reaching a **Surface** via a Home menu option, its Home letter, or a system-wide hotkey. A jump resets the surface stack to Home → target, so back from a jumped-to Surface always goes Home. See ADR-0006.
+_Avoid_: "switch screen", "navigate to" (ambiguous with **Drill-down**)
+
+**Drill-down**:
+Reaching a **Surface** from within another (Replays → Replay Viewer, Decks → Import Deck, F1 → help). A drill-down pushes one level onto the surface stack; back pops exactly one. See ADR-0006.
+_Avoid_: "sub-screen", "child screen"
+
 **Text mode**:
 The state in which keystrokes go to a text field instead of navigation. Entered only by an explicit act (never on surface entry); Enter commits and leaves, Escape leaves without committing.
 _Avoid_: "edit mode", "input mode"
@@ -82,12 +90,13 @@ _Avoid_: "narration event" (names a single consumer's purpose), "engine event"
 (too narrow — Replays produce them too without an engine)
 
 **Hearthstone Access** (or **HSA**):
-The third-party Hearthstone accessibility mod (hearthstoneaccess.com), used as StoneReader's canonical reference for keyboard navigation conventions. StoneReader's **Replay** viewer and Card Library/Browser mirror HSA's key conventions — including its internal inconsistencies — so that HSA users carry muscle memory across. See ADR-0003.
+The third-party Hearthstone accessibility mod (hearthstoneaccess.com), used as StoneReader's canonical reference for keyboard navigation conventions. StoneReader's **Replay** viewer and Cards surface mirror HSA's key conventions — including its internal inconsistencies — so that HSA users carry muscle memory across. See ADR-0003.
 _Avoid_: "the mod", "HearthstoneAccess" (single word), generic "accessibility mod"
 
 ## Relationships
 
 - A **Surface** presents exactly one **Widget type**; **Text mode** is a temporary state on top of a Surface, not a third type.
+- A **Surface** is reached by a **Screen jump** (stack resets to Home → target) or a **Drill-down** (pushes one level); back pops one drill-down, goes Home from any jumped-to Surface, and is an announced no-op at Home.
 - UI **zones** live on horizontal-list **Surfaces** (Live Game, Replay Viewer); switching zones changes what the list shows, never the **Widget type**.
 - A UI **zone** either projects from a game **Zone** (e.g., the Remaining Deck zone is `Zone.DECK` minus draws) or is *synthesised* (Cards Drawn, Opponent Played) and corresponds to no single game **Zone**.
 - Each UI **zone** owns one cursor; cursors persist across zone switches via `ZoneNavigationMixin`.
