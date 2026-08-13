@@ -12,6 +12,26 @@ _Avoid_: "game zone", "card location"
 A navigable list in the StoneReader UI with a persistent cursor and a user-facing label.
 _Avoid_: "pane", "section", "list", "region"
 
+**Surface**:
+A distinct place in the StoneReader UI the **User** can be — Home, Card Browser, Replay Viewer, a help screen. Surfaces stack; going back pops to the previous one. Each surface presents exactly one **Widget type**. See ADR-0004.
+_Avoid_: "screen", "panel", "page", "view" (when naming the user-facing concept)
+
+**Widget type**:
+One of the two navigation shapes a **Surface** presents: **Vertical menu** or **Horizontal list**. There is no third type. See ADR-0004.
+_Avoid_: "control type", "layout"
+
+**Vertical menu**:
+The **Widget type** for choosing among options: Up/Down move a cursor over options, Enter acts on the current one. Forms are vertical menus whose options are fields and actions.
+_Avoid_: "list box", "menu screen"
+
+**Horizontal list**:
+The **Widget type** for browsing items with depth: Left/Right move between items, Up/Down read the detail lines of the current item.
+_Avoid_: "card list", "browse mode"
+
+**Text mode**:
+The state in which keystrokes go to a text field instead of navigation. Entered only by an explicit act (never on surface entry); Enter commits and leaves, Escape leaves without committing.
+_Avoid_: "edit mode", "input mode"
+
 **Card**:
 The static definition of a Hearthstone card — name, cost, type, class. Loaded once from `hearthstone-data` XML and indexed in `CardDatabase`. The same **Card** object is shared by every runtime instance of that card.
 _Avoid_: "card definition" (redundant)
@@ -67,6 +87,8 @@ _Avoid_: "the mod", "HearthstoneAccess" (single word), generic "accessibility mo
 
 ## Relationships
 
+- A **Surface** presents exactly one **Widget type**; **Text mode** is a temporary state on top of a Surface, not a third type.
+- UI **zones** live on horizontal-list **Surfaces** (Live Game, Replay Viewer); switching zones changes what the list shows, never the **Widget type**.
 - A UI **zone** either projects from a game **Zone** (e.g., the Remaining Deck zone is `Zone.DECK` minus draws) or is *synthesised* (Cards Drawn, Opponent Played) and corresponds to no single game **Zone**.
 - Each UI **zone** owns one cursor; cursors persist across zone switches via `ZoneNavigationMixin`.
 - One **Card** → many **Entities** (two Fireballs in a deck = two Entities pointing at the same Fireball **Card**). `CardDatabase` holds **Cards**; `GameState` holds **Entities**.
