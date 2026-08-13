@@ -61,6 +61,17 @@ def _iter_entities(state: GameState) -> Iterable[GameEntity]:
         yield state.player_weapon
     if state.opponent_weapon is not None:
         yield state.opponent_weapon
+    # Terminal-zone entities (GRAVEYARD / REMOVEDFROMGAME) — without these a
+    # PLAY→GRAVEYARD death or a *→terminal removal is never visited below, so
+    # MinionDied / CardRemoved would be silently dropped from the event stream.
+    yield from state.graveyard
+    # Hero entities — without these a DAMAGE change on a hero under an ATTACK/
+    # POWER block (face damage) is never visited, so DamageDealt to face would
+    # be dropped from the event stream.
+    if state.player_hero_entity is not None:
+        yield state.player_hero_entity
+    if state.opponent_hero_entity is not None:
+        yield state.opponent_hero_entity
 
 
 def _index_entities(state: GameState) -> Dict[int, GameEntity]:
@@ -160,17 +171,35 @@ def diff(prev: Optional[GameState], curr: GameState) -> Sequence[GameEvent]:
                     controller=curr_ent.controller,
                 )
             )
-        elif curr_ent.zone == "GRAVEYARD" and prev_zone == "PLAY":
-            events.append(
-                MinionDied(
-                    timestamp=0.0,
-                    turn=turn,
-                    entity_id=curr_ent.entity_id,
-                    card_id=curr_ent.card_id,
-                    name=curr_ent.name,
-                    controller=curr_ent.controller,
+        elif prev_zone == "PLAY" and curr_ent.zone in _TERMINAL_ENTITY_ZONES:
+            if curr_ent.zone == "GRAVEYARD" and curr_ent.card_type == "MINION":
+                events.append(
+                    MinionDied(
+                        timestamp=0.0,
+                        turn=turn,
+                        entity_id=curr_ent.entity_id,
+                        card_id=curr_ent.card_id,
+                        name=curr_ent.name,
+                        controller=curr_ent.controller,
+                    )
                 )
-            )
+            else:
+                # Everything else leaving PLAY for a terminal zone is a removal,
+                # not a minion death: a destroyed weapon, a dead hero, a depleted
+                # location (PLAY→GRAVEYARD non-minion), or a board entity removed
+                # from the game outright (PLAY→REMOVEDFROMGAME). Without this the
+                # GRAVEYARD branch reported MinionDied for every PLAY entity and
+                # PLAY→REMOVEDFROMGAME produced no event at all, now that
+                # terminal-zone entities are projected and visited by the diff.
+                events.append(
+                    CardRemoved(
+                        timestamp=0.0,
+                        turn=turn,
+                        entity_id=curr_ent.entity_id,
+                        card_id=curr_ent.card_id,
+                        controller=curr_ent.controller,
+                    )
+                )
         elif (
             curr_ent.zone in _TERMINAL_ENTITY_ZONES
             and prev_zone not in _TERMINAL_ENTITY_ZONES

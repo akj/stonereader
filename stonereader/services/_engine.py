@@ -38,10 +38,38 @@ from stonereader.services._packets import (
 logger = logging.getLogger(__name__)
 
 
-_PLAYSTATE_NAMES: Dict[int, str] = {1: "PLAYING", 4: "WON", 5: "LOST", 8: "TIED"}
+# hearthstone.enums.PlayState values. NOTE: 6 = TIED, 8 = CONCEDED (a conceding
+# player has LOST). An earlier mapping mislabeled 8 as TIED and omitted 6, so
+# conceded games — the common way games end — were recorded as ties.
+_PLAYSTATE_NAMES: Dict[int, str] = {
+    1: "PLAYING",
+    4: "WON",
+    5: "LOST",
+    6: "TIED",
+    8: "CONCEDED",
+}
 
 # Mulligan DONE state (hearthstone.enums.Mulligan.DONE = 4)
 _MULLIGAN_DONE = 4
+
+# Stat tags whose value feeds an entity's published current_attack/current_health
+# (and, for DAMAGE under an ATTACK/POWER block, the diff seam's DamageDealt), or
+# the display Hero's health/armor (DAMAGE/HEALTH/ARMOR on a hero entity). A change
+# to any of these must republish the snapshot so the tracker/loader sees the delta
+# while the block context is still open — otherwise the new snapshot is identical
+# to the prior one and the damage/stat change is silently lost.
+_STAT_TAGS = frozenset({"DAMAGE", "ATK", "HEALTH", "DURABILITY", "ARMOR"})
+
+# Tags that reshape the zone projection — which side an entity is bucketed to
+# (CONTROLLER, e.g. Mind Control), its order within a zone (ZONE_POSITION), or
+# which board collection it lands in (CARDTYPE, e.g. a transform). They do not
+# pass through _handle_zone_change (ZONE does), so they must trigger a republish
+# of their own or the board/hand/secret/weapon projection goes stale.
+_PROJECTION_TAGS = frozenset({"CONTROLLER", "ZONE_POSITION", "CARDTYPE"})
+
+# Any of these, when their value actually changes, requires re-projecting and
+# republishing GameState from _on_tag_change.
+_REFRESH_TAGS = _STAT_TAGS | _PROJECTION_TAGS
 
 
 class GameEngine:
@@ -107,6 +135,24 @@ class GameEngine:
         # reconnect to a different server-assigned slot) re-resolves cleanly.
         self._friendly_player_resolved = False
         self._friendly_player_id = 1
+
+    def force_friendly_player(self, player_id: int) -> None:
+        """Authoritatively pin the friendly player_id (used by replay loading).
+
+        A replay's friendly side is known from metadata (FriendlyPlayerExporter),
+        not heuristics. CREATE_GAME calls reset() and re-runs the live AI
+        heuristic, which can disagree with the recorded side (e.g. a Player-2
+        replay). The replay loader calls this AFTER the CREATE_GAME packet to
+        override that result and mark resolution final so the SHOW_ENTITY
+        fallback cannot change it. Re-buckets already-recorded rows when the id
+        actually changes. No-op for an out-of-range player_id.
+        """
+        if player_id not in (1, 2):
+            return
+        if player_id != self._friendly_player_id:
+            self._friendly_player_id = player_id
+            self._rebucket_from_entities()
+        self._friendly_player_resolved = True
 
     def apply(self, packet: Packet) -> None:
         """Apply a packet, mutating internal state and republishing current_state.
@@ -222,9 +268,14 @@ class GameEngine:
                 continue
             # WR-02: use `is None` rather than `or` so a legitimate HEALTH=0
             # in the log (e.g. SHOW_ENTITY rebroadcast after lethal) is
-            # preserved instead of being clamped back to 30.
+            # preserved instead of being clamped back to 30. Hero.health is the
+            # CURRENT remaining health (max HEALTH minus accumulated DAMAGE) so
+            # the replay viewer speaks a damaged hero's real total, not its max.
             health_raw = ent.get("HEALTH")
-            health = 30 if health_raw is None else int(health_raw)
+            max_health = 30 if health_raw is None else int(health_raw)
+            damage_raw = ent.get("DAMAGE")
+            damage = 0 if damage_raw is None else int(damage_raw)
+            health = max_health - damage
             armor_raw = ent.get("ARMOR")
             armor = 0 if armor_raw is None else int(armor_raw)
             hero = Hero(
@@ -504,6 +555,23 @@ class GameEngine:
                         opponent_mana=mana,
                         opponent_max_mana=resources,
                     )
+        elif (
+            p.tag in _REFRESH_TAGS
+            and prev != p.value
+            and self._current_state is not None
+        ):
+            # A stat (DAMAGE/ATK/HEALTH/DURABILITY/ARMOR) or projection-shaping
+            # (CONTROLLER/ZONE_POSITION/CARDTYPE) change only mutated _entities
+            # above; republish so the new stats / re-bucketed zones (and any
+            # DamageDealt under an open ATTACK/POWER block) reach the
+            # tracker/loader before the block closes. Guarded on an actual value
+            # change to avoid redundant snapshots when hslog re-emits a tag.
+            self._refresh_state()
+            if ent.get("CARDTYPE") == int(CardType.HERO):
+                # _refresh_state only re-projects zones; rebuild the display Hero
+                # so its health (max - DAMAGE) and armor track a hero's
+                # DAMAGE/HEALTH/ARMOR change the replay viewer speaks.
+                self._resolve_heroes()
 
     def _handle_zone_change(self, eid: int, prev: Any, new_zone: int) -> None:
         ent = self._entities.get(eid, {})
@@ -541,29 +609,43 @@ class GameEngine:
         self._refresh_state()
 
     def _handle_playstate(self, eid: int, value: int) -> None:
+        """Resolve the game outcome from a single terminal PLAYSTATE change.
+
+        Only ONE side's PLAYSTATE is typically observed at the lethal/concede
+        moment (and the engine caps at the first terminal via _game_ended), so
+        both sides' results are INFERRED from it. The side is determined by the
+        PLAYSTATE entity's PLAYER_ID (recorded at CREATE_GAME) vs the friendly
+        player id — comparing the raw entity id would misattribute the result.
+        CONCEDED means that side LOST.
+        """
         name = _PLAYSTATE_NAMES.get(value, "")
         if (
-            value in (4, 5, 8)
-            and self._current_state is not None
-            and not self._game_ended
+            name not in ("WON", "LOST", "TIED", "CONCEDED")
+            or self._current_state is None
+            or self._game_ended
         ):
-            self._game_ended = True
-            new_player_state = (
-                name
-                if eid == self._friendly_player_id
-                else self._current_state.player_playstate
-            )
-            new_opponent_state = (
-                name
-                if eid != self._friendly_player_id
-                else self._current_state.opponent_playstate
-            )
-            self._current_state = dataclasses.replace(
-                self._current_state,
-                game_state="COMPLETE",
-                player_playstate=new_player_state,
-                opponent_playstate=new_opponent_state,
-            )
+            return
+        self._game_ended = True
+        pid = self._entities.get(eid, {}).get("PLAYER_ID")
+        is_friendly = pid is not None and int(pid) == self._friendly_player_id
+        if name == "TIED":
+            player_outcome = opponent_outcome = "TIED"
+        else:
+            side_won = name == "WON"  # LOST / CONCEDED => that side lost
+            if is_friendly:
+                player_outcome, opponent_outcome = (
+                    ("WON", "LOST") if side_won else ("LOST", "WON")
+                )
+            else:
+                opponent_outcome, player_outcome = (
+                    ("WON", "LOST") if side_won else ("LOST", "WON")
+                )
+        self._current_state = dataclasses.replace(
+            self._current_state,
+            game_state="COMPLETE",
+            player_playstate=player_outcome,
+            opponent_playstate=opponent_outcome,
+        )
 
     def _on_block_start(self, p: BlockStartPacket) -> None:
         self._block_stack.append(p.block_type)
@@ -622,97 +704,163 @@ class GameEngine:
         # a no-op for future zone-bookkeeping if needed.
         return
 
+    def _entity_view(
+        self, eid: int, ent: Dict[str, Any], zone_name: str, controller_int: int
+    ) -> GameEntity:
+        """Build a published GameEntity from internal bookkeeping for `eid`.
+
+        Carries the int GameTag map (ATK/HEALTH/DAMAGE/...) through as ``tags``
+        so the pure diff seam can recover DamageDealt etc. from board entities.
+        """
+        card_id = ent.get("card_id", "") or ""
+        base = self._lookup_card(card_id) if card_id else None
+        drawn_turn_raw = ent.get("drawn_turn", -1)
+        drawn_turn = drawn_turn_raw if isinstance(drawn_turn_raw, int) else -1
+        tags = {k: v for k, v in ent.items() if isinstance(v, int)}
+        # Live health = base (minion HEALTH, or weapon DURABILITY) minus DAMAGE.
+        base_hp = (ent.get("HEALTH", 0) or 0) or (ent.get("DURABILITY", 0) or 0)
+        current_health = base_hp - (ent.get("DAMAGE", 0) or 0)
+        return GameEntity(
+            entity_id=eid,
+            card_id=card_id,
+            base_card=base,
+            name=base.name if base else "",
+            cost=base.cost if base else 0,
+            current_attack=ent.get("ATK", 0) or 0,
+            current_health=current_health,
+            card_type=base.card_type if base else "",
+            zone=zone_name,
+            zone_position=ent.get("ZONE_POSITION", 0) or 0,
+            controller=controller_int,
+            drawn_turn=drawn_turn,
+            tags=tags,
+            creation_lineage=ent.get("creation_lineage", "") or "",
+        )
+
     def _refresh_state(self) -> None:
         """Rebuild the published snapshot from internal bookkeeping.
 
-        D-19: reconstructs opponent_hand from self._entities. Iteration over
-        the dict (keyed by entity_id) implicitly dedupes — there is exactly
-        one bookkeeping entry per entity, so duplicate hand entries are
-        impossible by construction.
-
-        Gap-closure 03-07: also rebuilds player_deck (live remaining-deck
-        for the friendly player) and derives player_deck_count /
-        opponent_deck_count from per-controller ZONE==DECK counts. NUM_CARDS
-        _IN_DECK is NOT exposed as a GameTag in hearthstone.enums, so the
-        count must be computed here.
+        Projects every navigable Zone from self._entities onto GameState so the
+        Live surface AND the Replay viewer (PRD #7) can inspect them:
+          - PLAY-zone MINIONs  -> player_board / opponent_board
+          - PLAY-zone WEAPONs  -> player_weapon / opponent_weapon (0-or-1)
+          - HAND               -> player_hand / opponent_hand
+          - SECRET             -> player_secrets / opponent_secrets
+          - DECK               -> player_deck (friendly) + per-side deck counts
+        Heroes are refined separately (CARDTYPE==HERO pass). Iteration over the
+        entity dict (keyed by entity_id) implicitly dedupes — exactly one
+        bookkeeping entry per entity. NUM_CARDS_IN_DECK is not a GameTag, so the
+        deck counts are computed here.
         """
         if self._current_state is None:
             return
-        opponent_hand_entities: List[GameEntity] = []
+        player_board: List[GameEntity] = []
+        opponent_board: List[GameEntity] = []
+        player_hand: List[GameEntity] = []
+        opponent_hand: List[GameEntity] = []
+        player_secrets: List[GameEntity] = []
+        opponent_secrets: List[GameEntity] = []
+        player_weapons: List[GameEntity] = []
+        opponent_weapons: List[GameEntity] = []
         player_deck_entities: List[GameEntity] = []
+        graveyard: List[GameEntity] = []
+        player_hero_entity: Optional[GameEntity] = None
+        opponent_hero_entity: Optional[GameEntity] = None
         player_deck_count = 0
         opponent_deck_count = 0
+        play_zone = int(Zone.PLAY)
         deck_zone = int(Zone.DECK)
         hand_zone = int(Zone.HAND)
+        secret_zone = int(Zone.SECRET)
+        graveyard_zone = int(Zone.GRAVEYARD)
+        removed_zone = int(Zone.REMOVEDFROMGAME)
+        minion_type = int(CardType.MINION)
+        weapon_type = int(CardType.WEAPON)
+        location_type = int(CardType.LOCATION)
+        hero_type = int(CardType.HERO)
         for eid, ent in self._entities.items():
             zone = ent.get("ZONE")
             controller = ent.get("CONTROLLER")
             if controller is None:
                 continue
             controller_int = int(controller)
+            is_friendly = controller_int == self._friendly_player_id
             if zone == deck_zone:
-                if controller_int == self._friendly_player_id:
+                if is_friendly:
                     player_deck_count += 1
-                    card_id = ent.get("card_id", "") or ""
-                    base = self._lookup_card(card_id) if card_id else None
-                    drawn_turn_raw = ent.get("drawn_turn", -1)
-                    drawn_turn = (
-                        drawn_turn_raw if isinstance(drawn_turn_raw, int) else -1
-                    )
                     player_deck_entities.append(
-                        GameEntity(
-                            entity_id=eid,
-                            card_id=card_id,
-                            base_card=base,
-                            name=base.name if base else "",
-                            cost=base.cost if base else 0,
-                            current_attack=ent.get("ATK", 0) or 0,
-                            current_health=ent.get("HEALTH", 0) or 0,
-                            card_type=base.card_type if base else "",
-                            zone="DECK",
-                            zone_position=ent.get("ZONE_POSITION", 0) or 0,
-                            controller=controller_int,
-                            drawn_turn=drawn_turn,
-                            creation_lineage=ent.get("creation_lineage", "") or "",
-                        )
+                        self._entity_view(eid, ent, "DECK", controller_int)
                     )
                 else:
                     opponent_deck_count += 1
-                continue
-            if zone == hand_zone and controller_int != self._friendly_player_id:
-                card_id = ent.get("card_id", "") or ""
-                base = self._lookup_card(card_id) if card_id else None
-                drawn_turn_raw = ent.get("drawn_turn", -1)
-                drawn_turn = drawn_turn_raw if isinstance(drawn_turn_raw, int) else -1
-                opponent_hand_entities.append(
-                    GameEntity(
-                        entity_id=eid,
-                        card_id=card_id,
-                        base_card=base,
-                        name=base.name if base else "",
-                        cost=base.cost if base else 0,
-                        current_attack=ent.get("ATK", 0) or 0,
-                        current_health=ent.get("HEALTH", 0) or 0,
-                        card_type=base.card_type if base else "",
-                        zone="HAND",
-                        zone_position=ent.get("ZONE_POSITION", 0) or 0,
-                        controller=controller_int,
-                        drawn_turn=drawn_turn,
-                        creation_lineage=ent.get("creation_lineage", "") or "",
-                    )
+            elif zone == hand_zone:
+                target = player_hand if is_friendly else opponent_hand
+                target.append(self._entity_view(eid, ent, "HAND", controller_int))
+            elif zone == secret_zone:
+                target = player_secrets if is_friendly else opponent_secrets
+                target.append(self._entity_view(eid, ent, "SECRET", controller_int))
+            elif zone == play_zone:
+                ctype = ent.get("CARDTYPE")
+                # Minions AND Locations occupy board slots in PLAY — project both
+                # onto the board so they appear in live/replay board views and a
+                # location's PLAY→GRAVEYARD depletion is visible to the diff (as a
+                # CardRemoved, since the MinionDied gate is card_type=="MINION").
+                if ctype == minion_type or ctype == location_type:
+                    target = player_board if is_friendly else opponent_board
+                    target.append(self._entity_view(eid, ent, "PLAY", controller_int))
+                elif ctype == weapon_type:
+                    target = player_weapons if is_friendly else opponent_weapons
+                    target.append(self._entity_view(eid, ent, "PLAY", controller_int))
+                elif ctype == hero_type:
+                    # Hero entity view (carries entity_id + DAMAGE) for the diff
+                    # seam's face-damage detection — distinct from the display
+                    # Hero model refined by _resolve_heroes.
+                    view = self._entity_view(eid, ent, "PLAY", controller_int)
+                    if is_friendly:
+                        player_hero_entity = view
+                    else:
+                        opponent_hero_entity = view
+            elif zone == graveyard_zone:
+                graveyard.append(
+                    self._entity_view(eid, ent, "GRAVEYARD", controller_int)
                 )
-        opponent_hand_entities.sort(key=lambda e: e.zone_position)
-        player_deck_entities.sort(key=lambda e: e.zone_position)
+            elif zone == removed_zone:
+                graveyard.append(
+                    self._entity_view(eid, ent, "REMOVEDFROMGAME", controller_int)
+                )
+        for lst in (
+            player_board,
+            opponent_board,
+            player_hand,
+            opponent_hand,
+            player_secrets,
+            opponent_secrets,
+            player_deck_entities,
+        ):
+            lst.sort(key=lambda e: e.zone_position)
+        # GRAVEYARD has no meaningful zone_position; order by entity_id so the
+        # projection (and therefore the diff seam) is deterministic.
+        graveyard.sort(key=lambda e: e.entity_id)
         self._current_state = dataclasses.replace(
             self._current_state,
+            player_board=tuple(player_board),
+            opponent_board=tuple(opponent_board),
+            player_hand=tuple(player_hand),
+            opponent_hand=tuple(opponent_hand),
+            player_secrets=tuple(player_secrets),
+            opponent_secrets=tuple(opponent_secrets),
+            player_weapon=player_weapons[0] if player_weapons else None,
+            opponent_weapon=opponent_weapons[0] if opponent_weapons else None,
             player_played=tuple(self._player_played),
             opponent_played=tuple(self._opponent_played),
             player_drawn=tuple(self._player_drawn),
             opponent_drawn=tuple(self._opponent_drawn),
-            opponent_hand=tuple(opponent_hand_entities),
             player_deck=tuple(player_deck_entities),
             player_deck_count=player_deck_count,
             opponent_deck_count=opponent_deck_count,
+            graveyard=tuple(graveyard),
+            player_hero_entity=player_hero_entity,
+            opponent_hero_entity=opponent_hero_entity,
         )
 
 

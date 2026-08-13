@@ -358,9 +358,7 @@ class MainWindow(wx.Frame):
             try:
                 live_presenter.cleanup()
             except Exception:
-                log.exception(
-                    "live_presenter.cleanup() failed; continuing cleanup"
-                )
+                log.exception("live_presenter.cleanup() failed; continuing cleanup")
         tracker = getattr(self, "_tracker", None)
         if tracker is not None:
             try:
@@ -411,6 +409,23 @@ class StoneReaderApp(wx.App):
         self._tracker = GameTracker(card_db=card_db)
         # Stash the tracker on the frame so MainWindow._on_close can stop it.
         self._frame._tracker = self._tracker  # type: ignore[attr-defined]
+
+        # --- Replay persistence (PRD #7) ---
+        # The store persists completed games as local .hsreplay files + SQLite
+        # metadata; the recorder buffers the live game's Power.log excerpt and
+        # auto-saves it on normal completion. Wire the recorder to the tracker:
+        # on_state for (prev, curr) lifecycle, add_raw_subscriber for the raw
+        # Power.log lines it converts to HSReplay XML.
+        from stonereader.services._build_info import current_build
+        from stonereader.services._replay_recorder import ReplayRecorder
+        from stonereader.services._replay_store import ReplayStore, default_replay_dir
+
+        replay_store = ReplayStore(db_conn, default_replay_dir())
+        self._recorder = ReplayRecorder(replay_store, build_provider=current_build)
+        self._tracker.subscribe(self._recorder.on_state)
+        self._tracker.add_raw_subscriber(
+            self._recorder.on_lines, self._recorder.on_reset
+        )
 
         # --- Home Screen ---
         from stonereader.presenters.home import HomePresenter
@@ -468,6 +483,42 @@ class StoneReaderApp(wx.App):
         # up before tracker.stop() (per Runtime State Inventory).
         self._frame._live_presenter = live_presenter  # type: ignore[attr-defined]
 
+        # --- Replays browser (PRD #7) ---
+        from stonereader.presenters.replays import ReplaysPresenter
+        from stonereader.views.replays import ReplaysPanel
+
+        replays_presenter = ReplaysPresenter(speech, replay_store)
+        replays_panel = ReplaysPanel(self._frame, replays_presenter)
+        nav.register_panel("Replays", replays_panel, replays_presenter, replays_panel)
+
+        # Opening a replay loads it into a fresh Replay Viewer screen. The viewer
+        # is read-only (no tracker/DB writes), built per-replay like Card Browser.
+        def _on_open_replay(meta: object) -> None:
+            from pathlib import Path
+
+            from stonereader.presenters.replay_viewer import ReplayViewerPresenter
+            from stonereader.services._replay_loader import (
+                ReplayLoadError,
+                load_replay,
+            )
+            from stonereader.views.replay_viewer import ReplayViewerPanel
+
+            try:
+                replay_state = load_replay(Path(meta.file_path), card_db=card_db)  # type: ignore[attr-defined]
+            except ReplayLoadError:
+                speech.speak("Could not open replay; the file may be invalid.")
+                return
+            viewer_presenter = ReplayViewerPresenter(
+                speech, replay_state, card_db=card_db
+            )
+            viewer_panel = ReplayViewerPanel(self._frame, viewer_presenter)
+            nav.replace_panel(
+                "Replay Viewer", viewer_panel, viewer_presenter, viewer_panel
+            )
+            nav.show_panel("Replay Viewer")
+
+        replays_presenter.set_on_open(_on_open_replay)
+
         # --- Wire callbacks ---
 
         # Home screen selection -> show panel. Live Game also jumps to the
@@ -477,6 +528,10 @@ class StoneReaderApp(wx.App):
             nav.show_panel(name)
             if name == "Live Game":
                 live_presenter.jump_to_zone("remaining_deck")
+            elif name == "Replays":
+                # Refresh on entry to pick up replays saved since construction.
+                replays_presenter.refresh()
+                replays_presenter.announce_entry()
 
         home_presenter.set_on_select(_on_home_select)
 
@@ -558,13 +613,13 @@ class StoneReaderApp(wx.App):
         self._hotkeys.register(mods, ord("R"), _open_remaining_deck, "Remaining Deck")
         self._hotkeys.register(mods, ord("O"), _open_opponent_hand, "Opponent Hand")
         self._hotkeys.register(mods, ord("D"), _speak_deck_counts, "Deck Counts")
-        self._hotkeys.register(mods, ord("H"), _speak_opponent_hand_count, "Opponent Hand Count")  # noqa: E501
+        self._hotkeys.register(
+            mods, ord("H"), _speak_opponent_hand_count, "Opponent Hand Count"
+        )  # noqa: E501
 
         if self._hotkeys.failed:
             speech.speak(
-                "Could not register hotkeys: "
-                + ", ".join(self._hotkeys.failed)
-                + "."
+                "Could not register hotkeys: " + ", ".join(self._hotkeys.failed) + "."
             )
 
         # Start tracker AFTER frame.Show() (Pitfall 9: Timer must not fire

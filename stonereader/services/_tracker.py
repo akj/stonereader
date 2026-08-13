@@ -63,6 +63,13 @@ class GameTracker:
             on_reset=self._on_watcher_reset,
         )
         self._subscribers: List[SubscriberCallback] = []
+        # Raw fan-out (PRD #7): the replay recorder needs the verbatim Power.log
+        # lines BEFORE parsing, plus reset signals, so it can buffer a game's
+        # excerpt and convert it to HSReplay XML on completion. These run ahead
+        # of the parser/engine in _on_lines so a game's lines are buffered before
+        # the COMPLETE (prev, curr) dispatch fires.
+        self._raw_line_listeners: List[Callable[[List[str]], None]] = []
+        self._raw_reset_listeners: List[Callable[[], None]] = []
         self._previously_running = False
         self._started = False
         # Issue #5: tracker holds the previously-published state so each
@@ -110,6 +117,21 @@ class GameTracker:
         if callback in self._subscribers:
             self._subscribers.remove(callback)
 
+    def add_raw_subscriber(
+        self,
+        on_lines: Callable[[List[str]], None],
+        on_reset: Callable[[], None],
+    ) -> None:
+        """Register a listener for raw Power.log lines and reset signals (PRD #7).
+
+        ``on_lines`` receives the verbatim line batch BEFORE the parser/engine
+        consume it; ``on_reset`` fires on Power.log rotation. Used by the replay
+        recorder to buffer the live game's Power.log excerpt. Listener failures
+        are isolated and never disturb live tracking.
+        """
+        self._raw_line_listeners.append(on_lines)
+        self._raw_reset_listeners.append(on_reset)
+
     @property
     def current_state(self) -> Optional[GameState]:
         """Return the latest frozen GameState snapshot, or None before any game."""
@@ -151,6 +173,11 @@ class GameTracker:
         self._parser.reset()
         self._engine.reset()
         self._last_published = None
+        for listener in list(self._raw_reset_listeners):
+            try:
+                listener()
+            except Exception:
+                logger.exception("raw reset listener raised — continuing")
 
     def _on_lines(self, lines: List[str]) -> None:
         """Watcher delivered new lines — push through parser and engine.
@@ -158,6 +185,13 @@ class GameTracker:
         After every packet apply(), if engine.current_state changed, dispatch
         (prev, curr) to subscribers (issue #5).
         """
+        # Fan raw lines out to recorders BEFORE parsing, so a completing game's
+        # lines are buffered before its COMPLETE (prev, curr) dispatch (PRD #7).
+        for listener in list(self._raw_line_listeners):
+            try:
+                listener(lines)
+            except Exception:
+                logger.exception("raw line listener raised — continuing")
         for line in lines:
             try:
                 packets = self._parser.feed_line(line)
@@ -169,9 +203,7 @@ class GameTracker:
                 try:
                     self._engine.apply(pkt)
                 except Exception:
-                    logger.exception(
-                        "engine failed on packet %s", type(pkt).__name__
-                    )
+                    logger.exception("engine failed on packet %s", type(pkt).__name__)
                     continue
                 curr = self._engine.current_state
                 if curr is None or curr is prev:
@@ -179,9 +211,7 @@ class GameTracker:
                 self._last_published = curr
                 self._dispatch(prev, curr)
 
-    def _dispatch(
-        self, prev: Optional[GameState], curr: GameState
-    ) -> None:
+    def _dispatch(self, prev: Optional[GameState], curr: GameState) -> None:
         """Deliver (prev, curr) to all subscribers — isolating each (Pitfall 3)."""
         for callback in list(self._subscribers):
             try:

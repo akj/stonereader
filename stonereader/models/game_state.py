@@ -153,3 +153,19 @@ class GameState:
     mulligan_complete: bool = False
     # Issue #3: present while a BlockType.ATTACK is open; None otherwise.
     attack_in_progress: Optional[AttackInProgress] = None
+
+    # PRD #7: terminal-zone entities (GRAVEYARD / REMOVEDFROMGAME) projected so
+    # the pure diff seam (services/_diff.py) can still observe a PLAY→GRAVEYARD
+    # death or a *→terminal removal. Those entities leave every navigable zone,
+    # so without exposing them here the diff loop never visits them and the
+    # replay event drilldown silently drops MinionDied / CardRemoved. Not
+    # rendered by the live UI — a pure diff-seam input.
+    graveyard: Tuple[GameEntity, ...] = ()
+
+    # PRD #7: GameEntity views of the two hero entities (CARDTYPE==HERO in PLAY),
+    # separate from the display-oriented player_hero / opponent_hero Hero models.
+    # They carry the hero's entity_id + DAMAGE tag so the diff seam can emit
+    # DamageDealt for face damage (an ATTACK/POWER block hitting a hero); without
+    # them _iter_entities never sees the hero and damage-to-face is dropped.
+    player_hero_entity: Optional[GameEntity] = None
+    opponent_hero_entity: Optional[GameEntity] = None

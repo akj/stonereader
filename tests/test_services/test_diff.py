@@ -42,6 +42,7 @@ def _entity(
     card_id: str = "",
     name: str = "",
     controller: int = 1,
+    card_type: str = "",
     tags: Optional[dict] = None,
 ) -> GameEntity:
     return GameEntity(
@@ -52,7 +53,7 @@ def _entity(
         cost=0,
         current_attack=0,
         current_health=0,
-        card_type="",
+        card_type=card_type,
         zone=zone,
         zone_position=0,
         controller=controller,
@@ -258,12 +259,22 @@ def test_entity_entering_play_without_play_block_does_not_emit_card_played() -> 
 
 
 def test_play_to_graveyard_emits_minion_died() -> None:
-    """A board entity that goes from zone="PLAY" to zone="GRAVEYARD" produces MinionDied."""
+    """A MINION that goes from zone="PLAY" to zone="GRAVEYARD" produces MinionDied."""
     alive = _entity(
-        entity_id=30, zone="PLAY", card_id="CS2_023", name="Bloodfen", controller=1
+        entity_id=30,
+        zone="PLAY",
+        card_id="CS2_023",
+        name="Bloodfen",
+        controller=1,
+        card_type="MINION",
     )
     dead = _entity(
-        entity_id=30, zone="GRAVEYARD", card_id="CS2_023", name="Bloodfen", controller=1
+        entity_id=30,
+        zone="GRAVEYARD",
+        card_id="CS2_023",
+        name="Bloodfen",
+        controller=1,
+        card_type="MINION",
     )
     prev = _state(turn=5, player_board=(alive,))
     curr = _state(turn=5, player_board=(dead,))
@@ -273,6 +284,30 @@ def test_play_to_graveyard_emits_minion_died() -> None:
     assert ev.entity_id == 30
     assert ev.name == "Bloodfen"
     assert ev.controller == 1
+
+
+def test_play_to_graveyard_weapon_emits_card_removed_not_minion_died() -> None:
+    """A non-minion (e.g. a destroyed WEAPON) going PLAY → GRAVEYARD is a
+    CardRemoved, never a MinionDied — terminal-zone entities are now visited by
+    the diff, so the GRAVEYARD branch must be gated by card type."""
+    equipped = _entity(
+        entity_id=31, zone="PLAY", card_id="CS2_106", controller=1, card_type="WEAPON"
+    )
+    destroyed = _entity(
+        entity_id=31,
+        zone="GRAVEYARD",
+        card_id="CS2_106",
+        controller=1,
+        card_type="WEAPON",
+    )
+    prev = _state(turn=5, player_weapon=equipped)
+    curr = _state(turn=5, graveyard=(destroyed,))
+    events = diff(prev, curr)
+    assert [e for e in events if isinstance(e, MinionDied)] == []
+    removed = [e for e in events if isinstance(e, CardRemoved)]
+    assert len(removed) == 1
+    assert removed[0].entity_id == 31
+    assert removed[0].controller == 1
 
 
 # ------------------------------------------------------------------ CardRemoved
@@ -291,6 +326,30 @@ def test_hand_to_graveyard_emits_card_removed() -> None:
     assert events[0].controller == 2
 
 
+def test_play_to_removed_from_game_emits_card_removed() -> None:
+    """A board entity removed directly from the game (PLAY → REMOVEDFROMGAME,
+    e.g. a transform/removal effect) is a CardRemoved, never a MinionDied, and
+    must not be silently dropped now that terminal-zone entities are visited."""
+    on_board = _entity(
+        entity_id=32, zone="PLAY", card_id="EX1_001", controller=1, card_type="MINION"
+    )
+    removed = _entity(
+        entity_id=32,
+        zone="REMOVEDFROMGAME",
+        card_id="EX1_001",
+        controller=1,
+        card_type="MINION",
+    )
+    prev = _state(turn=5, player_board=(on_board,))
+    curr = _state(turn=5, graveyard=(removed,))
+    events = diff(prev, curr)
+    assert [e for e in events if isinstance(e, MinionDied)] == []
+    removed_events = [e for e in events if isinstance(e, CardRemoved)]
+    assert len(removed_events) == 1
+    assert removed_events[0].entity_id == 32
+    assert removed_events[0].controller == 1
+
+
 def test_deck_to_removed_from_game_emits_card_removed() -> None:
     """REMOVEDFROMGAME from a non-PLAY zone is a CardRemoved (e.g. mill, transform)."""
     in_deck = _entity(entity_id=41, zone="DECK", card_id="CS2_023", controller=1)
@@ -305,9 +364,18 @@ def test_deck_to_removed_from_game_emits_card_removed() -> None:
 
 
 def test_play_to_graveyard_does_not_double_emit_card_removed() -> None:
-    """PLAY → GRAVEYARD is MinionDied, not CardRemoved. Each transition emits exactly one event."""
-    alive = _entity(entity_id=30, zone="PLAY", card_id="CS2_023", controller=1)
-    dead = _entity(entity_id=30, zone="GRAVEYARD", card_id="CS2_023", controller=1)
+    """A MINION PLAY → GRAVEYARD is MinionDied, not CardRemoved. Each transition
+    emits exactly one event."""
+    alive = _entity(
+        entity_id=30, zone="PLAY", card_id="CS2_023", controller=1, card_type="MINION"
+    )
+    dead = _entity(
+        entity_id=30,
+        zone="GRAVEYARD",
+        card_id="CS2_023",
+        controller=1,
+        card_type="MINION",
+    )
     prev = _state(turn=5, player_board=(alive,))
     curr = _state(turn=5, player_board=(dead,))
     removed = [e for e in diff(prev, curr) if isinstance(e, CardRemoved)]
@@ -370,6 +438,38 @@ def test_damage_tag_change_during_power_block_emits_damage_dealt() -> None:
     events = [e for e in diff(prev, curr) if isinstance(e, DamageDealt)]
     assert len(events) == 1
     assert events[0].amount == 2
+
+
+def test_hero_face_damage_emits_damage_dealt() -> None:
+    """A hero's DAMAGE tag change under an ATTACK block (damage to face) produces
+    DamageDealt — hero entities must be part of the diff input, or attacks and
+    spells to face are silently dropped (codex review round 9)."""
+    healthy = _entity(
+        entity_id=64,
+        zone="PLAY",
+        card_id="HERO_01",
+        controller=2,
+        card_type="HERO",
+        tags={"DAMAGE": 0},
+    )
+    hurt = _entity(
+        entity_id=64,
+        zone="PLAY",
+        card_id="HERO_01",
+        controller=2,
+        card_type="HERO",
+        tags={"DAMAGE": 6},
+    )
+    aip = AttackInProgress(
+        attacker_entity_id=10, defender_entity_id=64, attacker_controller=1
+    )
+    prev = _state(turn=6, opponent_hero_entity=healthy, attack_in_progress=aip)
+    curr = _state(turn=6, opponent_hero_entity=hurt, attack_in_progress=aip)
+    events = [e for e in diff(prev, curr) if isinstance(e, DamageDealt)]
+    assert len(events) == 1
+    assert events[0].target_entity_id == 64
+    assert events[0].amount == 6
+    assert events[0].target_controller == 2
 
 
 def test_damage_tag_change_outside_attack_or_power_block_does_not_emit() -> None:

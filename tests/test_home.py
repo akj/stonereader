@@ -21,11 +21,12 @@ def test_menu_items_are_feature_names():
         "Deck Manager",
         "Import Deck",
         "Live Game",
+        "Replays",
     ]
 
 
 def test_menu_items_includes_live_game() -> None:
-    """Regression-lock the new MENU_ITEMS shape (plan 03-06)."""
+    """Regression-lock the MENU_ITEMS shape (plan 03-06; Replays added in PRD #7)."""
     from stonereader.presenters.home import MENU_ITEMS
 
     assert MENU_ITEMS == [
@@ -33,6 +34,7 @@ def test_menu_items_includes_live_game() -> None:
         "Deck Manager",
         "Import Deck",
         "Live Game",
+        "Replays",
     ]
 
 
@@ -41,7 +43,7 @@ def test_move_down_announces_next_item():
     presenter = HomePresenter(speech)
     presenter.move_in_zone(1)
     assert "Deck Manager" in speech.last_speech
-    assert "2 of 4" in speech.last_speech
+    assert "2 of 5" in speech.last_speech
 
 
 def test_move_up_at_start_stays_at_first():
@@ -49,7 +51,7 @@ def test_move_up_at_start_stays_at_first():
     presenter = HomePresenter(speech)
     presenter.move_in_zone(-1)
     assert "Card Library" in speech.last_speech
-    assert "1 of 4" in speech.last_speech
+    assert "1 of 5" in speech.last_speech
 
 
 def test_select_current_fires_callback():
@@ -90,15 +92,15 @@ def test_home_jumps_to_first():
     presenter.move_in_zone(1)  # Move to index 1
     presenter.jump_to_first()
     assert "Card Library" in speech.last_speech
-    assert "1 of 4" in speech.last_speech
+    assert "1 of 5" in speech.last_speech
 
 
 def test_end_jumps_to_last():
     speech = MockSpeechService()
     presenter = HomePresenter(speech)
     presenter.jump_to_last()
-    assert "Live Game" in speech.last_speech
-    assert "4 of 4" in speech.last_speech
+    assert "Replays" in speech.last_speech
+    assert "5 of 5" in speech.last_speech
 
 
 def test_key_map_does_not_have_feature_switching_hotkeys():

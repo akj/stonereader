@@ -12,8 +12,12 @@ import pytest
 
 pytest.importorskip("stonereader.services._engine")
 
+from stonereader.models.card import CardDatabase
+from stonereader.services._diff import diff
 from stonereader.services._engine import GameEngine
+from stonereader.services._events import DamageDealt, MinionDied
 from stonereader.services._packets import (
+    BlockStartPacket,
     CreateGamePacket,
     FullEntityPacket,
     TagChangePacket,
@@ -69,7 +73,10 @@ def test_drawn_card_controller_reflects_log_controller():
         CreateGamePacket(
             packet_id=0,
             game_entity_id=1,
-            players=((2, 1, "LocalPlayer", 144115198130930503, 1), (3, 2, "Opponent", 144115198130930504, 2)),
+            players=(
+                (2, 1, "LocalPlayer", 144115198130930503, 1),
+                (3, 2, "Opponent", 144115198130930504, 2),
+            ),
         )
     )
     # Register entity 10 as belonging to controller 2 with no zone yet.
@@ -82,9 +89,7 @@ def test_drawn_card_controller_reflects_log_controller():
         )
     )
     # Now entity 10 moves to HAND (Zone=3).
-    engine.apply(
-        TagChangePacket(packet_id=2, entity_id=10, tag="ZONE", value=3)
-    )
+    engine.apply(TagChangePacket(packet_id=2, entity_id=10, tag="ZONE", value=3))
     state = engine.current_state
     assert state is not None
     drawn_for_eid = [pc for pc in state.opponent_drawn if pc.entity_id == 10]
@@ -94,6 +99,308 @@ def test_drawn_card_controller_reflects_log_controller():
     assert drawn_for_eid[0].controller == 2, (
         f"controller should be 2 (raw CONTROLLER tag), got {drawn_for_eid[0].controller}"
     )
+
+
+def test_terminal_zone_entity_projected_to_graveyard():
+    """A PLAY→GRAVEYARD entity must be projected into state.graveyard (with its
+    terminal zone name) so the pure diff seam can still visit it.
+
+    Before this projection the dead entity left every navigable zone, so the
+    diff loop never visited it and the replay event drilldown silently dropped
+    deaths/removals (PRD #7 / codex review round 4).
+    """
+    engine = GameEngine()
+    engine.apply(
+        CreateGamePacket(
+            packet_id=0,
+            game_entity_id=1,
+            players=((2, 1, "P1", 1, 1), (3, 2, "P2", 2, 2)),
+        )
+    )
+    # A friendly (CONTROLLER=1) minion (CARDTYPE=4) alive in PLAY (ZONE=1).
+    engine.apply(
+        FullEntityPacket(
+            packet_id=1,
+            entity_id=10,
+            card_id="EX1_001",
+            tags={"CONTROLLER": 1, "ZONE": 1, "CARDTYPE": 4, "HEALTH": 3},
+        )
+    )
+    prev = engine.current_state
+    assert prev is not None
+    assert [e.entity_id for e in prev.player_board] == [10]
+    assert prev.graveyard == ()
+
+    # The entity leaves play: ZONE -> GRAVEYARD (4).
+    engine.apply(TagChangePacket(packet_id=2, entity_id=10, tag="ZONE", value=4))
+    curr = engine.current_state
+    assert curr is not None
+    # It left the board and is now projected into the graveyard with the right zone.
+    assert curr.player_board == ()
+    assert [(e.entity_id, e.zone) for e in curr.graveyard] == [(10, "GRAVEYARD")]
+
+
+def test_dead_minion_drives_minion_died_end_to_end():
+    """End-to-end: a resolved MINION dying (PLAY→GRAVEYARD) projects into the
+    graveyard and the diff seam emits MinionDied. The card type must resolve for
+    the diff to distinguish a death from a removal, so this needs the
+    CardDatabase (PRD #7 / codex review rounds 4-5).
+    """
+    try:
+        card_db = CardDatabase.load()
+    except Exception:  # pragma: no cover - environment-dependent fallback
+        pytest.skip("CardDatabase unavailable (cardxml missing)")
+
+    engine = GameEngine(card_db=card_db)
+    engine.apply(
+        CreateGamePacket(
+            packet_id=0,
+            game_entity_id=1,
+            players=((2, 1, "P1", 1, 1), (3, 2, "P2", 2, 2)),
+        )
+    )
+    # EX1_001 (Lightwarden) is a real MINION; CARDTYPE=4 places it on the board.
+    engine.apply(
+        FullEntityPacket(
+            packet_id=1,
+            entity_id=10,
+            card_id="EX1_001",
+            tags={"CONTROLLER": 1, "ZONE": 1, "CARDTYPE": 4, "HEALTH": 3},
+        )
+    )
+    prev = engine.current_state
+    assert prev is not None
+
+    engine.apply(TagChangePacket(packet_id=2, entity_id=10, tag="ZONE", value=4))
+    curr = engine.current_state
+    assert curr is not None
+    # The projected graveyard entity carries the resolved MINION card type.
+    assert [e.card_type for e in curr.graveyard] == ["MINION"]
+
+    deaths = [e for e in diff(prev, curr) if isinstance(e, MinionDied)]
+    assert len(deaths) == 1
+    assert deaths[0].entity_id == 10
+    assert deaths[0].controller == 1
+
+
+def test_damage_under_attack_block_republishes_and_drives_damage_dealt():
+    """A DAMAGE TagChange under an open ATTACK block must republish the snapshot
+    so the diff seam emits DamageDealt while the block context is still open.
+
+    Before refreshing on stat tags the snapshot was identical to the prior one
+    (curr is prev), so the tracker/loader never saw the delta and combat damage
+    was silently dropped from replay drilldown (PRD #7 / codex review round 6).
+    """
+    engine = GameEngine()
+    engine.apply(
+        CreateGamePacket(
+            packet_id=0,
+            game_entity_id=1,
+            players=((2, 1, "P1", 1, 1), (3, 2, "P2", 2, 2)),
+        )
+    )
+    engine.apply(
+        FullEntityPacket(
+            packet_id=1,
+            entity_id=10,
+            card_id="a",
+            tags={"CONTROLLER": 1, "ZONE": 1, "CARDTYPE": 4, "HEALTH": 3, "ATK": 3},
+        )
+    )
+    engine.apply(
+        FullEntityPacket(
+            packet_id=2,
+            entity_id=20,
+            card_id="b",
+            tags={"CONTROLLER": 2, "ZONE": 1, "CARDTYPE": 4, "HEALTH": 4, "ATK": 2},
+        )
+    )
+    engine.apply(
+        BlockStartPacket(packet_id=3, block_type="ATTACK", entity_id=10, target_id=20)
+    )
+    prev = engine.current_state
+    assert prev is not None
+    assert prev.attack_in_progress is not None
+
+    # The defender takes 3 damage under the open ATTACK block.
+    engine.apply(TagChangePacket(packet_id=4, entity_id=20, tag="DAMAGE", value=3))
+    curr = engine.current_state
+    assert curr is not None
+    assert curr is not prev, "a DAMAGE change must republish a new snapshot"
+
+    dealt = [e for e in diff(prev, curr) if isinstance(e, DamageDealt)]
+    assert len(dealt) == 1
+    assert dealt[0].target_entity_id == 20
+    assert dealt[0].amount == 3
+    assert dealt[0].target_controller == 2
+
+    # Re-applying the SAME DAMAGE value must not republish a redundant snapshot.
+    same = engine.current_state
+    engine.apply(TagChangePacket(packet_id=5, entity_id=20, tag="DAMAGE", value=3))
+    assert engine.current_state is same
+
+
+def test_controller_change_rebuckets_board_projection():
+    """A CONTROLLER change (e.g. Mind Control) on a minion that stays in PLAY
+    must republish so the board projection moves it to the new side, not leave
+    it on the old side until an unrelated refresh (codex review round 9).
+    """
+    engine = GameEngine()
+    engine.apply(
+        CreateGamePacket(
+            packet_id=0,
+            game_entity_id=1,
+            players=((2, 1, "P1", 1, 1), (3, 2, "P2", 2, 2)),
+        )
+    )
+    engine.apply(
+        FullEntityPacket(
+            packet_id=1,
+            entity_id=20,
+            card_id="m",
+            tags={"CONTROLLER": 2, "ZONE": 1, "CARDTYPE": 4, "HEALTH": 3},
+        )
+    )
+    before = engine.current_state
+    assert before is not None
+    assert [e.entity_id for e in before.opponent_board] == [20]
+    assert before.player_board == ()
+
+    # Mind Control: CONTROLLER flips while the minion stays in PLAY (ZONE 1).
+    engine.apply(TagChangePacket(packet_id=2, entity_id=20, tag="CONTROLLER", value=1))
+    after = engine.current_state
+    assert after is not None
+    assert after is not before, "CONTROLLER change must republish a new snapshot"
+    assert after.opponent_board == ()
+    assert [e.entity_id for e in after.player_board] == [20]
+
+
+def test_face_damage_under_attack_block_drives_damage_dealt():
+    """An ATTACK block damaging a hero (face damage) must reach the diff as
+    DamageDealt — the hero entity is projected and visited by the diff seam
+    (codex review round 9).
+    """
+    engine = GameEngine()
+    engine.apply(
+        CreateGamePacket(
+            packet_id=0,
+            game_entity_id=1,
+            players=((2, 1, "P1", 1, 1), (3, 2, "P2", 2, 2)),
+        )
+    )
+    # Opponent hero (CARDTYPE 3 = HERO) in PLAY, plus a friendly attacker.
+    engine.apply(
+        FullEntityPacket(
+            packet_id=1,
+            entity_id=83,
+            card_id="HERO_01",
+            tags={"CONTROLLER": 2, "ZONE": 1, "CARDTYPE": 3, "HEALTH": 30, "DAMAGE": 0},
+        )
+    )
+    engine.apply(
+        FullEntityPacket(
+            packet_id=2,
+            entity_id=10,
+            card_id="m",
+            tags={"CONTROLLER": 1, "ZONE": 1, "CARDTYPE": 4, "HEALTH": 2, "ATK": 5},
+        )
+    )
+    engine.apply(
+        BlockStartPacket(packet_id=3, block_type="ATTACK", entity_id=10, target_id=83)
+    )
+    prev = engine.current_state
+    assert prev is not None
+    assert prev.opponent_hero_entity is not None
+    assert prev.opponent_hero_entity.entity_id == 83
+
+    # 5 damage to the opponent's face under the open ATTACK block.
+    engine.apply(TagChangePacket(packet_id=4, entity_id=83, tag="DAMAGE", value=5))
+    curr = engine.current_state
+    assert curr is not None
+    dealt = [e for e in diff(prev, curr) if isinstance(e, DamageDealt)]
+    assert len(dealt) == 1
+    assert dealt[0].target_entity_id == 83
+    assert dealt[0].amount == 5
+    assert dealt[0].target_controller == 2
+
+
+def test_hero_damage_and_armor_sync_display_hero():
+    """A hero's DAMAGE / ARMOR change must keep the display Hero in sync:
+    Hero.health is the current total (max HEALTH minus DAMAGE) and an armor-only
+    change republishes. Otherwise the replay viewer speaks the initial values for
+    a damaged or armored hero (codex review round 10).
+    """
+    try:
+        card_db = CardDatabase.load()
+    except Exception:  # pragma: no cover - environment-dependent fallback
+        pytest.skip("CardDatabase unavailable (cardxml missing)")
+
+    engine = GameEngine(card_db=card_db)
+    engine.apply(
+        CreateGamePacket(
+            packet_id=0,
+            game_entity_id=1,
+            players=((2, 1, "P1", 1, 1), (3, 2, "P2", 2, 2)),
+        )
+    )
+    # HERO_08 (Jaina) is a real hero card so _resolve_heroes resolves it.
+    engine.apply(
+        FullEntityPacket(
+            packet_id=1,
+            entity_id=64,
+            card_id="HERO_08",
+            tags={
+                "CONTROLLER": 1,
+                "ZONE": 1,
+                "CARDTYPE": 3,
+                "HEALTH": 30,
+                "DAMAGE": 0,
+                "ARMOR": 0,
+            },
+        )
+    )
+    assert engine.current_state is not None
+    assert engine.current_state.player_hero.health == 30
+    assert engine.current_state.player_hero.armor == 0
+
+    # Face damage: the display hero's current health drops.
+    engine.apply(TagChangePacket(packet_id=2, entity_id=64, tag="DAMAGE", value=6))
+    assert engine.current_state.player_hero.health == 24
+
+    # An armor-only change must still republish and update the model.
+    before_armor = engine.current_state
+    engine.apply(TagChangePacket(packet_id=3, entity_id=64, tag="ARMOR", value=5))
+    after_armor = engine.current_state
+    assert after_armor is not None
+    assert after_armor is not before_armor, "ARMOR change must republish a new snapshot"
+    assert after_armor.player_hero.armor == 5
+    assert after_armor.player_hero.health == 24  # unchanged by the armor gain
+
+
+def test_location_in_play_projected_to_board():
+    """A CardType.LOCATION in PLAY occupies a board slot and must appear on the
+    board projection, not be dropped like a non-minion/non-weapon (codex round 7).
+    """
+    engine = GameEngine()
+    engine.apply(
+        CreateGamePacket(
+            packet_id=0,
+            game_entity_id=1,
+            players=((2, 1, "P1", 1, 1), (3, 2, "P2", 2, 2)),
+        )
+    )
+    # CARDTYPE 39 = LOCATION, controlled by the friendly player, in PLAY (ZONE 1).
+    engine.apply(
+        FullEntityPacket(
+            packet_id=1,
+            entity_id=15,
+            card_id="CATA_301",
+            tags={"CONTROLLER": 1, "ZONE": 1, "CARDTYPE": 39, "HEALTH": 3},
+        )
+    )
+    state = engine.current_state
+    assert state is not None
+    assert [e.entity_id for e in state.player_board] == [15]
 
 
 def test_mid_game_fixture_publishes_running_state(power_log_fixture):
