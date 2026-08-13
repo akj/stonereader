@@ -3,7 +3,8 @@
 Replay CONTENT lives in ``.hsreplay`` files on disk under a managed
 ``replay_dir``; lightweight metadata lives in the ``replays`` table (schema
 v2). The store is the single seam between the two: it writes the file, inserts
-the row, dedupes by content checksum, and tears both down on delete.
+the row, dedupes by content checksum, writes an optional ``.hdtreplay`` raw-log
+sidecar, and tears all three down on delete.
 
 Content is treated OPAQUELY here — the store neither parses nor validates
 HSReplay XML. Whatever text it is handed is hashed (sha256 of the utf-8 bytes)
@@ -18,12 +19,16 @@ The connection and ``replay_dir`` are always injectable so tests can use a
 from __future__ import annotations
 
 import hashlib
+import logging
+import zipfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
 from stonereader import db
 from stonereader.services._exceptions import ServicesError
+
+logger = logging.getLogger(__name__)
 
 
 class ReplayImportError(ServicesError):
@@ -114,13 +119,17 @@ class ReplayStore:
         deck_id: int | None = None,
         played_at: str,
         duration_seconds: int | None = None,
+        raw_log: str | None = None,
     ) -> ReplayMeta:
         """Persist replay ``xml`` and its metadata, returning the stored record.
 
         Dedupes by sha256 checksum of the xml: if a replay with the same
         content already exists, returns the EXISTING record without writing a
         new file or inserting a new row. Otherwise writes the ``.hsreplay``
-        file and inserts the metadata row.
+        file and inserts the metadata row. When ``raw_log`` is provided, also
+        writes the source Power.log lines in Hearthstone Deck Tracker's
+        one-entry ``.hdtreplay`` ZIP format. A sidecar failure is logged but
+        cannot invalidate the already-written XML replay.
         """
         checksum = _checksum(xml)
         existing = db.get_replay_by_checksum(self._conn, checksum)
@@ -134,6 +143,8 @@ class ReplayStore:
             opponent_class=opponent_class,
             played_at=played_at,
         )
+        if raw_log is not None:
+            self._write_raw_log_sidecar(file_path, raw_log)
         replay_id = db.insert_replay(
             self._conn,
             file_path=str(file_path),
@@ -187,7 +198,30 @@ class ReplayStore:
         )
         db.delete_replay(self._conn, replay_id)
         if existing is not None:
-            Path(existing["file_path"]).unlink(missing_ok=True)
+            file_path = Path(existing["file_path"])
+            file_path.unlink(missing_ok=True)
+            file_path.with_suffix(".hdtreplay").unlink(missing_ok=True)
+
+    @staticmethod
+    def _write_raw_log_sidecar(file_path: Path, raw_log: str) -> None:
+        """Best-effort write of HDT's uploadable raw-log replay container.
+
+        ``.hdtreplay`` is not a second serialization of the game. It is a ZIP
+        containing the source-of-truth Power.log excerpt under HDT's exact
+        ``output_log.txt`` entry name, so a replay can be regenerated after a
+        future serializer fix. Failure here must not cost the primary XML save.
+        """
+        sidecar_path = file_path.with_suffix(".hdtreplay")
+        try:
+            with zipfile.ZipFile(
+                sidecar_path, "w", compression=zipfile.ZIP_DEFLATED
+            ) as archive:
+                archive.writestr("output_log.txt", raw_log)
+        except Exception:
+            logger.exception(
+                "could not write raw-log replay sidecar %s; keeping XML replay",
+                sidecar_path,
+            )
 
     def _write_file(
         self,

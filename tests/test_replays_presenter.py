@@ -132,16 +132,31 @@ def test_open_current_no_op_when_empty(tmp_path) -> None:
     assert opened == []
 
 
-def test_delete_current_removes_replay_and_reannounces(tmp_path) -> None:
+def test_first_delete_requests_confirmation_without_removing_replay(tmp_path) -> None:
     store = _make_store(tmp_path)
     _seed(store)
     speech = MockSpeechService()
     presenter = ReplaysPresenter(speech, store)
 
+    key_map = presenter.get_key_map()
+    key_map["delete"]()
+
     assert len(store.all_replays()) == 3
+    assert speech.last_speech == (
+        "Press Delete again to delete "
+        "Druid vs Rogue, Won, 15 turns, 2026-06-20"
+    )
+
+
+def test_second_delete_removes_replay_and_reannounces(tmp_path) -> None:
+    store = _make_store(tmp_path)
+    _seed(store)
+    speech = MockSpeechService()
+    presenter = ReplaysPresenter(speech, store)
 
     key_map = presenter.get_key_map()
-    key_map["delete"]()  # deletes the newest (index 0)
+    key_map["delete"]()
+    key_map["delete"]()
 
     # Store row count drops.
     assert len(store.all_replays()) == 2
@@ -170,10 +185,29 @@ def test_delete_to_empty_announces_no_replays(tmp_path) -> None:
 
     key_map = presenter.get_key_map()
     key_map["delete"]()
+    key_map["delete"]()
 
     assert len(store.all_replays()) == 0
     assert presenter.get_zone_items("replays") == []
     assert "No replays" in speech.last_speech
+
+
+def test_move_between_delete_presses_requires_fresh_confirmation(tmp_path) -> None:
+    store = _make_store(tmp_path)
+    _seed(store)
+    speech = MockSpeechService()
+    presenter = ReplaysPresenter(speech, store)
+
+    key_map = presenter.get_key_map()
+    key_map["delete"]()  # arm newest row
+    key_map["right"]()  # any other action disarms
+    key_map["delete"]()  # arm second row instead of deleting it
+
+    assert len(store.all_replays()) == 3
+    assert speech.last_speech == (
+        "Press Delete again to delete "
+        "Mage vs Warrior, Won, 12 turns, 2026-06-19"
+    )
 
 
 def test_empty_state_announces_no_replays(tmp_path) -> None:

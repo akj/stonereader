@@ -16,6 +16,10 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
+from xml.etree import ElementTree
+from zipfile import ZipFile
+
+import hslog
 
 from stonereader.db import get_connection, init_db
 from stonereader.models.game_state import GameState, Hero
@@ -112,6 +116,51 @@ def test_complete_game_auto_saves_one_replay(tmp_path: Path) -> None:
 
     files = list((tmp_path / "replays").rglob("*.hsreplay"))
     assert len(files) == 1
+
+
+def test_completed_game_writes_exact_raw_log_sidecar(tmp_path: Path) -> None:
+    store = _make_store(tmp_path)
+    recorder = _recorder(store)
+    lines = _fixture_lines()
+
+    recorder.on_lines(lines)
+    recorder.on_state(
+        _make_state(game_state="RUNNING", player_playstate="PLAYING"),
+        _make_state(game_state="COMPLETE", player_playstate="WON"),
+    )
+
+    replay = store.all_replays()[0]
+    sidecar = Path(replay.file_path).with_suffix(".hdtreplay")
+    marker_index = next(i for i, line in enumerate(lines) if "CREATE_GAME" in line)
+    with ZipFile(sidecar) as archive:
+        assert archive.namelist() == ["output_log.txt"]
+        assert archive.read("output_log.txt").decode("utf-8") == (
+            "\n".join(lines[marker_index:]) + "\n"
+        )
+
+
+def test_replay_uses_create_game_time_for_xml_and_metadata(tmp_path: Path) -> None:
+    store = _make_store(tmp_path)
+    game_started = datetime(2026, 6, 20, 23, 59, tzinfo=timezone.utc)
+    flushed = datetime(2026, 6, 21, 0, 5, tzinfo=timezone.utc)
+    current = game_started
+
+    def now() -> datetime:
+        return current
+
+    recorder = ReplayRecorder(store, now=now)
+    recorder.on_lines(_fixture_lines())
+    current = flushed
+
+    recorder.on_state(
+        _make_state(game_state="RUNNING", player_playstate="PLAYING"),
+        _make_state(game_state="COMPLETE", player_playstate="WON"),
+    )
+
+    replay = store.all_replays()[0]
+    assert replay.played_at == game_started.isoformat()
+    xml = Path(replay.file_path).read_text(encoding="utf-8")
+    assert 'ts="2026-06-20T12:56:56.988204+00:00"' in xml
 
 
 def test_conceded_but_completed_saves_with_loss(tmp_path: Path) -> None:
@@ -223,8 +272,12 @@ def test_next_game_in_same_batch_saves_completed_not_partial(tmp_path: Path) -> 
 
     # The next game's buffered head survived the clear (so it can be saved when
     # IT completes) rather than being discarded with the finished game.
-    assert recorder._buffer, "next game's buffered head must be preserved"
-    assert any("CREATE_GAME" in line for line in recorder._buffer)
+    assert recorder._segments, "next game's buffered head must be preserved"
+    assert any(
+        "CREATE_GAME" in line
+        for segment in recorder._segments
+        for line in segment.lines
+    )
 
 
 def test_second_complete_dispatch_does_not_clobber_preserved_next_game(
@@ -250,13 +303,13 @@ def test_second_complete_dispatch_does_not_clobber_preserved_next_game(
     # Transition into COMPLETE: saves the finished game, preserves the next head.
     recorder.on_state(running, complete)
     assert len(store.all_replays()) == 1
-    preserved = list(recorder._buffer)
+    preserved = list(recorder._segments)
     assert preserved, "next game's buffered head must be preserved"
 
     # A second COMPLETE snapshot (e.g. a trailing BLOCK_END) must be ignored.
     recorder.on_state(complete, complete)
     assert len(store.all_replays()) == 1  # no partial next-game save
-    assert recorder._buffer == preserved  # preserved head intact
+    assert recorder._segments == preserved  # preserved head intact
 
 
 def test_parse_drift_line_does_not_drop_completed_game(tmp_path: Path, caplog) -> None:
@@ -290,6 +343,84 @@ def test_parse_drift_line_does_not_drop_completed_game(tmp_path: Path, caplog) -
     # The drift line was tolerated (skipped + logged), not allowed to drop it.
     assert "skipped" in caplog.text
     assert "unparseable" in caplog.text
+
+
+def test_player_state_parse_failure_drops_game_without_escaping(
+    tmp_path: Path, monkeypatch, caplog
+) -> None:
+    store = _make_store(tmp_path)
+    recorder = _recorder(store)
+    original = hslog.LogParser.read_line
+    calls = 0
+
+    def read_line(parser, line):
+        nonlocal calls
+        calls += 1
+        if calls == 300:
+            raise hslog.exceptions.MissingPlayerData("boom")
+        return original(parser, line)
+
+    monkeypatch.setattr(hslog.LogParser, "read_line", read_line)
+    recorder.on_lines(_fixture_lines())
+
+    with caplog.at_level(logging.ERROR):
+        recorder.on_state(
+            _make_state(game_state="RUNNING", player_playstate="PLAYING"),
+            _make_state(game_state="COMPLETE", player_playstate="WON"),
+        )
+
+    assert store.all_replays() == []
+    assert "live replay auto-save failed" in caplog.text
+
+
+def test_later_segment_parse_failure_does_not_suppress_completed_game(
+    tmp_path: Path, monkeypatch
+) -> None:
+    store = _make_store(tmp_path)
+    recorder = _recorder(store)
+    original = hslog.LogParser.read_line
+    create_games_seen = 0
+
+    def read_line(parser, line):
+        nonlocal create_games_seen
+        if "GameState.DebugPrintPower() - CREATE_GAME" in line:
+            create_games_seen += 1
+            if create_games_seen == 2:
+                raise hslog.exceptions.MissingPlayerData("next game is broken")
+        return original(parser, line)
+
+    monkeypatch.setattr(hslog.LogParser, "read_line", read_line)
+    next_head = (FIXTURE_DIR / NEXT_LOG).read_text(encoding="utf-8").splitlines()[:120]
+    recorder.on_lines(_fixture_lines() + next_head)
+
+    recorder.on_state(
+        _make_state(game_state="RUNNING", player_playstate="PLAYING"),
+        _make_state(game_state="COMPLETE", player_playstate="LOST"),
+    )
+
+    assert len(store.all_replays()) == 1
+    assert len(recorder._segments) == 1
+
+
+def test_saved_xml_contains_build_game_metadata_and_player_names(tmp_path: Path) -> None:
+    store = _make_store(tmp_path)
+    recorder = ReplayRecorder(store, now=_now, build_provider=lambda: 99999)
+    recorder.on_lines(_fixture_lines())
+
+    recorder.on_state(
+        _make_state(game_state="RUNNING", player_playstate="PLAYING"),
+        _make_state(game_state="COMPLETE", player_playstate="WON"),
+    )
+
+    xml = Path(store.all_replays()[0].file_path).read_text(encoding="utf-8")
+    assert '<HSReplay version="1.7" build="99999">' in xml
+    game = ElementTree.fromstring(xml).find("Game")
+    assert game is not None
+    assert game.attrib["type"] == "1"
+    assert game.attrib["format"] == "1"
+    assert game.attrib["scenarioID"] == "4317"
+    assert 'name="Player1"' in xml
+    assert 'name="The Innkeeper"' in xml
 
 
 def test_buffer_cleared_after_save_prevents_double_save(tmp_path: Path) -> None:

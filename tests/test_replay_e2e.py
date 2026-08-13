@@ -67,7 +67,7 @@ def test_recorder_written_file_loads_and_views(tmp_path):
     conn = get_connection(str(tmp_path / "e2e.db"))
     init_db(conn)
     store = ReplayStore(conn, tmp_path / "replays")
-    recorder = ReplayRecorder(store, now=_now)
+    recorder = ReplayRecorder(store, now=_now, build_provider=lambda: 99999)
 
     # 1) Record a completed live game from real Power.log lines.
     recorder.on_lines(FIXTURE.read_text(encoding="utf-8").splitlines())
@@ -82,6 +82,9 @@ def test_recorder_written_file_loads_and_views(tmp_path):
     assert meta.source == "live_auto"
     assert meta.result == "WON"
     assert Path(meta.file_path).exists()
+    xml = Path(meta.file_path).read_text(encoding="utf-8")
+    assert 'build="99999"' in xml
+    assert 'name="Player1"' in xml
 
     # 2) Load that exact written file back into a ReplayState.
     replay = load_replay(Path(meta.file_path))

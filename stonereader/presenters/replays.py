@@ -2,7 +2,8 @@
 
 Single-zone list screen over ReplayStore.all_replays() (which already orders
 rows newest-first). Enter opens the selected replay via an on_open callback;
-Delete removes it from the store and re-announces the new count.
+Delete asks for confirmation, then removes it from the store and re-announces
+the new count when pressed again on the same row.
 
 Per CLAUDE.md MVP rule: all speech goes through the presenter; the view is
 passive. Speech text is produced here via the ZoneNavigationMixin
@@ -36,7 +37,12 @@ def format_replay_row(meta: ReplayMeta) -> str:
 
 
 class ReplaysPresenter(ZoneNavigationMixin, BasePresenter):
-    """Manages newest-first replay history navigation (open / delete)."""
+    """Manages newest-first replay history navigation (open / delete).
+
+    Deletion is deliberately a two-step action. Permanent single-keystroke file
+    deletion is an accessibility hazard: a keyboard-only User can land on the
+    wrong row and press Delete with no visual recovery path and no undo.
+    """
 
     def __init__(self, speech: SpeechService, store: ReplayStore) -> None:
         super().__init__(speech)
@@ -45,6 +51,7 @@ class ReplaysPresenter(ZoneNavigationMixin, BasePresenter):
         self._on_open: Callable[[ReplayMeta], None] | None = None
         self._on_changed: Callable[[], None] | None = None
         self._rows: list[ReplayMeta] = []
+        self._pending_delete_id: int | None = None
         self.refresh()
 
     # -- zone source -----------------------------------------------------
@@ -75,14 +82,21 @@ class ReplaysPresenter(ZoneNavigationMixin, BasePresenter):
 
     def open_current(self) -> None:
         """Invoke on_open with the selected replay (no-op if list empty)."""
+        self._disarm_delete()
         item = self._current_item()
         if item is not None and self._on_open is not None:
             self._on_open(item)
 
     def delete_current(self) -> None:
-        """Delete the selected replay, refresh, and announce the new count."""
+        """Confirm once, then delete the same row on consecutive invocation."""
         item = self._current_item()
         if item is None:
+            return
+        if self._pending_delete_id != item.id:
+            self._pending_delete_id = item.id
+            self._speech.speak(
+                f"Press Delete again to delete {format_replay_row(item)}"
+            )
             return
         self._store.delete(item.id)
         self.refresh()
@@ -96,6 +110,7 @@ class ReplaysPresenter(ZoneNavigationMixin, BasePresenter):
 
     def refresh(self) -> None:
         """Re-read the store's replays (newest-first) into the zone."""
+        self._disarm_delete()
         self._rows = list(self._store.all_replays())
         # Keep the cursor in range after the row count changes.
         cursor = self._zone_cursors.get(_REPLAYS_ZONE, 0)
@@ -114,16 +129,23 @@ class ReplaysPresenter(ZoneNavigationMixin, BasePresenter):
     # -- navigation (notify the view so its selection follows the cursor) -
 
     def move_in_zone(self, delta: int) -> None:
+        self._disarm_delete()
         super().move_in_zone(delta)
         self._notify_changed()
 
     def jump_to_first(self) -> None:
+        self._disarm_delete()
         super().jump_to_first()
         self._notify_changed()
 
     def jump_to_last(self) -> None:
+        self._disarm_delete()
         super().jump_to_last()
         self._notify_changed()
+
+    def _disarm_delete(self) -> None:
+        """Cancel a pending confirmation after any intervening action."""
+        self._pending_delete_id = None
 
     def announce_entry(self) -> None:
         """Spoken on entering the screen: zone label + count (or empty)."""

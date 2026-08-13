@@ -416,11 +416,12 @@ class StoneReaderApp(wx.App):
         # auto-saves it on normal completion. Wire the recorder to the tracker:
         # on_state for (prev, curr) lifecycle, add_raw_subscriber for the raw
         # Power.log lines it converts to HSReplay XML.
+        from stonereader.services._build_info import current_build
         from stonereader.services._replay_recorder import ReplayRecorder
         from stonereader.services._replay_store import ReplayStore, default_replay_dir
 
         replay_store = ReplayStore(db_conn, default_replay_dir())
-        self._recorder = ReplayRecorder(replay_store)
+        self._recorder = ReplayRecorder(replay_store, build_provider=current_build)
         self._tracker.subscribe(self._recorder.on_state)
         self._tracker.add_raw_subscriber(
             self._recorder.on_lines, self._recorder.on_reset

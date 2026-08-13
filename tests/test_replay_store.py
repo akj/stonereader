@@ -1,4 +1,7 @@
-"""Tests for the replay store (Slice #11): .hsreplay file + SQLite metadata."""
+"""Tests for the replay store (Slice #11): replay files + SQLite metadata."""
+
+from pathlib import Path
+from zipfile import ZipFile
 
 import pytest
 
@@ -36,6 +39,10 @@ def _hsreplay_files(replay_dir):
     return list(replay_dir.rglob("*.hsreplay"))
 
 
+def _hdtreplay_files(replay_dir):
+    return list(replay_dir.rglob("*.hdtreplay"))
+
+
 def test_save_xml_writes_one_file_and_one_row(tmp_path):
     store, conn, replay_dir = _store(tmp_path)
     meta = _save(store)
@@ -64,6 +71,45 @@ def test_save_xml_dedupes_identical_content(tmp_path):
     conn.close()
 
 
+def test_save_xml_writes_raw_log_sidecar_on_fresh_save(tmp_path):
+    store, conn, replay_dir = _store(tmp_path)
+
+    _save(store, raw_log="line one\nline two\n")
+
+    sidecars = _hdtreplay_files(replay_dir)
+    assert len(sidecars) == 1
+    with ZipFile(sidecars[0]) as archive:
+        assert archive.namelist() == ["output_log.txt"]
+        assert archive.read("output_log.txt").decode("utf-8") == (
+            "line one\nline two\n"
+        )
+    conn.close()
+
+
+def test_save_xml_dedupe_does_not_rewrite_raw_log_sidecar(tmp_path):
+    store, conn, replay_dir = _store(tmp_path)
+    first = _save(store, raw_log="original\n")
+
+    second = _save(store, raw_log="replacement\n")
+
+    assert second.id == first.id
+    sidecars = _hdtreplay_files(replay_dir)
+    assert len(sidecars) == 1
+    with ZipFile(sidecars[0]) as archive:
+        assert archive.read("output_log.txt").decode("utf-8") == "original\n"
+    conn.close()
+
+
+def test_save_xml_without_raw_log_writes_no_sidecar(tmp_path):
+    store, conn, replay_dir = _store(tmp_path)
+
+    meta = _save(store, raw_log=None)
+
+    assert Path(meta.file_path).exists()
+    assert _hdtreplay_files(replay_dir) == []
+    conn.close()
+
+
 def test_all_replays_newest_played_at_first(tmp_path):
     store, conn, _ = _store(tmp_path)
     _save(store, xml="<r>old</r>", played_at="2026-06-18 09:00:00")
@@ -76,16 +122,19 @@ def test_all_replays_newest_played_at_first(tmp_path):
     conn.close()
 
 
-def test_delete_removes_row_and_file(tmp_path):
+def test_delete_removes_row_file_and_raw_log_sidecar(tmp_path):
     store, conn, replay_dir = _store(tmp_path)
-    meta = _save(store)
+    meta = _save(store, raw_log="source line\n")
     file_path = _hsreplay_files(replay_dir)[0]
+    sidecar_path = file_path.with_suffix(".hdtreplay")
     assert file_path.exists()
+    assert sidecar_path.exists()
 
     store.delete(meta.id)
 
     assert conn.execute("SELECT COUNT(*) FROM replays").fetchone()[0] == 0
     assert not file_path.exists()
+    assert not sidecar_path.exists()
     conn.close()
 
 
