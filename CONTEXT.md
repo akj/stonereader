@@ -50,7 +50,15 @@ _Avoid_: "entry announcement" (suggests surface entry only — the utterance cov
 
 **Speech lane**:
 One of the two priority classes an utterance belongs to. **Lane 1** (user-initiated: movement, entry, queries, confirmations) always interrupts. **Lane 2** (auto-narration of **Game events**) queues among itself, never interrupts Lane 1, and is dropped by any Lane-1 keypress. See ADR-0007.
-_Avoid_: "channel" (reserved for output media — speech vs sound cues), "priority"
+_Avoid_: "channel" (reserved for output media — speech vs **Game audio**), "priority"
+
+**Game audio**:
+StoneReader's second output channel beside speech: Hearthstone's own audio assets (voice lines, event sounds), extracted at runtime from the **User**'s local Hearthstone installation — never shipped with the app, never fetched from elsewhere. Absent (and announced as such) when no install is found. See ADR-0008.
+_Avoid_: "sound cues" (the abandoned earcon concept), "sound effects" (one kind of clip, not the channel)
+
+**Sounds menu**:
+The **Vertical menu** the listen key (L) drills into from any card under the cursor, listing that card's **Game audio** clips by event ("Play", "Attack", "Death", …); Enter plays the focused clip. See ADR-0008.
+_Avoid_: "audio browser", "voice-line list"
 
 **Card**:
 The static definition of a Hearthstone card — name, cost, type, class. Loaded once from `hearthstone-data` XML and indexed in `CardDatabase`. The same **Card** object is shared by every runtime instance of that card.
@@ -115,6 +123,7 @@ _Avoid_: "the mod", "HearthstoneAccess" (single word), generic "accessibility mo
 - Every item has exactly one **Title line**; everything else spoken (context label, position, "empty", confirmations) is ephemeral wrapping added by the announcement layer, never baked into item text.
 - The **Context-entry utterance** wraps the **Title line**: `"{Context label}, {title}, {position} of {count}"` for **Horizontal lists** and zones, `"{Context label}, {current option}"` for **Vertical menus**, `"{Context label}: empty"` when empty.
 - Every utterance belongs to exactly one **Speech lane**; a **Game event** may only ever speak on Lane 2.
+- **Game audio** never delays or preempts speech; at most one clip plays at a time (a new one replaces it); surface transitions and a bare Ctrl tap stop it; ordinary navigation lets it play out. A **Live game** surface never plays **Game audio** — the real client's audio is already present.
 - One **Card** → many **Entities** (two Fireballs in a deck = two Entities pointing at the same Fireball **Card**). `CardDatabase` holds **Cards**; `GameState` holds **Entities**.
 - A game has exactly one **Friendly Player** and one **Opponent** from the **User**'s perspective. Hearthstone's `player_id` (1 or 2) is server-assigned and only maps to Friendly/Opponent after resolution.
 - In a **Live game**, the **Friendly Player** is always the **User**'s side. In a **Replay**, the **Friendly Player** is whoever the replay was recorded from — which may or may not be the **User** (the User might be watching someone else's replay). `ReplayState.friendly_player_id` is captured from the replay metadata, not from the User's identity.
