@@ -40,6 +40,18 @@ _Avoid_: "sub-screen", "child screen"
 The state in which keystrokes go to a text field instead of navigation. Entered only by an explicit act (never on surface entry); Enter commits and leaves, Escape leaves without committing.
 _Avoid_: "edit mode", "input mode"
 
+**Title line**:
+The canonical one-line identity of an item — the shortest string that distinguishes it from its neighbors in its list. One formatter produces it; the displayed row, the movement utterance, and detail line 0 are this same string, written for the ear. See ADR-0007.
+_Avoid_: "summary", "row text", "label" (that's the context's name, not the item's)
+
+**Context-entry utterance**:
+The single utterance spoken whenever the **User** lands in a context — by **Screen jump**, **Drill-down**, back-reveal, zone switch, in-place rebuild (filter/search), or orientation reread (Shift+Up). Route-invariant: the same place always sounds the same. See ADR-0007.
+_Avoid_: "entry announcement" (suggests surface entry only — the utterance covers every landing route)
+
+**Speech lane**:
+One of the two priority classes an utterance belongs to. **Lane 1** (user-initiated: movement, entry, queries, confirmations) always interrupts. **Lane 2** (auto-narration of **Game events**) queues among itself, never interrupts Lane 1, and is dropped by any Lane-1 keypress. See ADR-0007.
+_Avoid_: "channel" (reserved for output media — speech vs sound cues), "priority"
+
 **Card**:
 The static definition of a Hearthstone card — name, cost, type, class. Loaded once from `hearthstone-data` XML and indexed in `CardDatabase`. The same **Card** object is shared by every runtime instance of that card.
 _Avoid_: "card definition" (redundant)
@@ -100,6 +112,9 @@ _Avoid_: "the mod", "HearthstoneAccess" (single word), generic "accessibility mo
 - UI **zones** live on horizontal-list **Surfaces** (Live Game, Replay Viewer); switching zones changes what the list shows, never the **Widget type**.
 - A UI **zone** either projects from a game **Zone** (e.g., the Remaining Deck zone is `Zone.DECK` minus draws) or is *synthesised* (Cards Drawn, Opponent Played) and corresponds to no single game **Zone**.
 - Each UI **zone** owns one cursor; cursors persist across zone switches via `ZoneNavigationMixin`.
+- Every item has exactly one **Title line**; everything else spoken (context label, position, "empty", confirmations) is ephemeral wrapping added by the announcement layer, never baked into item text.
+- The **Context-entry utterance** wraps the **Title line**: `"{Context label}, {title}, {position} of {count}"` for **Horizontal lists** and zones, `"{Context label}, {current option}"` for **Vertical menus**, `"{Context label}: empty"` when empty.
+- Every utterance belongs to exactly one **Speech lane**; a **Game event** may only ever speak on Lane 2.
 - One **Card** → many **Entities** (two Fireballs in a deck = two Entities pointing at the same Fireball **Card**). `CardDatabase` holds **Cards**; `GameState` holds **Entities**.
 - A game has exactly one **Friendly Player** and one **Opponent** from the **User**'s perspective. Hearthstone's `player_id` (1 or 2) is server-assigned and only maps to Friendly/Opponent after resolution.
 - In a **Live game**, the **Friendly Player** is always the **User**'s side. In a **Replay**, the **Friendly Player** is whoever the replay was recorded from — which may or may not be the **User** (the User might be watching someone else's replay). `ReplayState.friendly_player_id` is captured from the replay metadata, not from the User's identity.
