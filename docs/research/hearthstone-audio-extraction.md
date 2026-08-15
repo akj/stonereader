@@ -10,7 +10,7 @@ sources:
   - https://github.com/K0lb3/UnityPy
 fetch_date: 2026-08-14
 verified_against: local install, Hearthstone build 36.2.0.248348, Unity 6000.3.11f1
-wayfinder_ticket: akj/stonereader#22
+wayfinder_ticket: akj/stonereader#22, akj/stonereader#32
 ---
 
 # Hearthstone audio in a companion app — legality and extraction pipeline
@@ -92,12 +92,65 @@ live install. Not legal advice.
    4,564 distinct card ids**; events `Attack` 4,839 · `Death` 4,536 · `Play`
    3,961 · `Trigger` 294 · `Emote` 33. Practical design: index once per game
    patch (cache to JSON), decode individual clips on demand. Non-VO event SFX
-   (draw whoosh, turn alert, impacts) were not surveyed — their naming scheme
-   is unverified.
+   are surveyed in the section below (ticket #32).
 8. **Wiki fallback rejected**: hearthstone.wiki.gg serves voice-line wavs at
    stable `Special:FilePath` URLs, but its operator ToS forbids scraping,
    `robots.txt` disallows the endpoints, the CC BY-NC-SA license can't cover
    Blizzard's audio anyway, and coverage is a fraction of the local corpus.
+
+## Non-VO event SFX survey (ticket #32)
+
+Name-only rescan of the full install (no audio decoded), same build. Raw
+survey with exhaustive name/bundle lists lives on the `research/sfx-survey`
+branch (`docs/research/.sfx-survey-raw.md`).
+
+9. **The sound corpus is bigger than the sound-named bundles.** Scanning all
+   4,866 bundles (126 s, zero unreadable) finds **69,959** AudioClips: the 576
+   sound-named bundles hold the 61,314 previously indexed; the other 4,290
+   bundles contribute 8,645 more — and those hold most of the *generic*
+   UI/gameplay SFX (`essential_*_global`, `initial_*_global`). A runtime index
+   limited to the sound-named corpus would miss exactly the event clips below.
+10. **Non-VO taxonomy** (16,775 clips, eight bundle-family clusters):
+    card-specific play Foley (`playsound_*`: `<CardID>_Play`), card-specific
+    attack/death Foley (`soundotherminion_*`: `<CardID>_Attack` / `_Death`),
+    spell/effect SFX (`soundspell_*`), legendary play stingers
+    (`soundlegend_*`), music (`heromusic_*`, `musicexpansion_*`), a 401-clip
+    generic UI/gameplay library (`essential_*_global`), a 5,746-clip
+    mode/board/skin catch-all (`initial_*_global`), and 97 ambiguous
+    mission vocal-or-Foley clips.
+11. **Card-id Foley extends the VO mapping.** Thousands of voiceless cards
+    still have *card-specific* play/attack/death Foley addressable by the same
+    CardID naming scheme as voice lines — one index covers both.
+12. **Game-event → SFX from names alone: partial, and sufficient for the
+    replay events zone.** Generic base clips are name-identifiable for the
+    core events; most live in `essential_base_global-audio-0.unity3d` and
+    `initial_base_global-*-audio-*` bundles:
+
+    | Event | Names suffice? | Canonical clips |
+    |---|---|---|
+    | Turn start | Yes | `ALERT_YourTurn_0v2` |
+    | End-turn button | Yes (small family) | `FX_EndTurn_Up` / `_Enemy` / `_Down` |
+    | Card draw | Yes | `draw_card_1..3`; opponent `draw_card_and_add_to_hand_opp_1..3` |
+    | Card play / drop | Yes | `play_card_from_hand_1..3`; `Minion_Drop_Basic_1..5` |
+    | Attack | Yes | `FX_Minion_AttackLaunch` → `FX_Minion_AttackImpact[Mid/Large]`; hero: `Hero_Attack_Generic_Start_01` / `_End_01` |
+    | Minion death | Yes | `Minion_Death_01..06` |
+    | Damage | Partial | `Shared_Physical_Impact_01/02`; armor-only `Shared_Armor_Damage_1`; no generic health-damage clip |
+    | Hero power | **No** | only icon UI (`hero_power_icon_flip_on/off`); activation SFX are hero/skin-specific |
+    | Game start / mulligan / coin | Yes | `Mulligan` (+`A/B/C`), `the_coin_card`, `FX_MulliganCoin01_HeroCoinDrop` |
+    | Victory / defeat | Yes | `victory_jingle`, `victory_screen_start`; `defeat_jingle`, `defeat_screen_start` |
+    | Secret trigger | Yes | `FX_Secret_Trigger` (birth: `FX_Secret_Birth`) |
+    | Discover / choice | **No** | card-specific only; no generic cue |
+    | Emote wheel | **No** | nearest is `speech_bubble_open/close` |
+13. **What names can't give**: hero-power activation, discover/choice, emote
+    wheel, and the runtime *mix* — the client layers card/skin-specific
+    variants over the base clips via prefab bindings this survey did not
+    inspect, and no waveform was auditioned.
+
+**Consequence for ADR-0008**: the Replay Viewer events zone *can* sound the
+common voiceless case — a generic base clip per event type, upgraded to
+card-specific Foley by CardID where one exists. Hero power, discover, and
+emote-wheel events stay silent (or borrow a nearby UI clip) unless a curated
+mapping is hand-built later.
 
 ## Hardening requirements for the extraction path
 
