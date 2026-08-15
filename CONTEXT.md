@@ -125,6 +125,10 @@ engine consumes; **Game events** are an output the rest of the system consumes.
 _Avoid_: "narration event" (names a single consumer's purpose), "engine event"
 (too narrow — Replays produce them too without an engine)
 
+**Stats corpus**:
+The set of **Games** counted in the **User**'s statistics. Membership is the User's say-so, not provenance: live-recorded games are members by default; imported **Replays** join only when the User opts them in. See ADR-0012.
+_Avoid_: "tracked games", "history" (the Replays list holds everything; the corpus is the counted subset)
+
 **Hearthstone Access** (or **HSA**):
 The third-party Hearthstone accessibility mod (hearthstoneaccess.com), used as StoneReader's canonical reference for keyboard navigation conventions. StoneReader's **Replay** viewer and Cards surface mirror HSA's key conventions — including its internal inconsistencies — so that HSA users carry muscle memory across. See ADR-0003.
 _Avoid_: "the mod", "HearthstoneAccess" (single word), generic "accessibility mod"
