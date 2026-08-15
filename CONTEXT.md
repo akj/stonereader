@@ -60,6 +60,10 @@ _Avoid_: "sound cues" (the abandoned earcon concept), "sound effects" (one kind 
 The **Vertical menu** the listen key (L) drills into from any card under the cursor, listing that card's **Game audio** clips by event ("Play", "Attack", "Death", …); Enter plays the focused clip. See ADR-0008.
 _Avoid_: "audio browser", "voice-line list"
 
+**Help menu**:
+The **Vertical menu** F1 pushes from any **Surface** (a **Drill-down**): the widget-type sentence first, then the surface's bindings key-first, then Universal-keys and All-commands drill-downs. Enter performs the chosen binding on the underlying Surface. Generated from the command registry — never hand-written. See ADR-0009.
+_Avoid_: "help screen", "help dialog", "documentation"
+
 **Card**:
 The static definition of a Hearthstone card — name, cost, type, class. Loaded once from `hearthstone-data` XML and indexed in `CardDatabase`. The same **Card** object is shared by every runtime instance of that card.
 _Avoid_: "card definition" (redundant)
@@ -123,6 +127,7 @@ _Avoid_: "the mod", "HearthstoneAccess" (single word), generic "accessibility mo
 - Every item has exactly one **Title line**; everything else spoken (context label, position, "empty", confirmations) is ephemeral wrapping added by the announcement layer, never baked into item text.
 - The **Context-entry utterance** wraps the **Title line**: `"{Context label}, {title}, {position} of {count}"` for **Horizontal lists** and zones, `"{Context label}, {current option}"` for **Vertical menus**, `"{Context label}: empty"` when empty.
 - Every utterance belongs to exactly one **Speech lane**; a **Game event** may only ever speak on Lane 2.
+- Every **Surface** has a **Help menu**, reached by F1; its options mirror the surface's bindings exactly (they are one registry), and Enter performs the chosen binding.
 - **Game audio** never delays or preempts speech; at most one clip plays at a time (a new one replaces it); surface transitions and a bare Ctrl tap stop it; ordinary navigation lets it play out. A **Live game** surface never plays **Game audio** — the real client's audio is already present.
 - One **Card** → many **Entities** (two Fireballs in a deck = two Entities pointing at the same Fireball **Card**). `CardDatabase` holds **Cards**; `GameState` holds **Entities**.
 - A game has exactly one **Friendly Player** and one **Opponent** from the **User**'s perspective. Hearthstone's `player_id` (1 or 2) is server-assigned and only maps to Friendly/Opponent after resolution.
