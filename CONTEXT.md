@@ -104,10 +104,6 @@ _Avoid_: "match"
 A **Game** in progress. Source: `Power.log` real-time tail. State updates as events arrive. Tracking starts on `CREATE_GAME` and resets on game end.
 _Avoid_: "current game", "active game"
 
-**Live game timeline**:
-The navigable history of a **Live game** while it is in progress.
-_Avoid_: "live replay"
-
 **Replay**:
 A **Game** that has finished, loaded from a persisted source such as HSReplay XML or a StoneReader-saved game record. The **User** navigates turn-by-turn through a `ReplayState`, which wraps `Tuple[GameState, ...]`.
 _Avoid_: "recording", "log" (`Power.log` is a different thing)
@@ -138,7 +134,7 @@ _Avoid_: "the mod", "HearthstoneAccess" (single word), generic "accessibility mo
 - A **Surface** presents exactly one **Widget type**; **Text mode** and **Capture mode** are temporary states on top of a Surface, not widget types. Navigation, **Text mode**, and **Capture mode** are the only three input states — each entered only by an explicit act, each with a no-commit exit.
 - A **Surface** is reached by a **Screen jump** (stack resets to Home → target) or a **Drill-down** (pushes one level); back pops one drill-down, goes Home from any jumped-to Surface, and is an announced no-op at Home.
 - UI **zones** live on horizontal-list **Surfaces** (Live Game, Replay Viewer); switching zones changes what the list shows, never the **Widget type**.
-- A UI **zone** either projects from a game **Zone** (e.g., the Remaining Deck zone is `Zone.DECK` minus draws) or is *synthesised* (Cards Drawn, Opponent Played) and corresponds to no single game **Zone**.
+- A UI **zone** either projects from a game **Zone** (e.g., the Remaining Deck zone is `Zone.DECK` minus draws) or is *synthesised* (Your drawn, Opponent played) and corresponds to no single game **Zone**.
 - Each UI **zone** owns one cursor; cursors persist across zone switches via `ZoneNavigationMixin`.
 - Every item has exactly one **Title line**; everything else spoken (context label, position, "empty", confirmations) is ephemeral wrapping added by the announcement layer, never baked into item text.
 - The **Context-entry utterance** wraps the **Title line**: `"{Context label}, {title}, {position} of {count}"` for **Horizontal lists** and zones, `"{Context label}, {current option}"` for **Vertical menus**, `"{Context label}: empty"` when empty.
@@ -148,8 +144,8 @@ _Avoid_: "the mod", "HearthstoneAccess" (single word), generic "accessibility mo
 - One **Card** → many **Entities** (two Fireballs in a deck = two Entities pointing at the same Fireball **Card**). `CardDatabase` holds **Cards**; `GameState` holds **Entities**.
 - A game has exactly one **Friendly Player** and one **Opponent** from the **User**'s perspective. Hearthstone's `player_id` (1 or 2) is server-assigned and only maps to Friendly/Opponent after resolution.
 - In a **Live game**, the **Friendly Player** is always the **User**'s side. In a **Replay**, the **Friendly Player** is whoever the replay was recorded from — which may or may not be the **User** (the User might be watching someone else's replay). `ReplayState.friendly_player_id` is captured from the replay metadata, not from the User's identity.
-- A **Live game timeline** and a **Replay** are both navigable histories of a **Game**, but only a **Replay** is loaded from a persisted finished-game source.
-- After a **Live game** ends normally, its **Live game timeline** is automatically persisted as a **Replay**.
+- A **Live game** has no navigable history — it is current-state only; a **Replay** is the only navigable history of a **Game** (ADR-0013).
+- After a **Live game** ends normally, it is automatically persisted as a **Replay**.
 - An abandoned **Live game** is not persisted as a **Replay** because StoneReader did not observe a complete game result.
 - A **Game event** is always derivable from a pair of `GameState` snapshots; consumers never need access to **Packets**, the engine's internal block stack, or hslog/HSReplay APIs. Cases where a packet-level fact is needed for a **Game event** (block context for "was played from hand," mulligan completion timing, attack-in-progress) are lifted onto `GameState` itself so the diff function can recover them.
 
@@ -157,4 +153,4 @@ _Avoid_: "the mod", "HearthstoneAccess" (single word), generic "accessibility mo
 
 - **Zone vs zone**: capital-Z `Zone` is the Hearthstone enum (`hearthstone.enums.Zone`); lowercase `zone` is the StoneReader UI navigable list. Both appear in the code — the imported `Zone` enum in `services/_engine.py` etc., and the `_*_ZONE` constants in `presenters/`. In prose, always pair the lowercase `zone` with its proper noun ("the Remaining Deck zone") so it's never bare.
 - **Player vs Friendly Player**: code uses `player_` as shorthand for "Friendly Player" in attribute names; in prose, prefer "Friendly Player" so it doesn't collide with the generic Hearthstone idea of "a player" (there are two). When referring to either side abstractly, say "side." `player_id` (1 or 2) is the Hearthstone server-slot; it only maps to Friendly/Opponent after `FriendlyPlayerExporter` resolution.
-- **Live game timeline vs Replay**: "live replay" was rejected because external Hearthstone tools use **Replay** for finished-game review and "live" language for in-progress information.
+- **"Live replay"**: rejected term. External Hearthstone tools use **Replay** for finished-game review and "live" language for in-progress information — and StoneReader has no navigable in-progress history at all (ADR-0013 retired the former "Live game timeline" concept).

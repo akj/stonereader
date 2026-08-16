@@ -60,7 +60,7 @@ free-form screen (Import Deck) into widget type #1 — there is no third type.
 | Enter | Acts on the current item. Never a silent no-op: each surface's spec assigns its action or an announced no-op. |
 | Escape / Backspace | Synonyms for **back**, injected centrally by the navigation controller, never bound per-surface. At the stack root, back is an announced no-op ("Home — already at the top"), not a quit. Quit stays on Ctrl+Q / Alt+F4. |
 | Home / End | First / last (option, item — whatever the widget type's cursor covers). |
-| PageUp / PageDown | Page the surface's **coarse axis**: pages in collection surfaces, turns in the Replay Viewer and Live Game timeline. Related-card content (HSA's in-game PageUp/Down meaning) lives in the detail-line stream instead; a surface spec may add a dedicated key if that proves insufficient. |
+| PageUp / PageDown | Page the surface's **coarse axis**: pages in collection surfaces, turns in the Replay Viewer. (This clause originally also named a "Live Game timeline"; ADR-0013 retired that concept — on Live Game, PageUp/PageDown is a constant announced no-op.) Related-card content (HSA's in-game PageUp/Down meaning) lives in the detail-line stream instead; a surface spec may add a dedicated key if that proves insufficient. |
 | Tab / Shift+Tab | Group jump where the surface has groups (class filter in Card Browser — HSA collection precedent); announced no-op where it has none. Never focus traversal. |
 | Ctrl+F | Search. Opens a typed search field on surfaces that support it (HSA collection precedent); announces "No search on this screen" on surfaces that don't. |
 | F1 | Help, everywhere (see below). |
@@ -101,6 +101,8 @@ Consequently **Live Game drops digits 1–4 as zone switches** (a pre-ADR-0003
 holdover) and adopts the Replay Viewer's letter set for the same zones:
 `d` remaining deck, `Shift+C` opponent hand, `Shift+P` opponent played,
 `n` cards drawn. Inspecting a game is one dialect, live or replayed.
+(ADR-0013 later completed the dialect: Live Game carries the Replay Viewer's
+full zone inventory and speak-only queries, current-state only.)
 
 ### Announcements
 

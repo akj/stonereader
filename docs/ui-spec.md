@@ -12,12 +12,12 @@ audio**, and Settings behavior. Nothing here is argued — every normative
 statement cites the ADR that decided it. A PRD written against a section of this
 document should have nothing left to decide except code.
 
-**Status:** Draft, assembled 2026-08-15 against ADR-0003…0012 (wayfinder map
-[#17](https://github.com/akj/stonereader/issues/17), ticket #28). Final except
-the two [Open questions](#open-questions) — Live Game's zone inventory and
-timeline ([#34](https://github.com/akj/stonereader/issues/34)) and the prompt
-construct ([#35](https://github.com/akj/stonereader/issues/35)). Every other
-section is normative and PRD-ready. Nothing here ships code by itself.
+**Status:** Draft, assembled 2026-08-15 against ADR-0003…0012, amended
+2026-08-16 for ADR-0013 (wayfinder map
+[#17](https://github.com/akj/stonereader/issues/17), tickets #28 and #34).
+Final except the one [Open question](#open-questions) — the prompt construct
+([#35](https://github.com/akj/stonereader/issues/35)). Every other section is
+normative and PRD-ready. Nothing here ships code by itself.
 
 Where an ADR left a detail to the per-surface spec, or where two ADRs could be
 read against each other, this document rules and says so inline ("this spec's
@@ -37,6 +37,7 @@ ruling"). A ruling is as binding as an ADR citation.
 | [0010](adr/0010-module-seams-declarative-surfaces.md) | Seams: declarative surfaces, two widget-type engines, command registry with layers and slots, one input sink, Announcer and Narrator, navigation controller |
 | [0011](adr/0011-settings-surface.md) | Settings surface, **Narration preset**, **Picker** idiom, **Capture mode**, global-hotkey rebinding, persistence and defaults |
 | [0012](adr/0012-deck-replay-statistics-surface.md) | **Stats corpus** membership, deck attribution, win-rate formula, the Statistics surface |
+| [0013](adr/0013-live-game-current-state-full-dialect.md) | Live Game: full replay dialect current-state only, no **Live game timeline**, draw-chance line, bare labels |
 
 ADR-0001 (Power.log over memory reading) and ADR-0002 (state-only prev/curr
 dispatch) govern the data pipeline below this spec and are not restated here.
@@ -399,70 +400,108 @@ but it is not a Home behavior — it is app-wide (see
 
 **Reached and left:** Screen jump from Home (`L`, or Enter on option 1), or the
 system-wide hotkeys Ctrl+Shift+L (landing on Remaining Deck) and Ctrl+Shift+O
-(landing on Opponent Hand). Back goes Home (ADR-0006).
+(landing on Opponent hand). Back goes Home (ADR-0006).
 
 **Window title:** `Live Game — StoneReader` (ADR-0006).
 **Entry utterance:** the zone's context-entry utterance —
 `"{Zone label}, {title}, {position} of {count}"`, degrading to
 `"{Zone label}: empty"` when the zone holds nothing, which is also what a Live
-Game with no game in progress sounds like (ADR-0007).
+Game with no game in progress sounds like (ADR-0007). Labels carry **no turn
+prefix**: live, the turn is ambient — the client and Lane 2 both announce it —
+and the Replay Viewer's turn-carrying label exists only because turn stepping
+changes what every zone means (ADR-0013).
 
-**Zones.** Zone labels are the user-facing strings below — no "zone" suffix,
-per ADR-0007's own example utterance ("Remaining Deck, Glacial Shard, 1 copy,
-1 of 2"). Digits 1–4 as zone switches are removed; Live Game adopts the Replay
-Viewer's letter set for the same zones, because inspecting a game is one dialect
-live or replayed (ADR-0004).
+**Zones.** Live Game speaks the Replay Viewer's full dialect — ADR-0004's "one
+dialect, live or replayed", completed by ADR-0013: the same fifteen navigable
+zones and five speak-only queries, identical letters and help phrases, reading
+the current `GameState` and nothing else. Zone labels are the user-facing
+strings below, no "zone" suffix (ADR-0007), and are shared with the Replay
+Viewer with one exception: `D` is **Remaining Deck** — live, the deck zone
+means what's left (`Zone.DECK` minus draws, grouped by card), not a snapshot
+list. `Shift+N` joining the surface forces one rename: the shipped "Cards
+Drawn" zone becomes **Your drawn** (ADR-0013). The events zone is the
+dialect's one asymmetry: **Y is a constant announced no-op live** — see the
+history ruling below.
 
-| Key | Zone label | Contents |
-|---|---|---|
-| D | Remaining Deck | `Zone.DECK` minus draws, by card |
-| Shift+C | Opponent Hand | Positional rows, identity where known |
-| Shift+P | Opponent Played | Cards the **Opponent** has played this game |
-| N | Cards Drawn | Cards the **Friendly Player** has drawn this game |
+| Key | Zone label |
+|---|---|
+| B | Your board |
+| G | Opponent board |
+| C | Your hand |
+| Shift+C | Opponent hand |
+| S | Your secrets |
+| Shift+S | Opponent secrets |
+| V | Your hero |
+| F | Opponent hero |
+| W | Your weapon |
+| Shift+W | Opponent weapon |
+| D | Remaining Deck |
+| P | Your played |
+| Shift+P | Opponent played |
+| N | Your drawn |
+| Shift+N | Opponent drawn |
 
-Whether Live Game carries the Replay Viewer's full zone inventory beyond these
-four is an
-[open question (#34)](#live-game-surface-zone-inventory-and-timeline).
+**No live history** (ADR-0013). The **Live game timeline** is retired; Live
+Game holds zero buffered state. Mid-game play history is the client's own
+feature — HSA's in-game `y` already speaks it there — so StoneReader
+mirroring it would double the client the way doubled audio would (ADR-0008's
+principle: the real client is in the room). Reviewing a finished game is the
+Replay Viewer's job; every completed live game already persists as a Replay.
 
-**Title lines and detail lines** (ADR-0007 delegates both to this spec; line 0
-is the title verbatim):
+**Title lines and detail lines.** Singleton zones (heroes, weapons) are
+one-item list zones (ADR-0003). Every zone follows the Replay Viewer's
+card-zone and hero-zone formats, with these live divergences (line 0 is the
+title verbatim, ADR-0007):
 
 *Remaining Deck* — title `"{Card name}, {n} copy"` / `"…, {n} copies"`
-(ADR-0007's worked example). Lines: 1 `"{cost} mana"`; 2 `"{Type}"`;
-3 `"{Attack} attack, {Health} health"` for minions and weapons; 4 card text.
+(ADR-0007's worked example). Lines: 1 `"{p} percent to draw"` — nearest whole
+percent, copies remaining over cards remaining (ADR-0013); 2 `"{cost} mana"`;
+3 `"{Type}"`; 4 `"{Attack} attack, {Health} health"` for minions and weapons;
+5 card text.
 
-*Opponent Hand* — title `"Card {position}, {identity}"`, where identity is the
+*Opponent hand* — title `"Card {position}, {identity}"`, where identity is the
 card name when revealed and "unknown" when not. Lines: 1 `"Drawn turn {t}"` or
 `"Drawn turn unknown"`; 2 `"Created by {source}"` when a creation lineage
 exists.
-
-*Opponent Played* — title `"{Card name}, turn {t}"`. Lines: 1 `"{cost} mana"`;
-2 `"{Type}"`; 3 card text.
-
-*Cards Drawn* — title `"{Card name}, turn {t}"`. Lines as Opponent Played.
 
 **Keys**
 
 | Key | Command | Spoken help phrase |
 |---|---|---|
-| Left / Right | Previous / next card in the zone | Widget-type layer (ADR-0004) |
+| Left / Right | Previous / next item in the zone | Widget-type layer (ADR-0004) |
 | Up / Down | Previous / next detail line | Widget-type layer (ADR-0004) |
 | Shift+Up / Shift+Down | Repeat line / read to last line | Widget-type layer (ADR-0004, ADR-0007) |
-| Home / End | First / last card in the zone | Universal layer (ADR-0004) |
+| Home / End | First / last item in the zone | Universal layer (ADR-0004) |
+| B / G | Jump to your board / opponent board | "B: your minions" / "G: opponent minions" (ADR-0003) |
+| C / Shift+C | Jump to your hand / opponent hand | "C: your hand" / "Shift+C: opponent hand" (ADR-0003) |
+| S / Shift+S | Jump to your secrets / opponent secrets | "S: your secrets" / "Shift+S: opponent secrets" |
+| V / F | Jump to your hero / opponent hero | "V: your hero" / "F: opponent hero" |
+| W / Shift+W | Jump to your weapon / opponent weapon | "W: your weapon" / "Shift+W: opponent weapon" |
 | D | Jump to Remaining Deck | "D: jump to Remaining Deck" (ADR-0009's worked example) |
-| Shift+C | Jump to Opponent Hand | "Shift+C: opponent hand" (ADR-0009) |
-| Shift+P | Jump to Opponent Played | "Shift+P: opponent played" |
-| N | Jump to Cards Drawn | "N: cards you have drawn" |
+| P / Shift+P | Jump to your played / opponent played | "P: cards you played" / "Shift+P: cards your opponent played" |
+| N / Shift+N | Jump to your drawn / opponent drawn | "N: cards you drew" / "Shift+N: cards your opponent drew" |
+| A | Speak your mana | "A: how much mana you have" — speak-only, never changes the zone (ADR-0003, ADR-0007) |
+| Shift+A | Speak opponent mana | "Shift+A: how much mana your opponent has" — speak-only |
+| Shift+D | Speak opponent deck count | "Shift+D: how many cards are in your opponent's deck" — speak-only |
+| R | Speak your hero power | "R: your hero power" — speak-only |
+| Shift+R | Speak opponent hero power | "Shift+R: your opponent's hero power" — speak-only |
 | 1–9 | Jump to position 1–9 in the current zone | "1 to 9: jump to that position in the list" (ADR-0003, ADR-0004) |
 | 0 | Jump to position 10 | "0: jump to the tenth item" (ADR-0004) |
-| PageUp / PageDown | Reserved for the **Live game timeline** | Announced no-op in v1 — see [Open questions (#34)](#live-game-surface-zone-inventory-and-timeline) |
+| Y | Announced no-op — "No events in a live game" | ADR-0013: play history is the client's feature; HSA's in-game `y` speaks it there |
+| PageUp / PageDown | Announced no-op — "No turns to step in a live game" | ADR-0013: there is no **Live game timeline** |
 | Enter | Announced no-op | *This spec's ruling* under ADR-0004's requirement that every Surface assign Enter an action or an announced no-op; matches ADR-0012's Statistics precedent |
 | L | Announced no-op — "No game audio during a live game" | *This spec's ruling*: ADR-0008's listen-key surface enumeration (Cards, deck contents, replay zones) deliberately excludes Live Game, where the real client is already producing its own audio; the phrase satisfies ADR-0004's no-silent-universal-key rule |
 | Tab / Shift+Tab, Ctrl+F | Announced no-op | Slot defaults (ADR-0010) |
 
-Letters HSA binds in-game that have no StoneReader meaning here are not
-registered and therefore stay silent (ADR-0004: unbound non-universal keys stay
-silent). Delete and Space are unbound here and likewise silent.
+Pressing a zone letter for a zone currently holding nothing speaks the
+constant "No {zone} on this screen" — every time, no press counting, never
+silence (ADR-0009). Speak-only queries follow the `"{Subject}, {value}"`
+shape — "Your mana, 4 of 10" (ADR-0007); with no game in progress they speak
+the constant "No game in progress" (*this spec's ruling*, same
+constant-no-op construct). Letters HSA binds in-game that have no StoneReader
+meaning here are not registered and therefore stay silent (ADR-0004: unbound
+non-universal keys stay silent). Delete and Space are unbound here and
+likewise silent.
 
 **Speech:** Zone switches fire the same context-entry utterance as any other
 landing (ADR-0007). Lane-2 narration of the game arrives from the Narrator, not
@@ -1214,6 +1253,7 @@ arrowing inside the menu does not (ADR-0008).
 | Battlegrounds toolset | Known fog on map #17; Home letter **B is reserved**, not bound, because HSA binds B = Battlegrounds (ADR-0006). HSA's Battlegrounds vocabulary is dense and distinct from its in-game vocabulary, so a future surface must re-derive its keys rather than reuse the Replay Viewer's (ADR-0003). HSA's 8 Battlegrounds wavs remain the earcon precedent if this ever graduates (ADR-0008). |
 | Collection / pack tracking | Known fog on map #17; Home letter **O is reserved**, not bound, because HSA binds O = Open Packs (ADR-0006). |
 | Mulligan helper | Not on this map. Named in ADR-0012 as one of the efforts that might need a filtered-list capability first; no key, letter, or topology slot is reserved for it. |
+| Secrets helper (which secrets are still possible) | Known fog on map #17 (ADR-0013): the strongest remaining tracker-overlay idea, but it needs per-format secret-pool data — a research effort, not a spec ruling. No key is reserved; S/Shift+S are the secrets zones themselves. |
 | Arena assist / drafting | Not on this map. ADR-0003 notes only the standing obligation that a future arena-drafting surface check HSA's vocabulary before picking keys. Arena games are excluded from deck statistics because they play no saved deck (ADR-0012). |
 | Onboarding / installer | Explicitly out of scope on this map: first run means no settings file means all defaults, and there is no setup wizard — Settings is for divergence (ADR-0011). ADR-0008's required "not affiliated with Blizzard Entertainment / assets © Blizzard" notices land with this effort; no v1 Surface carries them. |
 
@@ -1221,28 +1261,8 @@ arrowing inside the menu does not (ADR-0008).
 
 # Open questions
 
-Two questions remain open. Everything else in this document is normative and
-PRD-ready; a PRD touching either area below waits on its ticket.
-
-## Live Game surface: zone inventory and timeline
-
-**Ticket: [akj/stonereader#34](https://github.com/akj/stonereader/issues/34)**
-
-Two joined holes. First, the **zone inventory**: ADR-0004 names exactly four
-Live Game zones (`D` remaining deck, `Shift+C` opponent hand, `Shift+P` opponent
-played, `N` cards drawn) while asserting that "inspecting a game is one dialect,
-live or replayed" — and the Replay Viewer has sixteen. Whether Live Game gains
-boards (B/G), heroes (V/F), secrets (S/Shift+S), weapons (W/Shift+W), your hand
-(C), your played and drawn (P/N), events (Y), and the speak-only queries
-(A/Shift+A/Shift+D/R/Shift+R) is not stated anywhere, and it sizes the Surface.
-Second, the **Live game timeline**: ADR-0004 assigns PageUp/PageDown to "turns
-in the Replay Viewer and Live Game timeline", and CONTEXT.md defines the Live
-game timeline as the navigable history of a Live game in progress — but no ADR
-specs it, and it does not exist in the shipped app, which holds a single current
-state with no history buffer. Until it is designed (does stepping back freeze
-the zones at that turn, how does the User return to the live present, what
-happens when a new turn arrives while stepped back), PageUp/PageDown on Live
-Game is unimplementable and this spec makes it an announced no-op.
+One question remains open. Everything else in this document is normative and
+PRD-ready; a PRD touching the area below waits on its ticket.
 
 ## Prompt construct: how StoneReader asks the User a question
 
