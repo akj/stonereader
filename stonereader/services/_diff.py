@@ -13,8 +13,9 @@ Output ordering (deterministic):
   3. Turn lifecycle: TurnChanged, MulliganDone.
   4. Combat start: AttackStarted.
   5. Per-entity transitions, ordered by ascending entity_id. For each entity,
-     at most one zone-class event (CardDrawn | CardPlayed | MinionDied |
-     CardRemoved) followed by CardRevealed (if card_id became visible) and
+     at most one zone-class event (CardDrawn | CardPlayed | SecretPlayed |
+     SecretRevealed | MinionDied | CardRemoved), followed when applicable by
+     CardRevealed (if card_id became visible outside a secret reveal) and
      DamageDealt (if DAMAGE tag changed under an open ATTACK or POWER block).
 
 Pure timestamps: every emitted event carries timestamp=0.0 — diff has no
@@ -39,6 +40,8 @@ from stonereader.services._events import (
     GameStarted,
     MinionDied,
     MulliganDone,
+    SecretPlayed,
+    SecretRevealed,
     TurnChanged,
 )
 
@@ -141,8 +144,36 @@ def diff(prev: Optional[GameState], curr: GameState) -> Sequence[GameEvent]:
         curr_ent = curr_entities[eid]
         prev_ent = prev_entities.get(eid)
         prev_zone = prev_ent.zone if prev_ent is not None else ""
+        secret_revealed = (
+            prev_zone == "SECRET"
+            and curr_ent.zone == "GRAVEYARD"
+            and bool(curr_ent.card_id)
+        )
+        secret_played = curr_ent.zone == "SECRET" and prev_zone != "SECRET"
 
-        if curr_ent.zone == "HAND" and prev_zone != "HAND":
+        if secret_revealed:
+            events.append(
+                SecretRevealed(
+                    timestamp=0.0,
+                    turn=turn,
+                    name=curr_ent.name
+                    or (
+                        curr_ent.base_card.name
+                        if curr_ent.base_card is not None
+                        else ""
+                    ),
+                    controller=curr_ent.controller,
+                )
+            )
+        elif secret_played:
+            events.append(
+                SecretPlayed(
+                    timestamp=0.0,
+                    turn=turn,
+                    controller=curr_ent.controller,
+                )
+            )
+        elif curr_ent.zone == "HAND" and prev_zone != "HAND":
             events.append(
                 CardDrawn(
                     timestamp=0.0,
@@ -215,7 +246,13 @@ def diff(prev: Optional[GameState], curr: GameState) -> Sequence[GameEvent]:
                 )
             )
 
-        if prev_ent is not None and not prev_ent.card_id and curr_ent.card_id:
+        if (
+            not secret_revealed
+            and not secret_played
+            and prev_ent is not None
+            and not prev_ent.card_id
+            and curr_ent.card_id
+        ):
             events.append(
                 CardRevealed(
                     timestamp=0.0,

@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "accessible-output2>=0.17",
+    "fsb5>=1.0",
     "hearthstone>=9.15.8",
     "hearthstone-data>=221175.1",
     "hslog>=1.18.0,<2",
@@ -13,6 +14,7 @@ dependencies = [
     "pip",
     "psutil>=7.0,<8",
     "setuptools>=80.9.0,<81",
+    "unitypy>=1.25.3",
     "wxpython>=4.2.5",
 ]
 
@@ -21,4 +23,10 @@ dev = [
     "pytest>=8.0",
     "pyright>=1.1.402",
     "ruff>=0.11.10",
+]
+
+[tool.pytest.ini_options]
+addopts = "-m 'not slow_audio'"
+markers = [
+    "slow_audio: scans/decodes the real local Hearthstone audio install",
 ]

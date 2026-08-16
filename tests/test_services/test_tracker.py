@@ -149,6 +149,23 @@ def test_process_gone_skips_dispatch_for_completed_game(mock_process_detector):
     assert received == []
 
 
+def test_configured_existing_log_path_wins_when_process_is_running(
+    mock_process_detector,
+    tmp_path,
+):
+    from stonereader.services import GameTracker
+
+    custom = tmp_path / "Power.log"
+    custom.write_text("", encoding="utf-8")
+    mock_process_detector.set_running(True, exe_dir=None)
+    tracker = GameTracker(
+        process_detector=mock_process_detector,
+        log_path_provider=lambda: custom,
+    )
+
+    assert tracker._provide_path() == custom
+
+
 def test_start_stop_clean():
     wx = pytest.importorskip("wx")
     from stonereader.services import GameTracker

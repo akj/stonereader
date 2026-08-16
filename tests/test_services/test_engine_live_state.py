@@ -3,15 +3,15 @@
 RED phase: these tests fail on main pre-03-07 — they are the negative gate
 that locks in the engine-publication fix (Task 2 of plan 03-07).
 
-The original Phase 3 unit tests masked this gap because:
-- `tests/test_live_game_presenter.py:_make_state` constructs synthetic GameState.
+The original synthetic Live Game tests could mask this gap because:
+- `tests/test_surfaces/test_live_game.py:_rich_state` constructs a GameState.
 - `tests/test_services/test_engine.py` uses synthetic packets only.
 - No test fed real Power.log → Parser → Engine and asserted that the engine
-  publishes the fields the live presenter consumes (`player_deck`,
+  publishes the fields the Live Game Surface consumes (`player_deck`,
   `player_hero.hero_class`, `player_mana`/`player_max_mana`, deck counts).
 
 These captured-fixture tests close that gap and lock the contract: every
-field the panel renders must be reflected in `engine.current_state` after
+field the Surface projects must be reflected in `engine.current_state` after
 real-world replay.
 """
 

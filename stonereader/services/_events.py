@@ -97,6 +97,21 @@ class CardPlayed(GameEvent):
 
 
 @dataclass(frozen=True)
+class SecretPlayed(GameEvent):
+    """Emitted when either side puts a card into the SECRET Zone."""
+
+    controller: int
+
+
+@dataclass(frozen=True)
+class SecretRevealed(GameEvent):
+    """Emitted when a secret's identity is revealed as it leaves SECRET."""
+
+    name: str
+    controller: int
+
+
+@dataclass(frozen=True)
 class CardRevealed(GameEvent):
     """Emitted when a previously-hidden card becomes visible (e.g., opponent secret triggers, joust reveal)."""
 

@@ -52,9 +52,11 @@ class GameTracker:
         self,
         card_db: Optional[CardDatabase] = None,
         process_detector: Optional[ProcessDetector] = None,
+        log_path_provider: Callable[[], Optional[Path]] | None = None,
     ) -> None:
         self._card_db = card_db
         self._process_detector = process_detector or ProcessDetector()
+        self._log_path_provider = log_path_provider
         self._parser = Parser()
         self._engine = GameEngine(card_db=card_db)
         self._watcher = PowerLogWatcher(
@@ -150,6 +152,10 @@ class GameTracker:
             self._previously_running = running
         if not running:
             return None
+        if self._log_path_provider is not None:
+            configured = self._log_path_provider()
+            if configured is not None and configured.exists():
+                return configured
         return discover_power_log_path(self._process_detector.get_install_dir())
 
     def _handle_process_gone(self) -> None:

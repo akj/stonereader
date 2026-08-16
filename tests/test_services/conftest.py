@@ -25,8 +25,7 @@ class FakeClock:
 class MockProcessDetector:
     """Test double for ProcessDetector — scriptable is_running result.
 
-    Mirrors the resilience pattern from tests/conftest.py MockSpeechService:
-    skip parent __init__ to avoid touching the real psutil API.
+    Skips the parent __init__ so the double never touches the real psutil API.
     """
 
     def __init__(self, running: bool = False, exe_dir: Optional[Path] = None) -> None:

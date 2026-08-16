@@ -5,6 +5,22 @@ from typing import Any, Dict, List, Optional
 from hearthstone.cardxml import load
 
 
+CARD_CLASS_NAMES: dict[str, str] = {
+    "DEMONHUNTER": "Demon Hunter",
+    "DEATHKNIGHT": "Death Knight",
+    "DRUID": "Druid",
+    "HUNTER": "Hunter",
+    "MAGE": "Mage",
+    "NEUTRAL": "Neutral",
+    "PALADIN": "Paladin",
+    "PRIEST": "Priest",
+    "ROGUE": "Rogue",
+    "SHAMAN": "Shaman",
+    "WARLOCK": "Warlock",
+    "WARRIOR": "Warrior",
+}
+
+
 def _strip_tags(text: str) -> str:
     """Strip HTML tags, game markup, and normalize whitespace in card text."""
     text = re.sub(r"<[^>]+>", "", text)

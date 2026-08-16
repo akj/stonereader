@@ -28,7 +28,7 @@ services (`_watcher.py`, `_tracker.py`).
 from __future__ import annotations
 
 import logging
-from typing import Callable, Dict, List, Tuple
+from typing import Callable, Dict, List
 
 import wx
 
@@ -58,7 +58,7 @@ class GlobalHotkeyService:
         self._frame = frame
         self._next_id = _ID_BASE
         self._callbacks: Dict[int, Callable[[], None]] = {}
-        self._registered: List[Tuple[int, str]] = []
+        self._registered: Dict[int, str] = {}
         # Cumulative for service lifetime; not reset by clear_all() so
         # startup-failure announcements remain readable.
         self._failed: List[str] = []
@@ -72,6 +72,8 @@ class GlobalHotkeyService:
         vk: int,
         callback: Callable[[], None],
         label: str = "",
+        *,
+        hotkey_id: int | None = None,
     ) -> bool:
         """Register a global hotkey.
 
@@ -87,8 +89,15 @@ class GlobalHotkeyService:
         and proceeds normally.
         """
         mods = modifiers | _MOD_NOREPEAT
-        hkid = self._next_id
-        self._next_id += 1
+        if hotkey_id is None:
+            hkid = self._next_id
+            self._next_id += 1
+        else:
+            hkid = hotkey_id
+            self._next_id = max(self._next_id, hkid + 1)
+        if hkid in self._registered:
+            self._failed.append(label or f"id={hkid}")
+            return False
         ok = self._frame.RegisterHotKey(hkid, mods, vk)
         if not ok:
             logger.warning(
@@ -100,8 +109,26 @@ class GlobalHotkeyService:
             self._failed.append(label or f"mod=0x{mods:x} vk=0x{vk:x}")
             return False
         self._callbacks[hkid] = callback
-        self._registered.append((hkid, label))
+        self._registered[hkid] = label
         logger.info("Registered global hotkey: %s", label or f"id={hkid}")
+        return True
+
+    def unregister(self, hotkey_id: int) -> bool:
+        """Unregister one application hotkey id, preserving it on failure."""
+        if hotkey_id not in self._registered:
+            return True
+        label = self._registered[hotkey_id]
+        try:
+            ok = self._frame.UnregisterHotKey(hotkey_id)
+        except Exception:
+            logger.exception("UnregisterHotKey failed for id=%d", hotkey_id)
+            ok = False
+        if not ok:
+            logger.warning("UnregisterHotKey refused for %s", label or hotkey_id)
+            self._failed.append(label or f"id={hotkey_id}")
+            return False
+        self._registered.pop(hotkey_id, None)
+        self._callbacks.pop(hotkey_id, None)
         return True
 
     def clear_all(self) -> None:
@@ -113,13 +140,8 @@ class GlobalHotkeyService:
         Does NOT clear `_failed` — failure labels are cumulative for the
         service lifetime so callers can read them at any point.
         """
-        for hkid, _label in self._registered:
-            try:
-                self._frame.UnregisterHotKey(hkid)
-            except Exception:
-                logger.exception("UnregisterHotKey failed for id=%d", hkid)
-        self._registered.clear()
-        self._callbacks.clear()
+        for hkid in tuple(self._registered):
+            self.unregister(hkid)
 
     @property
     def failed(self) -> List[str]:

@@ -1,261 +1,124 @@
 """Main application window and wx.App setup.
 
-Provides NavigationController (panel-swap navigation replacing wx.Notebook),
-MainWindow (top-level frame with clipboard auto-detection), and
-StoneReaderApp (entry point that wires all presenters and panels).
+Provides the frame-level declarative Surface shell and the application entry
+point that wires long-lived services into it.
 """
 
 from __future__ import annotations
 
+import binascii
 import logging
 import sqlite3
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import wx
+from hearthstone.deckstrings import parse_deckstring
 
 from stonereader.db import get_connection, init_db
-from stonereader.input_layer import InputLayer
+from stonereader.models.game_state import GameState
+from stonereader.services._audio_player import AudioPlayer
 from stonereader.speech_service import SpeechService
+from stonereader.surfaces._deck_data import CurrentDeck, DeckData
+from stonereader.surfaces.cards import build_cards
+from stonereader.surfaces.deck_detail import build_deck_detail
+from stonereader.surfaces.decks import build_decks
+from stonereader.surfaces.help import HelpOrigin, build_help, open_help
+from stonereader.surfaces.help_all import build_help_all
+from stonereader.surfaces.help_reference import (
+    CommandReferenceHolder,
+    build_help_reference,
+)
+from stonereader.surfaces.help_universal import build_help_universal
+from stonereader.surfaces.home import build_home
+from stonereader.surfaces.import_deck import ImportDeckField, build_import_deck
+from stonereader.surfaces.import_replays import build_import_replays
+from stonereader.surfaces.live_game import CurrentGame, build_live_game
+from stonereader.surfaces.global_hotkeys import build_global_hotkeys
+from stonereader.surfaces.picker import PickerHolder, build_picker
+from stonereader.surfaces.replays import build_replays
+from stonereader.surfaces.replay_viewer import CurrentReplay, build_replay_viewer
+from stonereader.surfaces.settings import build_settings
+from stonereader.surfaces.sounds_menu import SoundsMenuHolder, build_sounds_menu
+from stonereader.surfaces.statistics import build_statistics
+from stonereader.ui import (
+    ActiveSurface,
+    Announcer,
+    Chord,
+    Command,
+    HorizontalListEngine,
+    InputSink,
+    NavigationController,
+    VerticalMenuEngine,
+)
+from stonereader.views.surface_panel import SurfacePanel
 
-
-class NavigationController:
-    """Manages panel visibility and navigation stack.
-
-    Replaces wx.Notebook with a panel-swap pattern per D-01. Only one
-    panel is visible at a time. Panels are registered by name and shown
-    via show_panel(). go_back() pops the stack and returns to the
-    previous panel.
-    """
-
-    def __init__(
-        self,
-        frame: wx.Frame,
-        sizer: wx.BoxSizer,
-        input_layer: InputLayer,
-    ) -> None:
-        self._frame = frame
-        self._sizer = sizer
-        self._input_layer = input_layer
-        self._panels: dict[str, wx.Panel] = {}
-        self._presenters: dict[str, object] = {}
-        self._focus_targets: dict[str, wx.Window] = {}
-        self._stack: list[str] = []
-        # Transient panels (e.g. Import Deck) are shown on demand but never
-        # pushed onto _stack so go_back skips them on the way home (D-02).
-        self._transient_panels: set[str] = set()
-        # Name of the panel currently visible (transient or stacked); the
-        # source of truth for current_panel_name. _stack[-1] only reflects
-        # the most recent non-transient panel.
-        self._current_visible: str | None = None
-
-    def register_panel(
-        self,
-        name: str,
-        panel: wx.Panel,
-        presenter: object,
-        focus_target: wx.Window,
-        *,
-        transient: bool = False,
-    ) -> None:
-        """Register a panel for navigation. Initially hidden.
-
-        A *transient* panel is shown on demand (e.g. Import Deck) but is not
-        pushed onto the navigation history -- go_back skips it on the way home,
-        so users never land on it via back-navigation. This matches the mental
-        model of a one-shot operation rather than a peer destination (D-02).
-        """
-        self._panels[name] = panel
-        self._presenters[name] = presenter
-        self._focus_targets[name] = focus_target
-        self._sizer.Add(panel, 1, wx.EXPAND)
-        panel.Hide()
-        if transient:
-            self._transient_panels.add(name)
-
-    def show_panel(self, name: str) -> None:
-        """Show a panel by name.
-
-        For non-transient panels: pushes onto the navigation stack so go_back
-        can return here. For transient panels (e.g. Import Deck): does NOT
-        push onto the stack so go_back skips this panel on the way home.
-        """
-        # Hide whatever is currently visible (transient or stacked)
-        if self._current_visible is not None:
-            self._panels[self._current_visible].Hide()
-
-        # Show the new panel
-        self._panels[name].Show()
-        self._current_visible = name
-
-        # Update navigation history. Transient panels are NEVER pushed.
-        if name not in self._transient_panels:
-            self._stack.append(name)
-
-        self._sizer.Layout()
-
-        # Activate key map. Add escape/back if there is anywhere to go back
-        # to: a non-transient parent exists in _stack OR this panel is
-        # transient (transient panels always need an escape route, even from
-        # Home, so the user can dismiss them without committing to the op).
-        presenter = self._presenters[name]
-        get_map = getattr(presenter, "get_key_map", None)
-        key_map = dict(get_map()) if get_map else {}
-        if name in self._transient_panels or len(self._stack) > 1:
-            key_map["escape"] = self.go_back
-            key_map["back"] = self.go_back
-        self._input_layer.activate_view(name, key_map)
-        wx.CallAfter(self._focus_targets[name].SetFocus)
-
-    def go_back(self) -> None:
-        """Pop the current panel and return to the previous one (D-02).
-
-        If the currently visible panel is transient: hide it and re-show the
-        top of _stack (the most recent non-transient panel). Transients never
-        appear in _stack, so the user is taken back to the panel they were on
-        before opening the transient -- bypassing it on subsequent
-        back-navigation.
-
-        If the currently visible panel is non-transient: pop _stack and
-        re-show the new top, exactly as before.
-
-        No-op if there is nowhere to go back to (only Home, no transient).
-        """
-        if self._current_visible is None:
-            return
-
-        if self._current_visible in self._transient_panels:
-            # Hide transient and return to the top of _stack (last
-            # non-transient panel).
-            self._panels[self._current_visible].Hide()
-            if not self._stack:
-                # No non-transient ancestry; nothing to restore. Defensive --
-                # should not occur because OnInit always shows Home before
-                # any transient.
-                self._current_visible = None
-                return
-            target = self._stack[-1]
-        else:
-            # Non-transient: pop ourselves off _stack, restore the new top.
-            if len(self._stack) <= 1:
-                return  # Already at home (only one non-transient on stack)
-            self._panels[self._current_visible].Hide()
-            self._stack.pop()
-            target = self._stack[-1]
-
-        self._panels[target].Show()
-        self._current_visible = target
-        self._sizer.Layout()
-
-        presenter = self._presenters[target]
-        get_map = getattr(presenter, "get_key_map", None)
-        key_map = dict(get_map()) if get_map else {}
-        if target in self._transient_panels or len(self._stack) > 1:
-            key_map["escape"] = self.go_back
-            key_map["back"] = self.go_back
-        self._input_layer.activate_view(target, key_map)
-        wx.CallAfter(self._focus_targets[target].SetFocus)
-
-    def replace_panel(
-        self,
-        name: str,
-        panel: wx.Panel,
-        presenter: object,
-        focus_target: wx.Window,
-        *,
-        transient: bool = False,
-    ) -> None:
-        """Replace an existing panel, destroying the old one.
-
-        If *name* is not yet registered, behaves like register_panel().
-        Cleans up the old panel's sizer entry, removes stale stack entries,
-        and updates the transient registry.
-        """
-        if name in self._panels:
-            old_panel = self._panels[name]
-            self._sizer.Detach(old_panel)
-            old_panel.Destroy()
-            self._stack = [n for n in self._stack if n != name]
-            del self._panels[name]
-            del self._presenters[name]
-            del self._focus_targets[name]
-            self._transient_panels.discard(name)
-            if self._current_visible == name:
-                self._current_visible = None
-        self.register_panel(name, panel, presenter, focus_target, transient=transient)
-
-    def get_presenter(self, name: str) -> object | None:
-        """Return the presenter for a named panel, or None."""
-        return self._presenters.get(name)
-
-    @property
-    def current_panel_name(self) -> str | None:
-        """Return the name of the currently visible panel (transient or stacked)."""
-        return self._current_visible
-
-    def restore_focus(self) -> None:
-        """Restore keyboard focus to the currently visible panel's focus target.
-
-        Used by modal callsites (e.g. clipboard auto-import dialog) to ensure
-        focus does not get lost in the destroyed dialog's parent chain after
-        the user dismisses it. No-op if no panel is currently visible.
-
-        Uses wx.CallAfter to schedule SetFocus after the current event loop
-        iteration completes (Pitfall 4 -- see RESEARCH.md).
-        """
-        if self._current_visible is None:
-            return
-        target = self._focus_targets.get(self._current_visible)
-        if target is None:
-            return
-        wx.CallAfter(target.SetFocus)
+if TYPE_CHECKING:
+    from stonereader.services import GameTracker
+    from stonereader.services._global_hotkey import GlobalHotkeyService
 
 
 class MainWindow(wx.Frame):
-    """Top-level window with panel-swap navigation."""
+    """Top-level frame hosting the single input sink and active Surface."""
 
-    def __init__(self) -> None:
-        super().__init__(None, title="StoneReader", size=wx.Size(800, 600))
+    def __init__(self, audio_player: AudioPlayer) -> None:
+        super().__init__(
+            None,
+            title="Home — StoneReader",
+            size=wx.Size(800, 600),
+        )
 
         self._speech = SpeechService()
-        self._input_layer = InputLayer(self)
+        self._announcer = Announcer(self._speech)
 
-        # Database
+        self._sizer = wx.BoxSizer(wx.VERTICAL)
+        self.SetSizer(self._sizer)
+        self._panels: dict[str, SurfacePanel] = {}
+        self._current_panel: SurfacePanel | None = None
+        self._current_surface: ActiveSurface | None = None
+        self._help_origin = HelpOrigin()
+        self._tracker: GameTracker | None = None
+        self._hotkeys: GlobalHotkeyService | None = None
+
+        self._audio_player = audio_player
+        self._sink = InputSink(self, self._announcer, stop_audio=audio_player.stop)
+        self._nav = NavigationController(
+            set_title=self.SetTitle,
+            announcer=self._announcer,
+            stop_audio=audio_player.stop,
+            activate=self._activate_surface,
+        )
+        quit_command = Command(
+            "app.quit",
+            "Ctrl+Q or Alt+F4: quit StoneReader",
+            self._quit,
+        )
+        self._universal_bindings = [
+            (
+                Chord("f1"),
+                Command(
+                    "app.help",
+                    "F1: help for this screen",
+                    self._open_help,
+                ),
+            ),
+            (
+                Chord("q", ctrl=True),
+                quit_command,
+            ),
+            (Chord("f4", alt=True), quit_command),
+        ]
+
         self._db_conn = get_connection()
         init_db(self._db_conn)
 
-        # Status bar -- readable via NVDA+End / JAWS Insert+B
-        self.CreateStatusBar()
-        self.SetStatusText("StoneReader ready")
-
-        # Main sizer -- NavigationController manages children
-        self._sizer = wx.BoxSizer(wx.VERTICAL)
-        self.SetSizer(self._sizer)
-
-        # Navigation controller replaces wx.Notebook (D-01)
-        self._nav = NavigationController(self, self._sizer, self._input_layer)
-
-        # Clipboard auto-detection state (D-06, Pitfall 5)
-        self._last_clipboard_deckstring: str | None = None
-        self._suppress_clipboard_check = True  # Suppress during initial launch
-
-        # Accelerator table for standard shortcuts
-        self._find_id = wx.NewIdRef()
-        accel_entries = [
-            wx.AcceleratorEntry(wx.ACCEL_CTRL, ord("Q"), wx.ID_EXIT),
-            wx.AcceleratorEntry(wx.ACCEL_CTRL, ord("F"), self._find_id),
-        ]
-        self.SetAcceleratorTable(wx.AcceleratorTable(accel_entries))
-        self.Bind(wx.EVT_MENU, self._on_quit, id=wx.ID_EXIT)
-        self.Bind(wx.EVT_MENU, self._on_find, id=self._find_id)
-        self.Bind(wx.EVT_CLOSE, self._on_close)
+        self._clipboard_offer_accept: Callable[[str], None] | None = None
         self.Bind(wx.EVT_ACTIVATE, self._on_activate)
+        self.Bind(wx.EVT_CLOSE, self._on_close)
 
     @property
-    def speech(self) -> SpeechService:
-        return self._speech
-
-    @property
-    def input_layer(self) -> InputLayer:
-        return self._input_layer
+    def announcer(self) -> Announcer:
+        return self._announcer
 
     @property
     def db_conn(self) -> sqlite3.Connection:
@@ -265,110 +128,85 @@ class MainWindow(wx.Frame):
     def nav(self) -> NavigationController:
         return self._nav
 
-    def _on_find(self, event: wx.CommandEvent) -> None:
-        """Handle Ctrl+F -- delegate to current panel's presenter if it supports search."""
-        current = self._nav.current_panel_name
-        if current is not None:
-            presenter = self._nav.get_presenter(current)
-            open_search = getattr(presenter, "open_search", None)
-            if open_search is not None:
-                open_search()
+    @property
+    def universal_bindings(self) -> list[tuple[Chord, Command]]:
+        return self._universal_bindings
+
+    def _activate_surface(self, surface: ActiveSurface) -> None:
+        self._current_surface = surface
+        self._sink.set_active(surface.registry)
+        panel = self._panels.get(surface.spec.name)
+        if panel is None:
+            engine = surface.engine
+            if not isinstance(engine, (VerticalMenuEngine, HorizontalListEngine)):
+                raise TypeError("SurfacePanel requires a supported Surface engine")
+            panel = SurfacePanel(self, engine)
+            panel.Hide()
+            self._panels[surface.spec.name] = panel
+            self._sizer.Add(panel, 1, wx.EXPAND)
+
+        if self._current_panel is not None and self._current_panel is not panel:
+            self._current_panel.Hide()
+        panel.Show()
+        self._current_panel = panel
+        self._sizer.Layout()
+
+    def _open_help(self) -> None:
+        if self._current_surface is None:
+            raise RuntimeError("Cannot open help before a Surface is active")
+        open_help(
+            self._announcer,
+            self._nav,
+            self._help_origin,
+            self._current_surface,
+        )
+
+    def configure_clipboard_offer(
+        self,
+        on_accept: Callable[[str], None],
+    ) -> None:
+        """Install the clipboard-deckstring Offer route."""
+        self._clipboard_offer_accept = on_accept
 
     def _on_activate(self, event: wx.ActivateEvent) -> None:
-        """Check clipboard for deckstring when app gains focus (D-06)."""
+        accept = self._clipboard_offer_accept
+        if event.GetActive() and accept is not None:
+            text = _read_clipboard_text()
+            if text is not None and _is_deckstring(text):
+                armed = self._sink.arm_offer(
+                    text,
+                    lambda text=text: accept(text),
+                )
+                if armed:
+                    self._announcer.clipboard_deck_offer()
         event.Skip()
-        if not event.GetActive():
-            return
-        if self._suppress_clipboard_check:
-            self._suppress_clipboard_check = False
-            return
-        self._check_clipboard_for_deckstring()
 
-    def _check_clipboard_for_deckstring(self) -> None:
-        """Check clipboard for valid deckstring and offer import (D-06)."""
-        if not wx.TheClipboard.Open():
-            return
-        try:
-            data = wx.TextDataObject()
-            if not wx.TheClipboard.GetData(data):
-                return
-            text = data.GetText().strip()
-            if not text:
-                return
-            # Skip if same as last checked (Pitfall 5)
-            if text == self._last_clipboard_deckstring:
-                return
-            self._last_clipboard_deckstring = text
-            # Try parsing as deckstring
-            try:
-                from hearthstone.deckstrings import parse_deckstring
-
-                parse_deckstring(text)
-            except (ValueError, TypeError):
-                return
-        finally:
-            wx.TheClipboard.Close()
-
-        # Valid deckstring found -- offer import
-        dialog = wx.MessageDialog(
-            self,
-            "A deck code was found on your clipboard. Import it?",
-            "Deck Found on Clipboard",
-            wx.YES_NO | wx.ICON_QUESTION,
-        )
-        result = dialog.ShowModal()
-        dialog.Destroy()
-        if result == wx.ID_YES:
-            self._nav.show_panel("Import Deck")
-            # Pre-fill deckstring and focus name field
-            import_panel = self._nav._panels.get("Import Deck")
-            if import_panel is not None:
-                from stonereader.views.import_deck import ImportDeckPanel
-
-                if isinstance(import_panel, ImportDeckPanel):
-                    import_panel.pre_fill_deckstring(text)
-                    # Override the default focus target (deckstring_ctrl): after
-                    # pre-filling, the next user action is to enter a name.
-                    wx.CallAfter(import_panel.name_ctrl.SetFocus)
-            # Don't clear clipboard -- _last_clipboard_deckstring prevents re-prompt
-        else:
-            # No path: explicitly restore focus to the active panel so screen
-            # readers don't silently lose their place after dialog dismissal
-            # (UAT Gap 3, D-06).
-            self._nav.restore_focus()
-
-    def _on_quit(self, event: wx.CommandEvent) -> None:
+    def _quit(self) -> None:
         self.Close()
 
     def _on_close(self, event: wx.CloseEvent) -> None:
         # Cleanup order (Runtime State Inventory, plan 03-06):
-        #   hotkeys.clear_all() -> live_presenter.cleanup()
-        #   -> tracker.stop() -> db_conn.close() -> Destroy()
-        # Each step is wrapped in try/except so a raise does NOT prevent later
-        # steps from running (per 03-REVIEWS.md MEDIUM 03-06 #5).
+        #   hotkeys.clear_all() -> tracker.stop() -> db_conn.close() -> Destroy()
+        # Every step is isolated so a failure cannot prevent later cleanup.
         log = logging.getLogger(__name__)
-        hotkeys = getattr(self, "_hotkeys", None)
+        hotkeys = self._hotkeys
         if hotkeys is not None:
             try:
                 hotkeys.clear_all()
             except Exception:
                 log.exception("hotkeys.clear_all() failed; continuing cleanup")
-        live_presenter = getattr(self, "_live_presenter", None)
-        if live_presenter is not None:
-            try:
-                live_presenter.cleanup()
-            except Exception:
-                log.exception("live_presenter.cleanup() failed; continuing cleanup")
-        tracker = getattr(self, "_tracker", None)
+        tracker = self._tracker
         if tracker is not None:
             try:
                 tracker.stop()
             except Exception:
                 log.exception("tracker.stop() failed; continuing cleanup")
-        try:
-            self._db_conn.close()
-        except Exception:
-            log.exception("db_conn.close() failed; continuing cleanup")
+        db_conn = getattr(self, "_db_conn", None)
+        if db_conn is not None:
+            try:
+                db_conn.close()
+            except Exception:
+                log.exception("db_conn.close() failed; continuing cleanup")
         self.Destroy()
 
 
@@ -376,254 +214,346 @@ class StoneReaderApp(wx.App):
     """Application entry point."""
 
     def OnInit(self) -> bool:  # noqa: N802 -- wx override
-        self._frame = MainWindow()
+        from stonereader.services._audio_index import AudioIndex
+        from stonereader.services._audio_player import WindowsMemoryBackend
+        from stonereader.services._settings import SettingsStore
+
+        settings = SettingsStore()
+        self._settings = settings
+        audio_player = AudioPlayer(
+            WindowsMemoryBackend(),
+            lambda: settings.game_audio_volume,
+        )
+        audio_index = AudioIndex(settings)
+        self._audio_index = audio_index
+        self._audio_player = audio_player
+        audio_index.start()
+
+        self._frame = MainWindow(audio_player)
         nav = self._frame.nav
-        speech = self._frame.speech
-        input_layer = self._frame.input_layer
+        announcer = self._frame.announcer
         db_conn = self._frame.db_conn
 
-        # Load card database
+        # Load card database even while its Surface is staged as a placeholder.
         from stonereader.models.card import CardDatabase
 
         card_db = CardDatabase.load()
 
+        current_deck = CurrentDeck()
+        current_game = CurrentGame()
+        current_replay = CurrentReplay()
+        deck_data = DeckData(db_conn, card_db)
+        import_field = ImportDeckField()
+        picker = PickerHolder()
+        help_reference = CommandReferenceHolder()
+        sounds = SoundsMenuHolder()
+
         # --- Game Tracker (Phase 2) ---
-        # NOTE: Logging is bootstrapped exactly once in __main__.py before the
-        # wx.App is constructed (Pitfall 10). Do NOT bootstrap it here — adding
-        # a second bootstrap call would attach duplicate handlers to the root
-        # logger. ensure_log_config() below is the per-launch log.config
-        # bootstrap (D-11) and is silent unless it actually changed the file.
-        from stonereader.services import GameTracker
+        # Logging is bootstrapped exactly once in __main__.py. This per-launch
+        # log.config bootstrap remains separate and silent unless it changed.
+        from stonereader.services import GameTracker, Narrator
         from stonereader.services._log_config import ensure_log_config
 
         try:
             log_config_changed = ensure_log_config()
             if log_config_changed:
-                speech.speak("Hearthstone logging enabled.")
+                announcer.game_logging_enabled()
         except Exception:
-            # Non-Windows or permissions failure — log and continue (D-04 spirit).
             logging.getLogger(__name__).exception(
                 "ensure_log_config failed; continuing"
             )
 
-        self._tracker = GameTracker(card_db=card_db)
-        # Stash the tracker on the frame so MainWindow._on_close can stop it.
-        self._frame._tracker = self._tracker  # type: ignore[attr-defined]
+        self._tracker = GameTracker(
+            card_db=card_db,
+            log_path_provider=lambda: settings.hs_log_path,
+        )
+        self._frame._tracker = self._tracker
+        self._current_game = current_game
+        self._narrator = Narrator(
+            announcer,
+            lambda: settings.narration,
+            card_db,
+        )
+        self._tracker.subscribe(current_game.on_state)
+        self._tracker.subscribe(self._narrator.on_state)
+        self._tracker.add_raw_subscriber(_ignore_raw_lines, current_game.reset)
 
         # --- Replay persistence (PRD #7) ---
-        # The store persists completed games as local .hsreplay files + SQLite
-        # metadata; the recorder buffers the live game's Power.log excerpt and
-        # auto-saves it on normal completion. Wire the recorder to the tracker:
-        # on_state for (prev, curr) lifecycle, add_raw_subscriber for the raw
-        # Power.log lines it converts to HSReplay XML.
         from stonereader.services._build_info import current_build
+        from stonereader.services._deck_detect import DeckDetector
         from stonereader.services._replay_recorder import ReplayRecorder
         from stonereader.services._replay_store import ReplayStore, default_replay_dir
 
-        replay_store = ReplayStore(db_conn, default_replay_dir())
-        self._recorder = ReplayRecorder(replay_store, build_provider=current_build)
+        replay_store = ReplayStore(
+            db_conn,
+            default_replay_dir(),
+            card_db,
+            retention_provider=lambda: settings.replay_retention,
+        )
+        self._deck_detector = DeckDetector(self._tracker, db_conn, card_db)
+        self._recorder = ReplayRecorder(
+            replay_store,
+            build_provider=current_build,
+            deck_provider=self._deck_detector.detected,
+            limit_provider=lambda: settings.replay_retention,
+        )
         self._tracker.subscribe(self._recorder.on_state)
         self._tracker.add_raw_subscriber(
-            self._recorder.on_lines, self._recorder.on_reset
+            self._recorder.on_lines,
+            self._recorder.on_reset,
         )
 
-        # --- Home Screen ---
-        from stonereader.presenters.home import HomePresenter
-        from stonereader.views.home import HomePanel
+        targets: dict[str, Callable[[], None]] = {
+            name: lambda name=name: nav.jump(name)
+            for name in ("Live Game", "Decks", "Cards", "Replays", "Settings")
+        }
 
-        home_presenter = HomePresenter(speech)
-        home_panel = HomePanel(self._frame, home_presenter)
-        nav.register_panel("Home", home_panel, home_presenter, home_panel.list_box)
+        from stonereader.services._hotkeys import HotkeyMap
 
-        # --- Card Library (category menu) ---
-        from stonereader.presenters.card_library import CardLibraryPresenter
-        from stonereader.views.card_library import CardLibraryPanel
+        hotkey_map: HotkeyMap
 
-        library_presenter = CardLibraryPresenter(speech)
-        library_panel = CardLibraryPanel(self._frame, library_presenter)
-        nav.register_panel(
-            "Card Library", library_panel, library_presenter, library_panel.list_box
-        )
-
-        # --- Deck Manager ---
-        from stonereader.presenters.deck_manager import DeckManagerPresenter
-        from stonereader.views.deck_manager import DeckManagerPanel
-
-        deck_presenter = DeckManagerPresenter(speech, db_conn, card_db)
-        deck_panel = DeckManagerPanel(self._frame, deck_presenter)
-        nav.register_panel("Deck Manager", deck_panel, deck_presenter, deck_panel)
-
-        # --- Import Deck ---
-        from stonereader.presenters.import_deck import ImportDeckPresenter
-        from stonereader.views.import_deck import ImportDeckPanel
-
-        import_presenter = ImportDeckPresenter(speech, db_conn, card_db)
-        import_panel = ImportDeckPanel(
-            self._frame,
-            import_presenter,
-            input_layer,
-            on_back=nav.go_back,
-        )
-        nav.register_panel(
-            "Import Deck",
-            import_panel,
-            import_presenter,
-            import_panel.deckstring_ctrl,
-            transient=True,
-        )
-
-        # --- Live Game ---
-        from stonereader.presenters.live_game import LiveGamePresenter
-        from stonereader.views.live_game import LiveGamePanel
-
-        live_presenter = LiveGamePresenter(speech, db_conn, self._tracker, card_db)
-        live_panel = LiveGamePanel(self._frame, live_presenter)
-        nav.register_panel("Live Game", live_panel, live_presenter, live_panel)
-        # Stash the presenter on the frame so MainWindow._on_close can clean it
-        # up before tracker.stop() (per Runtime State Inventory).
-        self._frame._live_presenter = live_presenter  # type: ignore[attr-defined]
-
-        # --- Replays browser (PRD #7) ---
-        from stonereader.presenters.replays import ReplaysPresenter
-        from stonereader.views.replays import ReplaysPanel
-
-        replays_presenter = ReplaysPresenter(speech, replay_store)
-        replays_panel = ReplaysPanel(self._frame, replays_presenter)
-        nav.register_panel("Replays", replays_panel, replays_presenter, replays_panel)
-
-        # Opening a replay loads it into a fresh Replay Viewer screen. The viewer
-        # is read-only (no tracker/DB writes), built per-replay like Card Browser.
-        def _on_open_replay(meta: object) -> None:
-            from pathlib import Path
-
-            from stonereader.presenters.replay_viewer import ReplayViewerPresenter
-            from stonereader.services._replay_loader import (
-                ReplayLoadError,
-                load_replay,
+        def home_factory() -> ActiveSurface:
+            return build_home(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                targets,
             )
-            from stonereader.views.replay_viewer import ReplayViewerPanel
 
-            try:
-                replay_state = load_replay(Path(meta.file_path), card_db=card_db)  # type: ignore[attr-defined]
-            except ReplayLoadError:
-                speech.speak("Could not open replay; the file may be invalid.")
-                return
-            viewer_presenter = ReplayViewerPresenter(
-                speech, replay_state, card_db=card_db
+        def decks_factory() -> ActiveSurface:
+            return build_decks(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                db_conn,
+                deck_data,
+                current_deck,
+                self._frame._sink,
+                _copy_to_clipboard,
             )
-            viewer_panel = ReplayViewerPanel(self._frame, viewer_presenter)
-            nav.replace_panel(
-                "Replay Viewer", viewer_panel, viewer_presenter, viewer_panel
+
+        def cards_factory() -> ActiveSurface:
+            return build_cards(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                card_db,
+                self._frame._sink,
+                audio_index=audio_index,
+                sounds=sounds,
             )
-            nav.show_panel("Replay Viewer")
 
-        replays_presenter.set_on_open(_on_open_replay)
-
-        # --- Wire callbacks ---
-
-        # Home screen selection -> show panel. Live Game also jumps to the
-        # remaining-deck zone so the entry speech matches the global hotkey
-        # browse-open path (per 03-PATTERNS.md app.py composition root).
-        def _on_home_select(name: str) -> None:
-            nav.show_panel(name)
-            if name == "Live Game":
-                live_presenter.jump_to_zone("remaining_deck")
-            elif name == "Replays":
-                # Refresh on entry to pick up replays saved since construction.
-                replays_presenter.refresh()
-                replays_presenter.announce_entry()
-
-        home_presenter.set_on_select(_on_home_select)
-
-        # Card Library category selection -> create and show card browser
-        def _on_category_select(category_name: str) -> None:
-            from stonereader.presenters.card_browser import CardBrowserPresenter
-            from stonereader.presenters.card_library import CATEGORY_TO_FILTER
-            from stonereader.views.card_browser import CardBrowserPanel
-
-            card_class_filter = CATEGORY_TO_FILTER.get(category_name)
-
-            browser_presenter = CardBrowserPresenter(
-                speech, card_db, category_name, card_class_filter
+        def live_game_factory() -> ActiveSurface:
+            return build_live_game(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                current_game,
             )
-            browser_panel = CardBrowserPanel(self._frame, browser_presenter)
-            nav.replace_panel(
-                "Card Browser", browser_panel, browser_presenter, browser_panel
+
+        def deck_detail_factory() -> ActiveSurface:
+            return build_deck_detail(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                deck_data,
+                current_deck,
+                audio_index=audio_index,
+                sounds=sounds,
             )
-            nav.show_panel("Card Browser")
-            browser_presenter.announce_entry()
 
-        library_presenter.set_on_select(_on_category_select)
-
-        # Deck Manager -> open deck contents
-        def _on_open_deck(deck: object) -> None:
-            from stonereader.presenters.deck_contents import DeckContentsPresenter
-            from stonereader.views.deck_contents import DeckContentsPanel
-
-            contents_presenter = DeckContentsPresenter(speech, deck)  # type: ignore[arg-type]
-            contents_panel = DeckContentsPanel(self._frame, contents_presenter)
-            nav.replace_panel(
-                "Deck Contents", contents_panel, contents_presenter, contents_panel
+        def import_deck_factory() -> ActiveSurface:
+            return build_import_deck(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                db_conn,
+                card_db,
+                self._frame._sink,
+                import_field,
             )
-            nav.show_panel("Deck Contents")
-            contents_presenter.announce_deck_header()
 
-        deck_presenter.set_on_open_deck(_on_open_deck)
+        def replays_factory() -> ActiveSurface:
+            return build_replays(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                replay_store,
+                card_db,
+                current_replay,
+            )
 
-        # Import success -> navigate to Deck Manager and reload
-        def _on_import_success() -> None:
-            deck_presenter.load_decks()
-            nav.show_panel("Deck Manager")
-            deck_presenter.announce_entry()
+        def replay_viewer_factory() -> ActiveSurface:
+            return build_replay_viewer(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                current_replay,
+                audio_index=audio_index,
+                player=audio_player,
+                replay_autoplay=lambda: settings.replay_autoplay,
+                sounds=sounds,
+            )
 
-        import_presenter.set_on_import_success(_on_import_success)
+        def import_replays_factory() -> ActiveSurface:
+            return build_import_replays(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                replay_store,
+                _choose_replay_files,
+            )
 
-        # Show home screen on launch
-        nav.show_panel("Home")
+        def statistics_factory() -> ActiveSurface:
+            return build_statistics(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                db_conn,
+            )
+
+        def settings_factory() -> ActiveSurface:
+            return build_settings(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                settings,
+                self._frame._sink,
+                picker,
+                hotkey_map,
+                audio_index=audio_index,
+            )
+
+        def sounds_menu_factory() -> ActiveSurface:
+            return build_sounds_menu(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                sounds,
+                audio_index,
+                audio_player,
+            )
+
+        def picker_factory() -> ActiveSurface:
+            return build_picker(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                picker,
+            )
+
+        def global_hotkeys_factory() -> ActiveSurface:
+            return build_global_hotkeys(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                self._frame._sink,
+                hotkey_map,
+            )
+
+        def help_factory() -> ActiveSurface:
+            return build_help(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                self._frame._help_origin,
+                self._frame._sink,
+            )
+
+        def help_universal_factory() -> ActiveSurface:
+            return build_help_universal(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+            )
+
+        def help_all_factory() -> ActiveSurface:
+            return build_help_all(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                help_reference,
+            )
+
+        def help_reference_factory() -> ActiveSurface:
+            return build_help_reference(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                help_reference,
+            )
+
+        nav.register("Home", home_factory)
+        nav.register("Live Game", live_game_factory)
+        nav.register("Cards", cards_factory)
+        nav.register("Decks", decks_factory)
+        nav.register("Deck detail", deck_detail_factory)
+        nav.register("Import Deck", import_deck_factory)
+        nav.register("Replays", replays_factory)
+        nav.register("Replay Viewer", replay_viewer_factory)
+        nav.register("Import Replays", import_replays_factory)
+        nav.register("Statistics", statistics_factory)
+        nav.register("Settings", settings_factory)
+        nav.register("Sounds menu", sounds_menu_factory)
+        nav.register("Picker", picker_factory)
+        nav.register("Global hotkeys", global_hotkeys_factory)
+        nav.register("Help menu", help_factory)
+        nav.register("Universal keys", help_universal_factory)
+        nav.register("All commands", help_all_factory)
+        nav.register("Command reference", help_reference_factory)
+
+        def accept_clipboard_deck(text: str) -> None:
+            import_field.set(text)
+            nav.jump_path(["Home", "Decks", "Import Deck"])
+
+        self._frame.configure_clipboard_offer(accept_clipboard_deck)
+        nav.jump("Home")
 
         self._frame.Show()
 
-        # --- Global hotkeys (LIVE-09) ---
-        # Register AFTER Show() so the frame's window handle is valid
-        # for Win32 RegisterHotKey (Pitfall 9).
+        # Register global Surface hotkeys after Show() so Win32 has a handle.
         from stonereader.services._global_hotkey import GlobalHotkeyService
 
         self._hotkeys = GlobalHotkeyService(self._frame)
-        # Stash on the frame so MainWindow._on_close can clear them.
-        self._frame._hotkeys = self._hotkeys  # type: ignore[attr-defined]
-
-        mods = wx.MOD_CONTROL | wx.MOD_SHIFT
-
-        def _open_remaining_deck() -> None:
-            nav.show_panel("Live Game")
-            live_presenter.jump_to_zone("remaining_deck")
-
-        def _open_opponent_hand() -> None:
-            nav.show_panel("Live Game")
-            live_presenter.jump_to_zone("opponent_hand")
-
-        def _speak_deck_counts() -> None:
-            live_presenter.announce_deck_counts()
-
-        def _speak_opponent_hand_count() -> None:
-            # Per 03-REVIEWS.md HIGH #3: delegate to public presenter method
-            # rather than reading the presenter's private state cache directly.
-            live_presenter.announce_opponent_hand_count()
-
-        self._hotkeys.register(mods, ord("R"), _open_remaining_deck, "Remaining Deck")
-        self._hotkeys.register(mods, ord("O"), _open_opponent_hand, "Opponent Hand")
-        self._hotkeys.register(mods, ord("D"), _speak_deck_counts, "Deck Counts")
-        self._hotkeys.register(
-            mods, ord("H"), _speak_opponent_hand_count, "Opponent Hand Count"
-        )  # noqa: E501
-
+        self._frame._hotkeys = self._hotkeys
+        hotkey_map = HotkeyMap(
+            self._hotkeys,
+            {
+                "jump_live_game": lambda: nav.jump(
+                    "Live Game",
+                    then=lambda surface: _switch_live_zone(
+                        surface, "remaining_deck"
+                    ),
+                ),
+                "jump_live_game_opponent_hand": lambda: nav.jump(
+                    "Live Game",
+                    then=lambda surface: _switch_live_zone(
+                        surface, "opponent_hand"
+                    ),
+                ),
+                "jump_cards": lambda: nav.jump("Cards"),
+                "jump_replays": lambda: nav.jump("Replays"),
+                "speak_deck_counts": lambda: _query_current_game(
+                    announcer,
+                    current_game,
+                    "Your deck",
+                    lambda state: f"{state.player_deck_count} cards",
+                ),
+                "speak_opponent_hand_count": lambda: _query_current_game(
+                    announcer,
+                    current_game,
+                    "Opponent hand",
+                    lambda state: f"{len(state.opponent_hand)} cards",
+                ),
+            },
+        )
+        self._hotkey_map = hotkey_map
+        hotkey_map.apply(settings)
         if self._hotkeys.failed:
-            speech.speak(
-                "Could not register hotkeys: " + ", ".join(self._hotkeys.failed) + "."
-            )
+            announcer.hotkeys_unavailable(self._hotkeys.failed)
 
-        # Start tracker AFTER frame.Show() (Pitfall 9: Timer must not fire
-        # before the message loop is wired up to the visible frame).
+        # Start after Show() so wx.Timer cannot fire before the visible frame's
+        # message loop is ready.
         try:
             self._tracker.start(parent=self._frame)
         except Exception:
@@ -632,3 +562,76 @@ class StoneReaderApp(wx.App):
             )
 
         return True
+
+
+def _read_clipboard_text() -> str | None:
+    if not wx.TheClipboard.Open():
+        return None
+    try:
+        data = wx.TextDataObject()
+        if not wx.TheClipboard.GetData(data):
+            return None
+        # Deck codes are copied with stray whitespace often enough that the
+        # subject and the parse must both see the trimmed string.
+        return data.GetText().strip()
+    finally:
+        wx.TheClipboard.Close()
+
+
+def _copy_to_clipboard(text: str) -> None:
+    if not wx.TheClipboard.Open():
+        raise RuntimeError("Could not open the clipboard")
+    try:
+        if not wx.TheClipboard.SetData(wx.TextDataObject(text)):
+            raise RuntimeError("Could not write to the clipboard")
+        wx.TheClipboard.Flush()
+    finally:
+        wx.TheClipboard.Close()
+
+
+def _choose_replay_files() -> list[str]:
+    """Delegate replay selection to the OS-native multi-select dialog."""
+    dialog = wx.FileDialog(
+        None,
+        message="Choose replay files",
+        wildcard="Replay files (*.hsreplay;*.xml)|*.hsreplay;*.xml",
+        style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST | wx.FD_MULTIPLE,
+    )
+    try:
+        if dialog.ShowModal() != wx.ID_OK:
+            return []
+        return list(dialog.GetPaths())
+    finally:
+        dialog.Destroy()
+
+
+def _is_deckstring(text: str) -> bool:
+    try:
+        parse_deckstring(text)
+    except (binascii.Error, EOFError, TypeError, UnicodeError, ValueError):
+        return False
+    return True
+
+
+def _switch_live_zone(surface: ActiveSurface, zone_id: str) -> None:
+    engine = surface.engine
+    if not isinstance(engine, HorizontalListEngine):
+        raise TypeError("Live Game requires a horizontal-list engine")
+    engine.switch_zone(zone_id)
+
+
+def _query_current_game(
+    announcer: Announcer,
+    current_game: CurrentGame,
+    subject: str,
+    value: Callable[[GameState], str],
+) -> None:
+    state = current_game.get()
+    if state is None:
+        announcer.noop("No game in progress")
+        return
+    announcer.query(subject, value(state))
+
+
+def _ignore_raw_lines(lines: list[str]) -> None:
+    del lines

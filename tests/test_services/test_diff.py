@@ -28,6 +28,8 @@ from stonereader.services._events import (
     GameStarted,
     MinionDied,
     MulliganDone,
+    SecretPlayed,
+    SecretRevealed,
     TurnChanged,
 )
 
@@ -398,6 +400,61 @@ def test_hidden_to_revealed_card_id_emits_card_revealed() -> None:
     assert ev.entity_id == 50
     assert ev.card_id == "EX1_006"
     assert ev.controller == 2
+
+
+# ------------------------------------------------------------------ Secrets
+
+
+def test_entity_entering_secret_emits_secret_played_without_revealing_name() -> None:
+    hidden_in_hand = _entity(entity_id=60, zone="HAND", controller=2)
+    hidden_secret = _entity(entity_id=60, zone="SECRET", controller=2)
+    prev = _state(turn=3, opponent_hand=(hidden_in_hand,))
+    curr = _state(turn=3, opponent_secrets=(hidden_secret,))
+
+    events = list(diff(prev, curr))
+
+    assert events == [SecretPlayed(timestamp=0.0, turn=3, controller=2)]
+
+
+def test_known_entity_entering_secret_is_still_only_secret_played() -> None:
+    hidden_in_hand = _entity(entity_id=62, zone="HAND", controller=1)
+    known_secret = _entity(
+        entity_id=62,
+        zone="SECRET",
+        card_id="EX1_611",
+        name="Freezing Trap",
+        controller=1,
+    )
+    prev = _state(turn=3, player_hand=(hidden_in_hand,))
+    curr = _state(turn=3, player_secrets=(known_secret,))
+
+    events = list(diff(prev, curr))
+
+    assert events == [SecretPlayed(timestamp=0.0, turn=3, controller=1)]
+
+
+def test_known_secret_leaving_for_graveyard_emits_secret_revealed_once() -> None:
+    hidden_secret = _entity(entity_id=61, zone="SECRET", controller=2)
+    revealed = _entity(
+        entity_id=61,
+        zone="GRAVEYARD",
+        card_id="EX1_611",
+        name="Freezing Trap",
+        controller=2,
+    )
+    prev = _state(turn=4, opponent_secrets=(hidden_secret,))
+    curr = _state(turn=4, graveyard=(revealed,))
+
+    events = list(diff(prev, curr))
+
+    assert events == [
+        SecretRevealed(
+            timestamp=0.0,
+            turn=4,
+            name="Freezing Trap",
+            controller=2,
+        )
+    ]
 
 
 # ------------------------------------------------------------------ DamageDealt
