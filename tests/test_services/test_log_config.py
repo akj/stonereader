@@ -59,8 +59,7 @@ def test_idempotent_when_correct(tmp_path):
 
 def test_raises_services_error_on_write_failure(tmp_path):
     """ensure_log_config raises ServicesError (not bare OSError) on write failure."""
-    import stat
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import patch
 
     from stonereader.services._exceptions import ServicesError
     from stonereader.services._log_config import ensure_log_config

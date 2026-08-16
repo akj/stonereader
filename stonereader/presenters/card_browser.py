@@ -6,11 +6,25 @@ from typing import Any, Callable, Sequence
 
 from stonereader.models.card import Card, CardDatabase
 from stonereader.presenters.base import BasePresenter, ZoneNavigationMixin
-from stonereader.presenters.card_library import CATEGORY_TO_FILTER
 from stonereader.speech_service import SpeechService
 
 _RESULTS_ZONE = "results"
-_CATEGORY_ORDER = list(CATEGORY_TO_FILTER.keys())
+_CATEGORY_TO_FILTER: dict[str, str | None] = {
+    "All Cards": None,
+    "Demon Hunter": "DEMONHUNTER",
+    "Death Knight": "DEATHKNIGHT",
+    "Druid": "DRUID",
+    "Hunter": "HUNTER",
+    "Mage": "MAGE",
+    "Neutral": "NEUTRAL",
+    "Paladin": "PALADIN",
+    "Priest": "PRIEST",
+    "Rogue": "ROGUE",
+    "Shaman": "SHAMAN",
+    "Warlock": "WARLOCK",
+    "Warrior": "WARRIOR",
+}
+_CATEGORY_ORDER = list(_CATEGORY_TO_FILTER.keys())
 _PAGE_SIZE = 10
 
 
@@ -65,7 +79,9 @@ class CardBrowserPresenter(ZoneNavigationMixin, BasePresenter):
     def _build_status_string(self) -> str:
         parts = [self._category_label]
         if self._mana_filter is not None:
-            mana_label = "9+ mana" if self._mana_filter == 9 else f"{self._mana_filter} mana"
+            mana_label = (
+                "9+ mana" if self._mana_filter == 9 else f"{self._mana_filter} mana"
+            )
             parts.append(mana_label)
         count = len(self._results)
         parts.append(f"{count} card" if count == 1 else f"{count} cards")
@@ -82,7 +98,7 @@ class CardBrowserPresenter(ZoneNavigationMixin, BasePresenter):
         self._class_index = (self._class_index + direction) % len(_CATEGORY_ORDER)
         label = _CATEGORY_ORDER[self._class_index]
         self._category_label = label
-        self._class_filter = CATEGORY_TO_FILTER[label]
+        self._class_filter = _CATEGORY_TO_FILTER[label]
         self._recompute_results()
         self._emit_status()
         self._notify_view()

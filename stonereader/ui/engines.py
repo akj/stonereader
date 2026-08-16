@@ -25,6 +25,11 @@ class VerticalMenuEngine:
     def subscribe(self, on_change: Callable[[], None]) -> None:
         self._subscribers.append(on_change)
 
+    def options_snapshot(self) -> tuple[list[str], int]:
+        """Return rendered option titles and the current cursor."""
+        options = self._options()
+        return [option.title() for option in options], self._cursor
+
     def widget_type_bindings(self) -> list[tuple[Chord, Command]]:
         return [
             (
@@ -150,6 +155,19 @@ class HorizontalListEngine:
     def subscribe(self, on_change: Callable[[], None]) -> None:
         self._subscribers.append(on_change)
 
+    def items_snapshot(self) -> tuple[list[str], int, list[str]]:
+        """Return active-zone titles, cursor, and current item details."""
+        items = self._items()
+        if not items:
+            return [], 0, []
+        zone = self.current_zone()
+        cursor = self._item_cursors[self._active_zone_id]
+        return (
+            [zone.title(item) for item in items],
+            cursor,
+            list(zone.detail_lines(items[cursor])),
+        )
+
     def widget_type_bindings(self) -> list[tuple[Chord, Command]]:
         return [
             (
@@ -162,7 +180,9 @@ class HorizontalListEngine:
             ),
             (
                 Chord("up"),
-                Command("list.detail_previous", "Up: previous detail", self._previous_detail),
+                Command(
+                    "list.detail_previous", "Up: previous detail", self._previous_detail
+                ),
             ),
             (
                 Chord("down"),
@@ -338,8 +358,7 @@ class HorizontalListEngine:
     def _land_on_item(self, target: int, items: list[Any]) -> None:
         zone_id = self._active_zone_id
         changed = (
-            target != self._item_cursors[zone_id]
-            or self._detail_cursors[zone_id] != 0
+            target != self._item_cursors[zone_id] or self._detail_cursors[zone_id] != 0
         )
         self._item_cursors[zone_id] = target
         self._detail_cursors[zone_id] = 0
@@ -389,7 +408,10 @@ class HorizontalListEngine:
             return
         item_cursor = min(self._item_cursors[zone_id], len(values) - 1)
         self._item_cursors[zone_id] = item_cursor
-        lines = [zone.title(values[item_cursor]), *zone.detail_lines(values[item_cursor])]
+        lines = [
+            zone.title(values[item_cursor]),
+            *zone.detail_lines(values[item_cursor]),
+        ]
         self._detail_cursors[zone_id] = min(
             self._detail_cursors[zone_id],
             len(lines) - 1,

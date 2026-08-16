@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import sqlite3
 
-from stonereader.db import get_connection, init_db, save_deck, get_all_decks
+from stonereader.db import get_connection, init_db, save_deck
 from stonereader.models.card import CardDatabase
-from stonereader.models.deck import DeckSummary
 from stonereader.presenters.deck_manager import DeckManagerPresenter
 from tests.conftest import MockSpeechService
 

@@ -20,9 +20,7 @@ def run_binding(
     handler()
 
 
-def menu_engine(
-    options: list[MenuOption], speech: FakeSpeech
-) -> VerticalMenuEngine:
+def menu_engine(options: list[MenuOption], speech: FakeSpeech) -> VerticalMenuEngine:
     spec = SurfaceSpec("Home", WidgetType.VERTICAL_MENU, options=lambda: options)
     return VerticalMenuEngine(spec, Announcer(speech))
 
@@ -75,6 +73,23 @@ def test_vertical_activate_current_and_change_notifications() -> None:
     assert changes == ["changed", "changed"]
 
 
+def test_vertical_options_snapshot_is_read_only_state() -> None:
+    speech = FakeSpeech()
+    engine = menu_engine(
+        [
+            MenuOption("live", lambda: "Live Game", None),
+            MenuOption("cards", lambda: "Cards", None),
+        ],
+        speech,
+    )
+    run_binding(engine.widget_type_bindings(), Chord("down"))
+    titles, cursor = engine.options_snapshot()
+    titles.append("Changed")
+
+    assert cursor == 1
+    assert engine.options_snapshot() == (["Live Game", "Cards"], 1)
+
+
 def horizontal_engine(
     speech: FakeSpeech,
     *,
@@ -82,7 +97,11 @@ def horizontal_engine(
     second_items: list[str] | None = None,
     context_label: Callable[[], str] | None = None,
 ) -> HorizontalListEngine:
-    one = ["Fireball", "Frostbolt", "Arcane Intellect"] if first_items is None else first_items
+    one = (
+        ["Fireball", "Frostbolt", "Arcane Intellect"]
+        if first_items is None
+        else first_items
+    )
     zones = [
         ZoneSpec(
             "one",
@@ -242,6 +261,22 @@ def test_zone_bindings_carry_help_and_switch() -> None:
     assert zone_bindings[Chord("c", shift=True)].help_phrase == "Shift+C: opponent hand"
     zone_bindings[Chord("c", shift=True)].handler()
     assert engine.current_zone().zone_id == "two"
+
+
+def test_horizontal_items_snapshot_is_read_only_active_zone_state() -> None:
+    speech = FakeSpeech()
+    engine = horizontal_engine(speech)
+    run_binding(engine.widget_type_bindings(), Chord("right"))
+    titles, cursor, details = engine.items_snapshot()
+    titles.append("Changed")
+    details.append("Changed")
+
+    assert cursor == 1
+    assert engine.items_snapshot() == (
+        ["Fireball", "Frostbolt", "Arcane Intellect"],
+        1,
+        ["Frostbolt detail 1", "Frostbolt detail 2"],
+    )
 
 
 def test_horizontal_empty_zone_universal_keys_never_silent() -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from stonereader.ui.announcer import Announcer
+from stonereader.ui.builder import build_active_surface
 from stonereader.ui.chords import Chord, chord_from_key
 from stonereader.ui.engines import HorizontalListEngine, VerticalMenuEngine
 from stonereader.ui.navigation import ActiveSurface, NavigationController
@@ -49,6 +50,7 @@ __all__ = [
     "WidgetType",
     "ZoneSpec",
     "chord_from_key",
+    "build_active_surface",
 ]
 
 
