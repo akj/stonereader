@@ -7,7 +7,7 @@ their boundaries:
       -> ReplayRecorder.on_lines / on_state(COMPLETE)   (#12)
       -> ReplayStore writes a .hsreplay file + metadata  (#11)
       -> load_replay(that exact file) -> ReplayState      (#13)
-      -> ReplayViewerPresenter renders it                 (#15)
+      -> replay turn views group it for the Surface       (#15)
 
 This is the real recorder-writes / loader-reads seam: the loader must be able
 to read back the XML the recorder actually wrote (not a separately-generated
@@ -21,12 +21,11 @@ from pathlib import Path
 
 from stonereader.db import get_connection, init_db
 from stonereader.models.game_state import GameState, Hero
-from stonereader.presenters.replay_viewer import ReplayViewerPresenter
 from stonereader.services._replay_loader import load_replay
 from stonereader.services._replay_recorder import ReplayRecorder
 from stonereader.services._replay_store import ReplayStore
 
-from tests.conftest import MockSpeechService
+from stonereader.surfaces._replay_turns import turns
 
 FIXTURE = Path(__file__).parent / "fixtures" / "log" / "game_end.log"
 
@@ -90,17 +89,11 @@ def test_recorder_written_file_loads_and_views(tmp_path):
     replay = load_replay(Path(meta.file_path))
     assert replay.states, "loader must reconstruct a non-empty state sequence"
 
-    # 3) The viewer can drive the reconstructed replay.
-    speech = MockSpeechService()
-    viewer = ReplayViewerPresenter(speech, replay, card_db=None)
-    # Starts at the first turn = the minimum in-game turn among loaded states
-    # (turn 0 = the opening/mulligan for a full game).
-    first_turn = min(s.turn for s in replay.states)
-    assert viewer.current_turn_number() == first_turn
-    # The events zone is populated from the diff seam over the loaded states.
-    assert list(viewer.get_zone_items("events")) is not None
-    # Stepping a turn keeps the viewer coherent and never moves backward.
-    viewer.next_turn()
-    assert viewer.current_turn_number() >= first_turn
+    # 3) The viewer's pure helper groups the reconstructed snapshots. Opening
+    # and mulligan snapshots are turn 1's prelude, never a separate turn 0.
+    replay_turns = turns(replay)
+    assert replay_turns
+    assert replay_turns[0].number == 1
+    assert isinstance(replay_turns[0].events, tuple)
 
     conn.close()

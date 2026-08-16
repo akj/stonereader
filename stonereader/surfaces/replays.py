@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import TypeAlias
 
+from stonereader.models.card import CardDatabase
+from stonereader.services._replay_loader import ReplayLoadError, load_replay
 from stonereader.services._replay_store import ReplayMeta, ReplayStore
 from stonereader.surfaces._deck_data import spoken_enum
+from stonereader.surfaces.replay_viewer import CurrentReplay
 from stonereader.ui.announcer import Announcer
 from stonereader.ui.arming import ArmedAction
 from stonereader.ui.builder import build_active_surface
@@ -45,6 +49,8 @@ def build_replays(
     universal_bindings: list[tuple[Chord, Command]],
     nav: NavigationController,
     store: ReplayStore,
+    card_db: CardDatabase,
+    current_replay: CurrentReplay,
 ) -> ActiveSurface:
     """Build the newest-first replay list and its import action row."""
     engine: HorizontalListEngine | None = None
@@ -88,7 +94,13 @@ def build_replays(
         if isinstance(item, ActionRow):
             nav.drill_down("Import Replays")
         else:
-            announcer.noop("Replay Viewer: not yet migrated")
+            try:
+                replay = load_replay(Path(item.file_path), card_db)
+            except ReplayLoadError:
+                announcer.noop("Could not open replay; the file may be invalid")
+                return
+            current_replay.set(replay)
+            nav.drill_down("Replay Viewer")
 
     def toggle_stats() -> None:
         item = selected()

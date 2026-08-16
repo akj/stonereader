@@ -4,6 +4,7 @@ from pathlib import Path
 
 from stonereader.db import get_connection, init_db
 from stonereader.services._replay_store import ReplayStore
+from stonereader.surfaces.replay_viewer import CurrentReplay
 from stonereader.surfaces.replays import build_replays
 from stonereader.ui._sink_core import _SinkCore
 from stonereader.ui.announcer import Announcer
@@ -14,6 +15,8 @@ from stonereader.ui.registry import CommandRegistry
 from stonereader.ui.surface import SurfaceSpec, WidgetType
 
 from tests.test_ui.conftest import FakeSpeech
+
+from .conftest import make_card_db
 
 
 class LandingEngine:
@@ -43,9 +46,18 @@ def _harness(tmp_path):
         lambda surface: sink.set_active(surface.registry),
     )
     nav.register("Import Replays", lambda: _placeholder("Import Replays"))
-    surface = build_replays(announcer, [], nav, store)
+    nav.register("Replay Viewer", lambda: _placeholder("Replay Viewer"))
+    current_replay = CurrentReplay()
+    surface = build_replays(
+        announcer,
+        [],
+        nav,
+        store,
+        make_card_db(),
+        current_replay,
+    )
     sink.set_active(surface.registry)
-    return conn, store, surface, sink, speech, nav
+    return conn, store, surface, sink, speech, nav, current_replay
 
 
 def _save(store: ReplayStore, xml: str, **overrides):
@@ -65,7 +77,7 @@ def _save(store: ReplayStore, xml: str, **overrides):
 
 
 def test_rows_are_newest_first_then_action_with_every_detail_variant(tmp_path):
-    conn, store, surface, _sink, _speech, _nav = _harness(tmp_path)
+    conn, store, surface, _sink, _speech, _nav, _current = _harness(tmp_path)
     _save(
         store,
         "<old/>",
@@ -121,7 +133,7 @@ def test_rows_are_newest_first_then_action_with_every_detail_variant(tmp_path):
 
 
 def test_all_result_titles_are_spoken_in_title_case(tmp_path):
-    conn, store, surface, _sink, _speech, _nav = _harness(tmp_path)
+    conn, store, surface, _sink, _speech, _nav, _current = _harness(tmp_path)
     for index, result in enumerate(("WON", "LOST", "TIED", "UNKNOWN")):
         _save(
             store,
@@ -141,7 +153,7 @@ def test_all_result_titles_are_spoken_in_title_case(tmp_path):
 
 
 def test_space_toggles_cursor_neutrally_and_action_row_is_noop(tmp_path):
-    conn, store, surface, sink, speech, _nav = _harness(tmp_path)
+    conn, store, surface, sink, speech, _nav, _current = _harness(tmp_path)
     replay = _save(store, "<one/>", in_stats=False)
 
     sink.handle_chord(Chord("space"))
@@ -162,7 +174,7 @@ def test_space_toggles_cursor_neutrally_and_action_row_is_noop(tmp_path):
 
 
 def test_armed_delete_lifecycle_and_shift_delete_queue_reentry(tmp_path):
-    conn, store, surface, sink, speech, _nav = _harness(tmp_path)
+    conn, store, surface, sink, speech, _nav, _current = _harness(tmp_path)
     first = _save(store, "<first/>", played_at="2026-08-16T09:30:00")
     second = _save(store, "<second/>", played_at="2026-08-15T09:30:00")
 
@@ -191,18 +203,47 @@ def test_armed_delete_lifecycle_and_shift_delete_queue_reentry(tmp_path):
     conn.close()
 
 
-def test_enter_dispatches_by_row_kind_and_search_has_exact_noop(tmp_path):
-    conn, store, surface, sink, speech, nav = _harness(tmp_path)
+def test_enter_loads_replay_drills_down_and_search_has_exact_noop(
+    tmp_path, monkeypatch
+):
+    conn, store, surface, sink, speech, nav, current = _harness(tmp_path)
     _save(store, "<one/>")
+    loaded = object()
+    monkeypatch.setattr(
+        "stonereader.surfaces.replays.load_replay",
+        lambda _path, _card_db: loaded,
+    )
 
     sink.handle_chord(Chord("enter"))
-    assert speech.calls[-1] == ("Replay Viewer: not yet migrated", True)
+    assert current.get() is loaded
+    assert nav.stack == ("Home", "Replay Viewer")
 
+    sink.set_active(surface.registry)
     surface.engine.jump_to_position(2)
     sink.handle_chord(Chord("enter"))
-    assert nav.stack == ("Home", "Import Replays")
+    assert nav.stack == ("Home", "Replay Viewer", "Import Replays")
 
     sink.set_active(surface.registry)
     sink.handle_chord(Chord("f", ctrl=True))
     assert speech.calls[-1] == ("No search on this screen", True)
+    conn.close()
+
+
+def test_invalid_replay_is_announced_without_navigation(tmp_path, monkeypatch):
+    from stonereader.services._replay_loader import ReplayLoadError
+
+    conn, store, _surface, sink, speech, nav, _current = _harness(tmp_path)
+    _save(store, "<bad/>")
+
+    def fail(_path, _card_db):
+        raise ReplayLoadError("bad replay")
+
+    monkeypatch.setattr("stonereader.surfaces.replays.load_replay", fail)
+    sink.handle_chord(Chord("enter"))
+
+    assert nav.stack == ("Home",)
+    assert speech.calls[-1] == (
+        "Could not open replay; the file may be invalid",
+        True,
+    )
     conn.close()

@@ -2,6 +2,7 @@
 
 from stonereader.services._engine import GameEngine
 from stonereader.services._deck_detect import DeckDetector
+from stonereader.services._event_phrases import phrase
 from stonereader.services._events import (
     AttackStarted,
     CardDrawn,
@@ -36,4 +37,5 @@ __all__ = [
     "DamageDealt",
     "GameEngine",
     "PowerLogWatcher",
+    "phrase",
 ]

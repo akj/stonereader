@@ -6,6 +6,7 @@ import pytest
 
 from stonereader.services._replay_store import ReplayImportError
 from stonereader.surfaces.import_replays import build_import_replays
+from stonereader.surfaces.replay_viewer import CurrentReplay
 from stonereader.surfaces.replays import build_replays
 from stonereader.ui._sink_core import _SinkCore
 from stonereader.ui.announcer import Announcer
@@ -14,6 +15,8 @@ from stonereader.ui.engines import VerticalMenuEngine
 from stonereader.ui.navigation import NavigationController
 
 from tests.test_ui.conftest import FakeSpeech
+
+from .conftest import make_card_db
 
 
 @dataclass(frozen=True)
@@ -56,7 +59,17 @@ def _harness(
         lambda: None,
         lambda surface: sink.set_active(surface.registry),
     )
-    nav.register("Replays", lambda: build_replays(announcer, [], nav, store))
+    nav.register(
+        "Replays",
+        lambda: build_replays(
+            announcer,
+            [],
+            nav,
+            store,
+            make_card_db(),
+            CurrentReplay(),
+        ),
+    )
     nav.register(
         "Import Replays",
         lambda: build_import_replays(

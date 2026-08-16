@@ -24,6 +24,7 @@ from stonereader.surfaces.home import build_home
 from stonereader.surfaces.import_deck import ImportDeckField, build_import_deck
 from stonereader.surfaces.import_replays import build_import_replays
 from stonereader.surfaces.replays import build_replays
+from stonereader.surfaces.replay_viewer import CurrentReplay, build_replay_viewer
 from stonereader.ui import (
     ActiveSurface,
     Announcer,
@@ -206,6 +207,7 @@ class StoneReaderApp(wx.App):
         card_db = CardDatabase.load()
 
         current_deck = CurrentDeck()
+        current_replay = CurrentReplay()
         deck_data = DeckData(db_conn, card_db)
         import_field = ImportDeckField()
 
@@ -311,6 +313,16 @@ class StoneReaderApp(wx.App):
                 self._frame.universal_bindings,
                 nav,
                 replay_store,
+                card_db,
+                current_replay,
+            )
+
+        def replay_viewer_factory() -> ActiveSurface:
+            return build_replay_viewer(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                current_replay,
             )
 
         def import_replays_factory() -> ActiveSurface:
@@ -328,6 +340,7 @@ class StoneReaderApp(wx.App):
         nav.register("Deck detail", deck_detail_factory)
         nav.register("Import Deck", import_deck_factory)
         nav.register("Replays", replays_factory)
+        nav.register("Replay Viewer", replay_viewer_factory)
         nav.register("Import Replays", import_replays_factory)
 
         def accept_clipboard_deck(text: str) -> None:
