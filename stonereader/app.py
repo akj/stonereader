@@ -525,12 +525,6 @@ class StoneReaderApp(wx.App):
                         surface, "remaining_deck"
                     ),
                 ),
-                "jump_live_game_opponent_hand": lambda: nav.jump(
-                    "Live Game",
-                    then=lambda surface: _switch_live_zone(
-                        surface, "opponent_hand"
-                    ),
-                ),
                 "jump_cards": lambda: nav.jump("Cards"),
                 "jump_replays": lambda: nav.jump("Replays"),
                 "speak_deck_counts": lambda: _query_current_game(
@@ -538,12 +532,6 @@ class StoneReaderApp(wx.App):
                     current_game,
                     "Your deck",
                     lambda state: f"{state.player_deck_count} cards",
-                ),
-                "speak_opponent_hand_count": lambda: _query_current_game(
-                    announcer,
-                    current_game,
-                    "Opponent hand",
-                    lambda state: f"{len(state.opponent_hand)} cards",
                 ),
             },
         )

@@ -104,18 +104,7 @@ def _rich_state() -> GameState:
         player_board=(_entity(1, boar),),
         opponent_board=(_entity(2, yeti, controller=2),),
         player_hand=(_entity(3, fireball, zone="HAND"),),
-        opponent_hand=(
-            None,
-            _entity(4, fireball, controller=2, zone="HAND", name="", drawn_turn=-1),
-            _entity(
-                5,
-                yeti,
-                controller=2,
-                zone="HAND",
-                drawn_turn=0,
-                lineage="Wand",
-            ),
-        ),
+        opponent_hand=(None, None),
         player_secrets=(_entity(6, secret, zone="SECRET"),),
         opponent_secrets=(_entity(7, secret, controller=2, zone="SECRET", name=""),),
         player_weapon=_entity(8, axe),
@@ -152,7 +141,7 @@ def _harness(state: GameState | None = None) -> Harness[CurrentGame]:
     return harness
 
 
-def test_all_fifteen_zone_providers_and_shared_formats() -> None:
+def test_all_fourteen_zone_providers_and_shared_formats() -> None:
     harness = _harness(_rich_state())
     surface = harness.active_surface
     assert [zone.zone_id for zone in surface.spec.zones] == [
@@ -160,7 +149,6 @@ def test_all_fifteen_zone_providers_and_shared_formats() -> None:
         "your_board",
         "opponent_board",
         "your_hand",
-        "opponent_hand",
         "your_secrets",
         "opponent_secrets",
         "your_hero",
@@ -178,7 +166,6 @@ def test_all_fifteen_zone_providers_and_shared_formats() -> None:
         "your_board": ["Boar"],
         "opponent_board": ["Yeti"],
         "your_hand": ["Fireball"],
-        "opponent_hand": ["Card 1, unknown", "Card 2, unknown", "Card 3, Yeti"],
         "your_secrets": ["Counterspell"],
         "opponent_secrets": ["Unknown card"],
         "your_hero": ["Jaina, 27 health, 2 armor"],
@@ -206,23 +193,6 @@ def test_all_fifteen_zone_providers_and_shared_formats() -> None:
         "4 mana",
         "Spell",
         "Deal 6 damage.",
-    ]
-
-
-def test_opponent_hand_slots_keep_positions_and_draw_provenance() -> None:
-    harness = _harness(_rich_state())
-    harness.press(Chord("c", shift=True))
-    assert harness.horizontal.items_snapshot() == (
-        ["Card 1, unknown", "Card 2, unknown", "Card 3, Yeti"],
-        0,
-        ["Drawn turn unknown"],
-    )
-    harness.horizontal.jump_to_position(2)
-    assert harness.horizontal.items_snapshot()[2] == ["Drawn turn unknown"]
-    harness.horizontal.jump_to_position(3)
-    assert harness.horizontal.items_snapshot()[2] == [
-        "Drawn in the mulligan",
-        "Created by Wand",
     ]
 
 
@@ -273,6 +243,7 @@ def test_queries_digits_y_slots_and_unbound_keys_match_live_contract() -> None:
     assert harness.speech.calls[-1] == ("Fireball, 2 copies", True)
     for chord, expected in (
         (Chord("y"), "No events in a live game"),
+        (Chord("c", shift=True), "The game announces the opponent's hand"),
         (Chord("pageup"), "No turns to step in a live game"),
         (Chord("pagedown"), "No turns to step in a live game"),
         (Chord("l"), "No game audio during a live game"),
@@ -289,7 +260,7 @@ def test_queries_digits_y_slots_and_unbound_keys_match_live_contract() -> None:
     assert harness.speech.calls == before
 
 
-def test_compound_hotkeys_land_then_switch_to_the_requested_zone() -> None:
+def test_compound_hotkey_lands_then_switches_to_the_requested_zone() -> None:
     harness = _harness(_rich_state())
     harness.horizontal.switch_zone("your_board")
     harness.speech.calls.clear()
@@ -300,14 +271,5 @@ def test_compound_hotkeys_land_then_switch_to_the_requested_zone() -> None:
     )
     assert harness.speech.calls[-1] == (
         "Remaining Deck, Boar, 1 copy, 1 of 2",
-        True,
-    )
-
-    harness.nav.jump(
-        "Live Game",
-        then=lambda _active: harness.horizontal.switch_zone("opponent_hand"),
-    )
-    assert harness.speech.calls[-1] == (
-        "Opponent hand, Card 1, unknown, 1 of 3",
         True,
     )

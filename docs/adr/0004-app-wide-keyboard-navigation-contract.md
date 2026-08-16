@@ -102,7 +102,9 @@ holdover) and adopts the Replay Viewer's letter set for the same zones:
 `d` remaining deck, `Shift+C` opponent hand, `Shift+P` opponent played,
 `n` cards drawn. Inspecting a game is one dialect, live or replayed.
 (ADR-0013 later completed the dialect: Live Game carries the Replay Viewer's
-full zone inventory and speak-only queries, current-state only.)
+full zone inventory and speak-only queries, current-state only. The ui-spec
+then retired the live Opponent hand zone as client-redundant — live,
+`Shift+C` is an announced no-op.)
 
 ### Announcements
 

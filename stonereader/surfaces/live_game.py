@@ -1,4 +1,4 @@
-"""Fifteen-zone current-state Live Game Surface."""
+"""Fourteen-zone current-state Live Game Surface."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from stonereader.models.card import Card
-from stonereader.models.game_state import GameEntity, GameState
+from stonereader.models.game_state import GameState
 from stonereader.surfaces._game_surface import (
     card_items,
     card_zone,
@@ -64,12 +64,6 @@ class RemainingDeckItem:
     cards_remaining: int
 
 
-@dataclass(frozen=True)
-class OpponentHandItem:
-    position: int
-    entity: GameEntity | None
-
-
 def build_live_game(
     announcer: Announcer,
     universal_bindings: list[tuple[Chord, Command]],
@@ -102,15 +96,6 @@ def build_live_game(
                 counts.items(),
                 key=lambda pair: (cards[pair[0]].cost, cards[pair[0]].name),
             )
-        ]
-
-    def opponent_hand() -> list[OpponentHandItem]:
-        current = state()
-        if current is None:
-            return []
-        return [
-            OpponentHandItem(position, entity)
-            for position, entity in enumerate(current.opponent_hand, start=1)
         ]
 
     def query(subject: str, value: Callable[[GameState], str]) -> None:
@@ -152,15 +137,6 @@ def build_live_game(
             "c",
             "C: your hand",
             card_items(state, "player_hand"),
-        ),
-        ZoneSpec(
-            "opponent_hand",
-            "Opponent hand",
-            opponent_hand,
-            _opponent_hand_title,
-            _opponent_hand_details,
-            Chord("c", shift=True),
-            "Shift+C: opponent hand",
         ),
         card_zone(
             "your_secrets",
@@ -314,6 +290,14 @@ def build_live_game(
                 lambda: announcer.noop("No events in a live game"),
             ),
         ),
+        Binding(
+            Chord("c", shift=True),
+            Command(
+                "live.opponent_hand",
+                "Shift+C: the game announces the opponent's hand",
+                lambda: announcer.noop("The game announces the opponent's hand"),
+            ),
+        ),
     ]
     bindings.extend(
         Binding(
@@ -382,23 +366,4 @@ def _remaining_deck_details(item: RemainingDeckItem) -> list[str]:
         lines.append(f"{card.attack} attack, {card.health} health")
     if card.text:
         lines.append(card.text)
-    return lines
-
-def _opponent_hand_title(item: OpponentHandItem) -> str:
-    identity = item.entity.name if item.entity is not None else ""
-    return f"Card {item.position}, {identity or 'unknown'}"
-
-
-def _opponent_hand_details(item: OpponentHandItem) -> list[str]:
-    entity = item.entity
-    if entity is None or entity.drawn_turn < 0:
-        drawn = "Drawn turn unknown"
-    elif entity.drawn_turn == 0:
-        # Ruling: turn zero is the mulligan, rather than an unknown draw turn.
-        drawn = "Drawn in the mulligan"
-    else:
-        drawn = f"Drawn turn {entity.drawn_turn}"
-    lines = [drawn]
-    if entity is not None and entity.creation_lineage:
-        lines.append(f"Created by {entity.creation_lineage}")
     return lines

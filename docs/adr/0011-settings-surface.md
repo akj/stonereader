@@ -13,7 +13,8 @@ ticket #25.
 
 The charter locked Settings' scope: speech behavior, global-hotkey
 rebinding (the six system-wide chords only — the HSA letter keymap is the
-app's identity and is not rebindable), plumbing, and game-audio controls.
+app's identity and is not rebindable; the ui-spec later retired the two
+opponent-hand chords, leaving four), plumbing, and game-audio controls.
 Three ADRs have since parked decisions here: which Game events Lane 2
 narrates (ADR-0007/0010), the audio volume / auto-play switch / install
 path (ADR-0008), and the rebindable chord table (ADR-0006). No settings
@@ -113,9 +114,9 @@ User's own plays are narrated by neither preset — you did them.
 
 This table is the preset definition; per-surface PRDs may amend membership
 without reopening this ADR — the Narrator seam (ADR-0010) makes it one
-table. (The ui-spec later removed turn flips and opponent draws from every
-preset as client-redundant — the client announces both itself, ADR-0013's
-principle. The ui-spec table is current.)
+table. (The ui-spec later removed turn flips and card draws on either side
+from every preset as client-redundant — the client announces those itself,
+ADR-0013's principle. The ui-spec table is current.)
 
 ### Apply, persist, reset
 

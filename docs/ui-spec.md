@@ -309,15 +309,18 @@ other input route, so none can die silently (ADR-0010).
 | Hotkey | Command | Effect |
 |---|---|---|
 | Ctrl+Shift+L | Jump to Live Game | Screen jump to Live Game, landing on Remaining Deck (ADR-0006) |
-| Ctrl+Shift+O | Jump to Live Game, opponent hand | Screen jump to Live Game, landing on Opponent Hand (ADR-0006) |
 | Ctrl+Shift+C | Jump to Cards | Screen jump to Cards (ADR-0006) |
 | Ctrl+Shift+R | Jump to Replays | Screen jump to Replays (ADR-0006) |
 | Ctrl+Shift+D | Speak deck counts | Speak-only: "Your deck, {n} cards" — navigates nowhere (ADR-0006, ADR-0007) |
-| Ctrl+Shift+H | Speak opponent hand count | Speak-only: "Opponent hand, {n} cards" — navigates nowhere (ADR-0006, ADR-0007) |
 
-The two Live Game hotkeys are **compound commands**: a screen jump plus an
+(ADR-0006's table also carried Ctrl+Shift+O, jump to the live Opponent hand,
+and Ctrl+Shift+H, speak opponent hand count; *this spec's amendment* retired
+both with the live Opponent hand zone itself — the client owns opponent-hand
+information live.)
+
+The Live Game hotkey is a **compound command**: a screen jump plus an
 explicit zone switch, exactly equivalent to jumping and then pressing the zone
-letter. *This spec's ruling:* they do not conflict with ADR-0007's found-as-left
+letter. *This spec's ruling:* it does not conflict with ADR-0007's found-as-left
 persistence, which governs what no command touched — the stack resets because
 the jump says so, the active zone changes because the command says so, and every
 zone's own cursor still persists (ADR-0006, ADR-0007).
@@ -453,8 +456,8 @@ but it is not a Home behavior — it is app-wide (see
 **Widget type:** Horizontal list with zones (ADR-0004, ADR-0010).
 
 **Reached and left:** Screen jump from Home (`L`, or Enter on option 1), or the
-system-wide hotkeys Ctrl+Shift+L (landing on Remaining Deck) and Ctrl+Shift+O
-(landing on Opponent hand). Back goes Home (ADR-0006).
+system-wide hotkey Ctrl+Shift+L (landing on Remaining Deck). Back goes Home
+(ADR-0006).
 
 **Window title:** `Live Game — StoneReader` (ADR-0006).
 **Entry utterance:** the zone's context-entry utterance —
@@ -466,23 +469,27 @@ Viewer's turn-carrying label exists only because turn stepping changes what
 every zone means (ADR-0013).
 
 **Zones.** Live Game speaks the Replay Viewer's full dialect — ADR-0004's "one
-dialect, live or replayed", completed by ADR-0013: the same fifteen navigable
+dialect, live or replayed", completed by ADR-0013: the same fourteen navigable
 zones and five speak-only queries, identical letters and help phrases, reading
-the current `GameState` and nothing else. Zone labels are the user-facing
+the current `GameState` and nothing else (*this spec's amendment* to ADR-0013's
+fifteen-zone inventory — see Shift+C below). Zone labels are the user-facing
 strings below, no "zone" suffix (ADR-0007), and are shared with the Replay
 Viewer with one exception: `D` is **Remaining Deck** — live, the deck zone
 means what's left (`Zone.DECK` minus draws, grouped by card), not a snapshot
 list. `Shift+N` joining the surface forces one rename: the shipped "Cards
-Drawn" zone becomes **Your drawn** (ADR-0013). The events zone is the
-dialect's one asymmetry: **Y is a constant announced no-op live** — see the
-history ruling below.
+Drawn" zone becomes **Your drawn** (ADR-0013). Two zones are live
+asymmetries: **Y is a constant announced no-op** — see the history ruling
+below — and **Shift+C is the constant announced no-op "The game announces
+the opponent's hand"**: opponent-hand information is the client's to speak
+live, the same client-redundancy principle that retired the timeline. The
+zone remains fully navigable in the Replay Viewer, where the client is not
+in the room.
 
 | Key | Zone label |
 |---|---|
 | B | Your board |
 | G | Opponent board |
 | C | Your hand |
-| Shift+C | Opponent hand |
 | S | Your secrets |
 | Shift+S | Opponent secrets |
 | V | Your hero |
@@ -513,11 +520,6 @@ percent, copies remaining over cards remaining (ADR-0013); 2 `"{cost} mana"`;
 3 `"{Type}"`; 4 `"{Attack} attack, {Health} health"` for minions and weapons;
 5 card text.
 
-*Opponent hand* — title `"Card {position}, {identity}"`, where identity is the
-card name when revealed and "unknown" when not. Lines: 1 `"Drawn turn {t}"` or
-`"Drawn turn unknown"`; 2 `"Created by {source}"` when a creation lineage
-exists.
-
 **Keys**
 
 | Key | Command | Spoken help phrase |
@@ -527,7 +529,8 @@ exists.
 | Shift+Up / Shift+Down | Repeat line / read to last line | Widget-type layer (ADR-0004, ADR-0007) |
 | Home / End | First / last item in the zone | Universal layer (ADR-0004) |
 | B / G | Jump to your board / opponent board | "B: your minions" / "G: opponent minions" (ADR-0003) |
-| C / Shift+C | Jump to your hand / opponent hand | "C: your hand" / "Shift+C: opponent hand" (ADR-0003) |
+| C | Jump to your hand | "C: your hand" (ADR-0003) |
+| Shift+C | Announced no-op — "The game announces the opponent's hand" | "Shift+C: the game announces the opponent's hand" — *this spec's amendment*: live opponent-hand information is the client's |
 | S / Shift+S | Jump to your secrets / opponent secrets | "S: your secrets" / "Shift+S: opponent secrets" |
 | V / F | Jump to your hero / opponent hero | "V: your hero" / "F: opponent hero" |
 | W / Shift+W | Jump to your weapon / opponent weapon | "W: your weapon" / "Shift+W: opponent weapon" |
@@ -1163,10 +1166,10 @@ Space is unbound here and therefore silent.
 
 **Narration presets** — the Lane-2 content (ADR-0011). Membership test for Key
 moments: *things you'd miss by not watching that change your next decision*. The
-User's own plays are narrated by no preset, and neither are turn flips or
-opponent draws — the client announces both itself, and StoneReader does not
-double the client (ADR-0013's principle; *this spec's amendment* to ADR-0011's
-original table).
+User's own plays are narrated by no preset, and neither are turn flips or card
+draws on either side — the client announces those itself, and StoneReader does
+not double the client (ADR-0013's principle; *this spec's amendment* to
+ADR-0011's original table).
 
 | Game event | Key moments | Everything |
 |---|---|---|
@@ -1174,7 +1177,6 @@ original table).
 | Minion dies | yes | yes |
 | Secret played / revealed | yes | yes |
 | Game over (result) | yes | yes |
-| Friendly Player draws (card name) | — | yes |
 | Attacks (attacker → target) | — | yes |
 | Hero power used | — | yes |
 | Triggers / deathrattles | — | yes |
@@ -1208,12 +1210,11 @@ pops one level to Settings (ADR-0011, ADR-0006).
 **Window title:** `Global hotkeys — StoneReader` (ADR-0006).
 **Entry utterance:** `"Global hotkeys, {current option}"` (ADR-0007).
 
-**Rows:** six chord rows, titled `"{Label}, {chord}"` with the chord spoken as a
-word sequence — "Jump to Live Game, Ctrl Shift L" (ADR-0011). The six are the
-ADR-0006 table: Jump to Live Game, Jump to Live Game (opponent hand), Jump to
-Cards, Jump to Replays, Speak deck counts, Speak opponent hand count. Help reads
-these chords from the registry at speak time, never from a static table, because
-they are mutable (ADR-0011, ADR-0009).
+**Rows:** four chord rows, titled `"{Label}, {chord}"` with the chord spoken as
+a word sequence — "Jump to Live Game, Ctrl Shift L" (ADR-0011). The four are
+the system-wide hotkey table above: Jump to Live Game, Jump to Cards, Jump to
+Replays, Speak deck counts. Help reads these chords from the registry at speak
+time, never from a static table, because they are mutable (ADR-0011, ADR-0009).
 
 **Capture mode.** Enter on a chord row announces "Press the new shortcut for
 {name}. Escape cancels." and enters **Capture mode**: the next chord pressed

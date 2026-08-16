@@ -77,6 +77,10 @@ Hearthstone, clear of HSA's own keymap. Assignments:
 | `Ctrl+Shift+D` | Speak-only query: deck counts (shipped; HSA `d` mnemonic) |
 | `Ctrl+Shift+H` | Speak-only query: opponent hand count (shipped) |
 
+(The ui-spec later retired `Ctrl+Shift+O` and `Ctrl+Shift+H` with the live
+Opponent hand zone — the client owns opponent-hand information live. Four
+hotkeys remain; the ui-spec table is current.)
+
 Speak-only queries are HSA's drive-by-query idiom made system-wide: they
 speak and navigate nowhere. `Ctrl+Shift+D` stays a query rather than a
 Decks jump — mid-game, "what's left in my deck" is the high-value ask, and

@@ -44,7 +44,9 @@ grouped by card, per ADR-0007's worked example), and the former "Cards Drawn"
 label becomes **Your drawn**, forced by `Shift+N` (Opponent drawn) joining
 the surface. Live-specific title lines are kept where they carry live-only
 facts (Opponent hand's positional identity-where-known rows and drawn-turn
-lines).
+lines). (The ui-spec later retired the live Opponent hand zone by this ADR's
+own client-redundancy principle — live, `Shift+C` is an announced no-op like
+`Y`, and the inventory is fourteen zones. The ui-spec is current.)
 
 ### No live history — the client is in the room
 
@@ -77,7 +79,7 @@ Live zone landings keep the plain `"{Zone label}, {title}, {position} of
 {count}"` utterance — no turn prefix. The Replay Viewer's "Turn {t}, {yours |
 opponent's}" label exists because turn stepping changes what every zone
 means; live, the turn is ambient (the client announces it; Lane 2 originally
-doubled it, until the ui-spec dropped turn narration as client-redundant).
+doubled it, until the ui-spec retired turn narration as client-redundant).
 One dialect means the same keys mean the same things, not that every
 utterance carries the same prefix.
 

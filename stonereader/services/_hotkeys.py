@@ -1,4 +1,4 @@
-"""Mutable registry for StoneReader's six system-wide hotkeys."""
+"""Mutable registry for StoneReader's four system-wide hotkeys."""
 
 from __future__ import annotations
 
@@ -22,20 +22,10 @@ class HotkeyCommand:
 
 HOTKEY_COMMANDS = (
     HotkeyCommand("jump_live_game", "Jump to Live Game", Chord.parse("ctrl+shift+l")),
-    HotkeyCommand(
-        "jump_live_game_opponent_hand",
-        "Jump to Live Game (opponent hand)",
-        Chord.parse("ctrl+shift+o"),
-    ),
     HotkeyCommand("jump_cards", "Jump to Cards", Chord.parse("ctrl+shift+c")),
     HotkeyCommand("jump_replays", "Jump to Replays", Chord.parse("ctrl+shift+r")),
     HotkeyCommand(
         "speak_deck_counts", "Speak deck counts", Chord.parse("ctrl+shift+d")
-    ),
-    HotkeyCommand(
-        "speak_opponent_hand_count",
-        "Speak opponent hand count",
-        Chord.parse("ctrl+shift+h"),
     ),
 )
 
@@ -113,7 +103,7 @@ class HotkeyMap:
         return HOTKEY_COMMANDS
 
     def apply(self, store: SettingsStore) -> None:
-        """Read stored overrides and register all six commands."""
+        """Read stored overrides and register all four commands."""
         self._store = store
         for command in HOTKEY_COMMANDS:
             override = store.hotkey_chord(command.command_id)

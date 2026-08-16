@@ -33,7 +33,7 @@ def build_global_hotkeys(
     sink: CaptureSink,
     hotkeys: HotkeyMap,
 ) -> ActiveSurface:
-    """Build the six-row hotkey menu."""
+    """Build the four-row hotkey menu."""
     engine: VerticalMenuEngine | None = None
     armed: ArmedAction | None = None
     pending_single: Chord | None = None

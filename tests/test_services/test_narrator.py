@@ -143,7 +143,7 @@ def test_key_moments_speaks_decision_changing_events_only() -> None:
     ]
 
 
-def test_everything_adds_your_draws_and_attacks_but_never_friendly_plays() -> None:
+def test_everything_adds_attacks_but_never_friendly_plays() -> None:
     fireball = _card("FIREBALL", "Fireball")
     boar = _card("BOAR", "Boar")
     yeti = _card("YETI", "Yeti")
@@ -181,20 +181,24 @@ def test_everything_adds_your_draws_and_attacks_but_never_friendly_plays() -> No
         _state(player_board=(friendly_play,), block_stack=("PLAY",)),
     )
 
-    assert announcer.spoken == [
-        "You drew Fireball",
-        "Boar attacks Yeti",
-    ]
+    assert announcer.spoken == ["Boar attacks Yeti"]
 
 
 def test_client_covered_events_are_never_narrated() -> None:
-    # Turn flips and opponent draws are the client's to announce, so even
-    # the widest preset stays silent on them.
+    # Turn flips and card draws on either side are the client's to
+    # announce, so even the widest preset stays silent on them.
     fireball = _card("FIREBALL", "Fireball")
     preset = ["everything"]
     narrator, announcer = _narrator(preset, fireball)
 
     narrator.on_state(_state(active_player_id=1), _state(turn=2, active_player_id=2))
+
+    friendly_deck = _entity(40, fireball, "DECK", 1)
+    friendly_hand = _entity(40, fireball, "HAND", 1)
+    narrator.on_state(
+        _state(player_deck=(friendly_deck,)),
+        _state(player_hand=(friendly_hand,)),
+    )
 
     opponent_deck = _entity(41, fireball, "DECK", 2)
     opponent_hand = _entity(41, fireball, "HAND", 2)

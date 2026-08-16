@@ -11,7 +11,6 @@ from stonereader.services._diff import diff
 from stonereader.services._event_phrases import phrase
 from stonereader.services._events import (
     AttackStarted,
-    CardDrawn,
     CardPlayed,
     GameEnded,
     GameEvent,
@@ -56,7 +55,7 @@ class Narrator:
                 self._announcer.narrate(text)
 
     def _with_known_name(self, event: GameEvent) -> GameEvent:
-        if not isinstance(event, (CardDrawn, CardPlayed)) or event.name:
+        if not isinstance(event, CardPlayed) or event.name:
             return event
         card = event.base_card or self._card_db.get_card_by_id(event.card_id)
         if card is None:
@@ -65,14 +64,12 @@ class Narrator:
 
 
 def _included(event: GameEvent, preset: str) -> bool:
-    # Turn flips and opponent draws are never narrated: the client
-    # announces both itself, and StoneReader does not double the client.
+    # Turn flips and card draws are never narrated: the client announces
+    # both itself, and StoneReader does not double the client.
     if isinstance(event, CardPlayed):
         return event.controller != 1 and preset in {"key_moments", "everything"}
     if isinstance(event, _KEY_MOMENTS):
         return preset in {"key_moments", "everything"}
-    if isinstance(event, CardDrawn):
-        return event.controller == 1 and preset == "everything"
     if isinstance(event, AttackStarted):
         return preset == "everything"
     return False

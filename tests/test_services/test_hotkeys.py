@@ -56,7 +56,7 @@ def test_apply_uses_defaults_and_stored_override(tmp_path: Path) -> None:
     hotkeys.apply(store)
 
     assert hotkeys.current_chord("jump_cards") == Chord.parse("ctrl+alt+c")
-    assert len(backend.calls) == 6
+    assert len(backend.calls) == len(HOTKEY_COMMANDS)
 
 
 def test_rebind_success_persists_and_failure_restores_old_binding(
