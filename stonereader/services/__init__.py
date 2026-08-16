@@ -15,13 +15,17 @@ from stonereader.services._events import (
     GameStarted,
     MinionDied,
     MulliganDone,
+    SecretPlayed,
+    SecretRevealed,
     TurnChanged,
 )
 from stonereader.services._tracker import GameTracker
+from stonereader.services._narrator import Narrator
 from stonereader.services._watcher import PowerLogWatcher
 
 __all__ = [
     "GameTracker",
+    "Narrator",
     "DeckDetector",
     "GameEvent",
     "GameStarted",
@@ -34,6 +38,8 @@ __all__ = [
     "CardRemoved",
     "AttackStarted",
     "MinionDied",
+    "SecretPlayed",
+    "SecretRevealed",
     "DamageDealt",
     "GameEngine",
     "PowerLogWatcher",

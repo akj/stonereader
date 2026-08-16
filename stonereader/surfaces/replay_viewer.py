@@ -4,9 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import TypeAlias
-
-from stonereader.models.card import Card
 from stonereader.models.game_state import GameEntity, GameState, Hero, PlayedCard
 from stonereader.models.replay import ReplayState
 from stonereader.services._event_phrases import phrase
@@ -20,6 +17,14 @@ from stonereader.services._events import (
     MinionDied,
 )
 from stonereader.surfaces._replay_turns import TurnView, turns
+from stonereader.surfaces._zone_format import (
+    CardItem,
+    card_detail_lines,
+    card_name,
+    card_title,
+    hero_detail_lines,
+    hero_title,
+)
 from stonereader.ui.announcer import Announcer
 from stonereader.ui.builder import build_active_surface
 from stonereader.ui.chords import Chord
@@ -27,10 +32,6 @@ from stonereader.ui.engines import HorizontalListEngine
 from stonereader.ui.navigation import ActiveSurface, NavigationController
 from stonereader.ui.registry import Command, Slot
 from stonereader.ui.surface import Binding, SurfaceSpec, WidgetType, ZoneSpec
-
-
-CardItem: TypeAlias = GameEntity | PlayedCard | None
-
 
 class CurrentReplay:
     """App-owned selected-replay seam shared by Replays and Replay Viewer."""
@@ -118,7 +119,7 @@ def build_replay_viewer(
 
     def player_hero_details(hero: Hero) -> list[str]:
         current = state()
-        return _hero_detail_lines(
+        return hero_detail_lines(
             hero,
             current.player_weapon,
             len(current.player_secrets),
@@ -126,7 +127,7 @@ def build_replay_viewer(
 
     def opponent_hero_details(hero: Hero) -> list[str]:
         current = state()
-        return _hero_detail_lines(
+        return hero_detail_lines(
             hero,
             current.opponent_weapon,
             len(current.opponent_secrets),
@@ -175,8 +176,8 @@ def build_replay_viewer(
         _card_zone("opponent_hand", "Opponent hand", "c", "Shift+C: opponent hand", card_items("opponent_hand"), shift=True),
         _card_zone("your_secrets", "Your secrets", "s", "S: your secrets", card_items("player_secrets")),
         _card_zone("opponent_secrets", "Opponent secrets", "s", "Shift+S: opponent secrets", card_items("opponent_secrets"), shift=True),
-        ZoneSpec("your_hero", "Your hero", lambda: [state().player_hero], _hero_title, player_hero_details, Chord("v"), "V: your hero"),
-        ZoneSpec("opponent_hero", "Opponent hero", lambda: [state().opponent_hero], _hero_title, opponent_hero_details, Chord("f"), "F: opponent hero"),
+        ZoneSpec("your_hero", "Your hero", lambda: [state().player_hero], hero_title, player_hero_details, Chord("v"), "V: your hero"),
+        ZoneSpec("opponent_hero", "Opponent hero", lambda: [state().opponent_hero], hero_title, opponent_hero_details, Chord("f"), "F: opponent hero"),
         # An absent weapon is deliberately an empty zone: the engine composes
         # its constant "No {label} on this screen" phrase from this label.
         _card_zone("your_weapon", "Your weapon", "w", "W: your weapon", singleton("player_weapon")),
@@ -271,79 +272,11 @@ def _card_zone(
         zone_id,
         label,
         items,
-        lambda item: _card_title(item, with_turn=with_turn),
-        _card_detail_lines,
+        lambda item: card_title(item, with_turn=with_turn),
+        card_detail_lines,
         Chord(key, shift=shift),
         help_phrase,
     )
-
-
-def _card_title(item: CardItem, *, with_turn: bool = False) -> str:
-    name = _card_name(item) or "Unknown card"
-    if with_turn and isinstance(item, PlayedCard):
-        return f"{name}, turn {item.turn}"
-    return name
-
-
-def _card_name(item: CardItem) -> str:
-    if item is None:
-        return ""
-    # A missing entity name is hidden information even if a synthetic or stale
-    # base-card reference happens to be present; never reveal through fallback.
-    return item.name
-
-
-def _base_card(item: CardItem) -> Card | None:
-    return item.base_card if item is not None else None
-
-
-def _card_detail_lines(item: CardItem) -> list[str]:
-    if item is None:
-        return []
-    card = _base_card(item)
-    cost = item.cost if isinstance(item, GameEntity) else (card.cost if card else 0)
-    lines = [f"{cost} mana"]
-    card_type = item.card_type if isinstance(item, GameEntity) else (card.card_type if card else "")
-    if card_type == "MINION":
-        if isinstance(item, GameEntity):
-            lines.append(f"{item.current_attack} attack, {item.current_health} health")
-        elif card is not None and card.attack is not None and card.health is not None:
-            lines.append(f"{card.attack} attack, {card.health} health")
-    if isinstance(item, GameEntity):
-        for tag, label in (
-            ("TAUNT", "Taunt"),
-            ("DIVINE_SHIELD", "Divine shield"),
-            ("FROZEN", "Frozen"),
-        ):
-            if item.tags.get(tag):
-                lines.append(label)
-        if card is not None and card.health is not None and item.current_health < card.health:
-            lines.append("Damaged")
-    if card is not None and card.text:
-        lines.append(card.text)
-    if isinstance(item, GameEntity) and item.creation_lineage:
-        lines.append(f"Created by {item.creation_lineage}")
-    return lines
-
-
-def _hero_title(hero: Hero) -> str:
-    title = f"{hero.name}, {hero.health} health"
-    if hero.armor:
-        title += f", {hero.armor} armor"
-    return title
-
-
-def _hero_detail_lines(
-    hero: Hero,
-    weapon: GameEntity | None,
-    secrets: int,
-) -> list[str]:
-    # The engine does not currently populate Hero.hero_power, so retain the old
-    # viewer's explicit fallback until that data gap is closed.
-    power = hero.hero_power or "No hero power"
-    weapon_name = _card_name(weapon) if weapon is not None else "No weapon"
-    return [power, weapon_name or "Unknown card", f"{secrets} secrets"]
-
 
 def _event_source_title(event: GameEvent, state: GameState) -> str | None:
     entity_id: int | None = None
@@ -358,7 +291,7 @@ def _event_source_title(event: GameEvent, state: GameState) -> str | None:
         return None
     for item in _state_cards(state):
         if item is not None and item.entity_id == entity_id:
-            return _card_name(item) or None
+            return card_name(item) or None
     name = getattr(event, "name", "")
     return name or None
 

@@ -14,6 +14,8 @@ from stonereader.services._events import (
     GameStarted,
     MinionDied,
     MulliganDone,
+    SecretPlayed,
+    SecretRevealed,
     TurnChanged,
 )
 
@@ -86,6 +88,9 @@ def test_phrases_every_existing_event_type() -> None:
         (AttackStarted(0, 4, 10, 20, 1), "Boar attacks Yeti"),
         (AttackStarted(0, 4, 99, 98, 1), "a minion attacks a minion"),
         (MinionDied(0, 4, 20, "B", "Yeti", 2), "Yeti died"),
+        (SecretPlayed(0, 4, 2), "Opponent played a secret"),
+        (SecretPlayed(0, 4, 1), "You played a secret"),
+        (SecretRevealed(0, 4, "Freezing Trap", 2), "Secret revealed, Freezing Trap"),
     ]
     for event, expected in cases:
         assert phrase(event, state) == expected

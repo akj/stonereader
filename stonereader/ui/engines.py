@@ -155,6 +155,11 @@ class HorizontalListEngine:
     def subscribe(self, on_change: Callable[[], None]) -> None:
         self._subscribers.append(on_change)
 
+    def refresh(self) -> None:
+        """Notify render subscribers after provider data changes, without speech."""
+        self._items()
+        self._notify()
+
     def items_snapshot(self) -> tuple[list[str], int, list[str]]:
         """Return active-zone titles, cursor, and current item details."""
         items = self._items()

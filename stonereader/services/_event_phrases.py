@@ -17,8 +17,13 @@ from stonereader.services._events import (
     GameStarted,
     MinionDied,
     MulliganDone,
+    SecretPlayed,
+    SecretRevealed,
     TurnChanged,
 )
+
+# The preset table also names hero-power-use and trigger/deathrattle events.
+# GameState does not yet retain the packet/block context needed to derive them.
 
 
 def phrase(event: GameEvent, state: GameState) -> str | None:
@@ -49,6 +54,11 @@ def phrase(event: GameEvent, state: GameState) -> str | None:
     if isinstance(event, CardPlayed):
         subject = "You" if event.controller == 1 else "Opponent"
         return f"{subject} played {_event_name(event.name)}"
+    if isinstance(event, SecretPlayed):
+        subject = "You" if event.controller == 1 else "Opponent"
+        return f"{subject} played a secret"
+    if isinstance(event, SecretRevealed):
+        return f"Secret revealed, {_event_name(event.name)}"
     if isinstance(event, CardRevealed):
         return f"{_event_name(event.name)} revealed"
     if isinstance(event, CardRemoved):

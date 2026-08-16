@@ -15,6 +15,7 @@ import wx
 from hearthstone.deckstrings import parse_deckstring
 
 from stonereader.db import get_connection, init_db
+from stonereader.models.game_state import GameState
 from stonereader.speech_service import SpeechService
 from stonereader.surfaces._deck_data import CurrentDeck, DeckData
 from stonereader.surfaces.cards import build_cards
@@ -23,6 +24,7 @@ from stonereader.surfaces.decks import build_decks
 from stonereader.surfaces.home import build_home
 from stonereader.surfaces.import_deck import ImportDeckField, build_import_deck
 from stonereader.surfaces.import_replays import build_import_replays
+from stonereader.surfaces.live_game import CurrentGame, build_live_game
 from stonereader.surfaces.replays import build_replays
 from stonereader.surfaces.replay_viewer import CurrentReplay, build_replay_viewer
 from stonereader.ui import (
@@ -160,8 +162,7 @@ class MainWindow(wx.Frame):
 
     def _on_close(self, event: wx.CloseEvent) -> None:
         # Cleanup order (Runtime State Inventory, plan 03-06):
-        #   hotkeys.clear_all() -> live_presenter.cleanup()
-        #   -> tracker.stop() -> db_conn.close() -> Destroy()
+        #   hotkeys.clear_all() -> tracker.stop() -> db_conn.close() -> Destroy()
         # Every step is isolated so a failure cannot prevent later cleanup.
         log = logging.getLogger(__name__)
         hotkeys = getattr(self, "_hotkeys", None)
@@ -170,12 +171,6 @@ class MainWindow(wx.Frame):
                 hotkeys.clear_all()
             except Exception:
                 log.exception("hotkeys.clear_all() failed; continuing cleanup")
-        live_presenter = getattr(self, "_live_presenter", None)
-        if live_presenter is not None:
-            try:
-                live_presenter.cleanup()
-            except Exception:
-                log.exception("live_presenter.cleanup() failed; continuing cleanup")
         tracker = getattr(self, "_tracker", None)
         if tracker is not None:
             try:
@@ -207,6 +202,7 @@ class StoneReaderApp(wx.App):
         card_db = CardDatabase.load()
 
         current_deck = CurrentDeck()
+        current_game = CurrentGame()
         current_replay = CurrentReplay()
         deck_data = DeckData(db_conn, card_db)
         import_field = ImportDeckField()
@@ -214,7 +210,7 @@ class StoneReaderApp(wx.App):
         # --- Game Tracker (Phase 2) ---
         # Logging is bootstrapped exactly once in __main__.py. This per-launch
         # log.config bootstrap remains separate and silent unless it changed.
-        from stonereader.services import GameTracker
+        from stonereader.services import GameTracker, Narrator
         from stonereader.services._log_config import ensure_log_config
 
         try:
@@ -228,6 +224,15 @@ class StoneReaderApp(wx.App):
 
         self._tracker = GameTracker(card_db=card_db)
         self._frame._tracker = self._tracker  # type: ignore[attr-defined]
+        self._current_game = current_game
+        self._narrator = Narrator(
+            announcer,
+            lambda: "key_moments",
+            card_db,
+        )
+        self._tracker.subscribe(current_game.on_state)
+        self._tracker.subscribe(self._narrator.on_state)
+        self._tracker.add_raw_subscriber(_ignore_raw_lines, current_game.reset)
 
         # --- Replay persistence (PRD #7) ---
         from stonereader.services._build_info import current_build
@@ -256,6 +261,7 @@ class StoneReaderApp(wx.App):
         }
         targets["Decks"] = lambda: nav.jump("Decks")
         targets["Cards"] = lambda: nav.jump("Cards")
+        targets["Live Game"] = lambda: nav.jump("Live Game")
         targets["Replays"] = lambda: nav.jump("Replays")
 
         def home_factory() -> ActiveSurface:
@@ -285,6 +291,14 @@ class StoneReaderApp(wx.App):
                 nav,
                 card_db,
                 self._frame._sink,
+            )
+
+        def live_game_factory() -> ActiveSurface:
+            return build_live_game(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                current_game,
             )
 
         def deck_detail_factory() -> ActiveSurface:
@@ -335,6 +349,7 @@ class StoneReaderApp(wx.App):
             )
 
         nav.register("Home", home_factory)
+        nav.register("Live Game", live_game_factory)
         nav.register("Cards", cards_factory)
         nav.register("Decks", decks_factory)
         nav.register("Deck detail", deck_detail_factory)
@@ -361,13 +376,53 @@ class StoneReaderApp(wx.App):
             wx.MOD_CONTROL | wx.MOD_SHIFT,
             ord("C"),
             lambda: nav.jump("Cards"),
-            "Cards",
+            "Jump to Cards",
         )
         self._hotkeys.register(
             wx.MOD_CONTROL | wx.MOD_SHIFT,
             ord("R"),
             lambda: nav.jump("Replays"),
-            "Replays",
+            "Jump to Replays",
+        )
+        self._hotkeys.register(
+            wx.MOD_CONTROL | wx.MOD_SHIFT,
+            ord("L"),
+            lambda: nav.jump(
+                "Live Game",
+                then=lambda surface: _switch_live_zone(surface, "remaining_deck"),
+            ),
+            "Jump to Live Game",
+        )
+        self._hotkeys.register(
+            wx.MOD_CONTROL | wx.MOD_SHIFT,
+            ord("O"),
+            lambda: nav.jump(
+                "Live Game",
+                then=lambda surface: _switch_live_zone(surface, "opponent_hand"),
+            ),
+            "Jump to Live Game (opponent hand)",
+        )
+        self._hotkeys.register(
+            wx.MOD_CONTROL | wx.MOD_SHIFT,
+            ord("D"),
+            lambda: _query_current_game(
+                announcer,
+                current_game,
+                "Your deck",
+                lambda state: f"{state.player_deck_count} cards",
+            ),
+            "Speak deck counts",
+        )
+        self._hotkeys.register(
+            wx.MOD_CONTROL | wx.MOD_SHIFT,
+            ord("H"),
+            lambda: _query_current_game(
+                announcer,
+                current_game,
+                "Opponent hand",
+                lambda state: f"{len(state.opponent_hand)} cards",
+            ),
+            "Speak opponent hand count",
         )
         if self._hotkeys.failed:
             speech.speak(
@@ -435,3 +490,27 @@ def _is_deckstring(text: str) -> bool:
     except (binascii.Error, EOFError, TypeError, UnicodeError, ValueError):
         return False
     return True
+
+
+def _switch_live_zone(surface: ActiveSurface, zone_id: str) -> None:
+    engine = surface.engine
+    if not isinstance(engine, HorizontalListEngine):
+        raise TypeError("Live Game requires a horizontal-list engine")
+    engine.switch_zone(zone_id)
+
+
+def _query_current_game(
+    announcer: Announcer,
+    current_game: CurrentGame,
+    subject: str,
+    value: Callable[[GameState], str],
+) -> None:
+    state = current_game.get()
+    if state is None:
+        announcer.noop("No game in progress")
+        return
+    announcer.query(subject, value(state))
+
+
+def _ignore_raw_lines(lines: list[str]) -> None:
+    del lines
