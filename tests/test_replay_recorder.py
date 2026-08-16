@@ -113,6 +113,7 @@ def test_complete_game_auto_saves_one_replay(tmp_path: Path) -> None:
     assert meta.source == "live_auto"
     assert meta.result == "WON"
     assert meta.result != "UNKNOWN"
+    assert meta.in_stats is True
 
     files = list((tmp_path / "replays").rglob("*.hsreplay"))
     assert len(files) == 1
@@ -178,6 +179,50 @@ def test_conceded_but_completed_saves_with_loss(tmp_path: Path) -> None:
     replays = store.all_replays()
     assert len(replays) == 1
     assert replays[0].result == "LOST"
+
+
+def test_missing_playstates_save_unknown_instead_of_tied(tmp_path: Path) -> None:
+    store = _make_store(tmp_path)
+    recorder = _recorder(store)
+    recorder.on_lines(_fixture_lines())
+
+    recorder.on_state(
+        _make_state(game_state="RUNNING"),
+        _make_state(game_state="COMPLETE"),
+    )
+
+    assert store.all_replays()[0].result == "UNKNOWN"
+
+
+def test_detected_deck_is_attributed_at_save(tmp_path: Path) -> None:
+    store = _make_store(tmp_path)
+    recorder = ReplayRecorder(
+        store,
+        now=_now,
+        deck_provider=lambda: (42, "Snapshot Mage"),
+    )
+    recorder.on_lines(_fixture_lines())
+
+    recorder.on_state(
+        _make_state(game_state="RUNNING", player_playstate="PLAYING"),
+        _make_state(game_state="COMPLETE", player_playstate="WON"),
+    )
+
+    replay = store.all_replays()[0]
+    assert (replay.deck_id, replay.deck_name) == (42, "Snapshot Mage")
+
+
+def test_retention_prunes_after_each_save(tmp_path: Path) -> None:
+    store = _make_store(tmp_path)
+    recorder = ReplayRecorder(store, now=_now, limit_provider=lambda: 0)
+    recorder.on_lines(_fixture_lines())
+
+    recorder.on_state(
+        _make_state(game_state="RUNNING", player_playstate="PLAYING"),
+        _make_state(game_state="COMPLETE", player_playstate="WON"),
+    )
+
+    assert store.all_replays() == []
 
 
 def test_abandoned_game_saves_nothing(tmp_path: Path) -> None:

@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import sqlite3
+import logging
 from pathlib import Path
 
 from stonereader.models.deck import DeckSummary
 
-_SCHEMA_V1 = """
+logger = logging.getLogger(__name__)
+
+# Historical schema used only to exercise upgrades; fresh databases never run it.
+_SCHEMA_V1_LEGACY = """
 CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER PRIMARY KEY
 );
@@ -54,6 +58,40 @@ CREATE TABLE IF NOT EXISTS replays (
 );
 """
 
+_SCHEMA_V3_FRESH = """
+CREATE TABLE IF NOT EXISTS schema_version (
+    version INTEGER PRIMARY KEY
+);
+
+CREATE TABLE IF NOT EXISTS decks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    hero_class TEXT NOT NULL,
+    format TEXT NOT NULL,
+    deckstring TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS replays (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    file_path TEXT NOT NULL,
+    checksum TEXT NOT NULL UNIQUE,
+    source TEXT NOT NULL,
+    friendly_class TEXT NOT NULL,
+    opponent_class TEXT NOT NULL,
+    result TEXT NOT NULL,
+    turns INTEGER NOT NULL,
+    game_type TEXT NOT NULL DEFAULT '',
+    format_type TEXT NOT NULL DEFAULT '',
+    deck_name TEXT,
+    deck_id INTEGER,
+    played_at TIMESTAMP NOT NULL,
+    duration_seconds INTEGER,
+    imported_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    in_stats INTEGER NOT NULL DEFAULT 0
+);
+"""
+
 REPLAY_SOURCES = ("live_auto", "manual_import")
 REPLAY_RESULTS = ("WON", "LOST", "TIED", "UNKNOWN")
 
@@ -81,18 +119,84 @@ def get_schema_version(conn: sqlite3.Connection) -> int:
 def init_db(conn: sqlite3.Connection) -> None:
     """Create/migrate tables to the latest schema version. Idempotent.
 
-    Migrates v1 -> v2 in place without dropping existing decks/games data.
+    Fresh databases receive the current schema. Upgrades preserve decks and
+    replays, add stats membership, backfill replay deck attribution once, and
+    remove the obsolete v1 ``games`` table.
     """
     version = get_schema_version(conn)
-    if version >= 2:
+    if version >= 3:
         return
     if version == 0:
-        conn.executescript(_SCHEMA_V1)
-    conn.executescript(_SCHEMA_V2)
-    # version is the PRIMARY KEY, so clear stale rows before recording the new one.
-    conn.execute("DELETE FROM schema_version")
-    conn.execute("INSERT INTO schema_version (version) VALUES (?)", (2,))
+        conn.executescript(_SCHEMA_V3_FRESH)
+        _set_schema_version(conn, 3)
+        conn.commit()
+        return
+    if version < 2:
+        conn.executescript(_SCHEMA_V2)
+    conn.execute(
+        "ALTER TABLE replays ADD COLUMN in_stats INTEGER NOT NULL DEFAULT 0"
+    )
+    conn.execute(
+        "UPDATE replays SET in_stats = CASE WHEN source = 'live_auto' THEN 1 ELSE 0 END"
+    )
+    _backfill_replay_decks(conn)
+    conn.execute("DROP TABLE IF EXISTS games")
+    _set_schema_version(conn, 3)
     conn.commit()
+
+
+def _set_schema_version(conn: sqlite3.Connection, version: int) -> None:
+    """Replace the singleton schema-version row."""
+    conn.execute("DELETE FROM schema_version")
+    conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
+
+
+def _backfill_replay_decks(conn: sqlite3.Connection) -> None:
+    """Attribute legacy replays from stored XML without blocking upgrades."""
+    rows = conn.execute(
+        "SELECT id, file_path FROM replays WHERE deck_id IS NULL"
+    ).fetchall()
+    skipped = len(rows)
+    attributed = 0
+    decks = get_all_decks(conn)
+    if rows and decks:
+        try:
+            from stonereader.models.card import CardDatabase
+            from stonereader.services._deck_detect import detect_deck
+            from stonereader.services._replay_loader import load_replay
+
+            card_db = CardDatabase.load()
+        except Exception:
+            logger.exception("replay deck backfill setup failed; skipping attribution")
+        else:
+            for row in rows:
+                try:
+                    replay = load_replay(Path(row["file_path"]), card_db)
+                    match = next(
+                        (
+                            detected
+                            for state in replay.states
+                            if (detected := detect_deck(state, decks, card_db))
+                            is not None
+                        ),
+                        None,
+                    )
+                    if match is None:
+                        continue
+                    deck_id, deck_name = match
+                    conn.execute(
+                        "UPDATE replays SET deck_id = ?, deck_name = ? WHERE id = ?",
+                        (deck_id, deck_name, row["id"]),
+                    )
+                    attributed += 1
+                    skipped -= 1
+                except Exception:
+                    logger.exception(
+                        "replay deck backfill skipped replay %s", row["id"]
+                    )
+    logger.info(
+        "replay deck backfill: attributed %d / skipped %d", attributed, skipped
+    )
 
 
 def save_deck(
@@ -152,6 +256,7 @@ _REPLAY_COLUMNS = (
     "deck_id",
     "played_at",
     "duration_seconds",
+    "in_stats",
 )
 
 
@@ -168,6 +273,8 @@ def insert_replay(conn: sqlite3.Connection, **fields: object) -> int:
         values["game_type"] = ""
     if values["format_type"] is None:
         values["format_type"] = ""
+    if values["in_stats"] is None:
+        values["in_stats"] = 0
     placeholders = ", ".join("?" for _ in _REPLAY_COLUMNS)
     columns = ", ".join(_REPLAY_COLUMNS)
     cursor = conn.execute(
@@ -197,4 +304,15 @@ def get_replay_by_checksum(
 def delete_replay(conn: sqlite3.Connection, replay_id: int) -> None:
     """Delete a replay metadata row by id."""
     conn.execute("DELETE FROM replays WHERE id = ?", (replay_id,))
+    conn.commit()
+
+
+def set_replay_in_stats(
+    conn: sqlite3.Connection, replay_id: int, in_stats: bool
+) -> None:
+    """Set one replay's stats-corpus membership."""
+    conn.execute(
+        "UPDATE replays SET in_stats = ? WHERE id = ?",
+        (int(in_stats), replay_id),
+    )
     conn.commit()

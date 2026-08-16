@@ -24,9 +24,13 @@ import zipfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from stonereader import db
 from stonereader.services._exceptions import ServicesError
+
+if TYPE_CHECKING:
+    from stonereader.models.card import CardDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +45,7 @@ class ReplayImportError(ServicesError):
 
 @dataclass(frozen=True)
 class ReplayMeta:
-    """Immutable view of a single ``replays`` row (all 15 columns)."""
+    """Immutable view of a single ``replays`` row."""
 
     id: int
     file_path: str
@@ -58,6 +62,7 @@ class ReplayMeta:
     played_at: str
     duration_seconds: int | None
     imported_at: str
+    in_stats: bool
 
     @classmethod
     def from_row(cls, row) -> "ReplayMeta":
@@ -78,7 +83,27 @@ class ReplayMeta:
             played_at=row["played_at"],
             duration_seconds=row["duration_seconds"],
             imported_at=row["imported_at"],
+            in_stats=bool(row["in_stats"]),
         )
+
+
+@dataclass(frozen=True)
+class ReplaySaveResult:
+    """A stored replay plus whether this call created it."""
+
+    meta: ReplayMeta
+    created: bool
+
+
+@dataclass(frozen=True)
+class _ImportMetadata:
+    friendly_class: str
+    opponent_class: str
+    result: str
+    turns: int
+    game_type: str
+    format_type: str
+    played_at: str
 
 
 def default_replay_dir() -> Path:
@@ -100,9 +125,15 @@ def _safe(value: str) -> str:
 class ReplayStore:
     """Stores replay XML on disk and its metadata in SQLite, deduped by checksum."""
 
-    def __init__(self, conn, replay_dir: Path) -> None:
+    def __init__(
+        self,
+        conn,
+        replay_dir: Path,
+        card_db: CardDatabase | None = None,
+    ) -> None:
         self._conn = conn
         self._replay_dir = Path(replay_dir)
+        self._card_db = card_db
 
     def save_xml(
         self,
@@ -117,11 +148,12 @@ class ReplayStore:
         format_type: str = "",
         deck_name: str | None = None,
         deck_id: int | None = None,
+        in_stats: bool = False,
         played_at: str,
         duration_seconds: int | None = None,
         raw_log: str | None = None,
-    ) -> ReplayMeta:
-        """Persist replay ``xml`` and its metadata, returning the stored record.
+    ) -> ReplaySaveResult:
+        """Persist replay ``xml`` and report whether a record was created.
 
         Dedupes by sha256 checksum of the xml: if a replay with the same
         content already exists, returns the EXISTING record without writing a
@@ -134,7 +166,7 @@ class ReplayStore:
         checksum = _checksum(xml)
         existing = db.get_replay_by_checksum(self._conn, checksum)
         if existing is not None:
-            return ReplayMeta.from_row(existing)
+            return ReplaySaveResult(ReplayMeta.from_row(existing), created=False)
 
         file_path = self._write_file(
             xml,
@@ -160,14 +192,31 @@ class ReplayStore:
             deck_id=deck_id,
             played_at=played_at,
             duration_seconds=duration_seconds,
+            in_stats=int(in_stats),
         )
         row = db.get_replay_by_checksum(self._conn, checksum)
         assert row is not None  # we just inserted it
         meta = ReplayMeta.from_row(row)
         assert meta.id == replay_id
-        return meta
+        return ReplaySaveResult(meta, created=True)
 
-    def import_file(self, src_path: Path, **meta) -> ReplayMeta:
+    def import_file(
+        self,
+        src_path: Path,
+        *,
+        source: str = "manual_import",
+        in_stats: bool = False,
+        friendly_class: str | None = None,
+        opponent_class: str | None = None,
+        result: str | None = None,
+        turns: int | None = None,
+        game_type: str | None = None,
+        format_type: str | None = None,
+        deck_name: str | None = None,
+        deck_id: int | None = None,
+        played_at: str | None = None,
+        duration_seconds: int | None = None,
+    ) -> ReplaySaveResult:
         """Import an external replay file into managed storage.
 
         Reads the source file's text, then runs the same dedupe + store path
@@ -181,7 +230,54 @@ class ReplayStore:
             raise ReplayImportError(
                 f"Cannot read replay source {src_path!r}: {exc}"
             ) from exc
-        return self.save_xml(xml, **meta)
+        existing = db.get_replay_by_checksum(self._conn, _checksum(xml))
+        if existing is not None:
+            return ReplaySaveResult(ReplayMeta.from_row(existing), created=False)
+        derived: _ImportMetadata | None = None
+        if any(
+            value is None
+            for value in (
+                friendly_class,
+                opponent_class,
+                result,
+                turns,
+                played_at,
+            )
+        ):
+            try:
+                derived = _derive_import_metadata(Path(src_path), self._card_db)
+            except Exception as exc:
+                raise ReplayImportError(
+                    f"Cannot read replay metadata from {src_path!r}: {exc}"
+                ) from exc
+        if derived is not None:
+            friendly_class = friendly_class or derived.friendly_class
+            opponent_class = opponent_class or derived.opponent_class
+            result = result or derived.result
+            turns = derived.turns if turns is None else turns
+            game_type = derived.game_type if game_type is None else game_type
+            format_type = derived.format_type if format_type is None else format_type
+            played_at = played_at or derived.played_at
+        assert friendly_class is not None
+        assert opponent_class is not None
+        assert result is not None
+        assert turns is not None
+        assert played_at is not None
+        return self.save_xml(
+            xml,
+            source=source,
+            in_stats=in_stats,
+            friendly_class=friendly_class,
+            opponent_class=opponent_class,
+            result=result,
+            turns=turns,
+            game_type=game_type or "",
+            format_type=format_type or "",
+            deck_name=deck_name,
+            deck_id=deck_id,
+            played_at=played_at,
+            duration_seconds=duration_seconds,
+        )
 
     def all_replays(self) -> list[ReplayMeta]:
         """Return all stored replays, newest first."""
@@ -201,6 +297,19 @@ class ReplayStore:
             file_path = Path(existing["file_path"])
             file_path.unlink(missing_ok=True)
             file_path.with_suffix(".hdtreplay").unlink(missing_ok=True)
+
+    def set_in_stats(self, replay_id: int, in_stats: bool) -> None:
+        """Set one replay's stats-corpus membership."""
+        db.set_replay_in_stats(self._conn, replay_id, in_stats)
+
+    def prune(self, limit: int | None) -> None:
+        """Delete oldest replays beyond ``limit``; ``None`` keeps everything."""
+        if limit is None:
+            return
+        if limit < 0:
+            raise ValueError("Replay retention limit must not be negative")
+        for replay in reversed(self.all_replays()[limit:]):
+            self.delete(replay.id)
 
     @staticmethod
     def _write_raw_log_sidecar(file_path: Path, raw_log: str) -> None:
@@ -272,3 +381,59 @@ def _parse_dt(played_at: str) -> datetime | None:
         except ValueError:
             continue
     return None
+
+
+def _derive_import_metadata(
+    path: Path, card_db: CardDatabase | None = None
+) -> _ImportMetadata:
+    """Derive the minimal DB metadata exposed by the replay loader."""
+    from stonereader.services._replay_loader import load_replay
+
+    replay = load_replay(path, card_db)
+    states = replay.states
+
+    # Imported perspective is intentionally the replay's recorded Friendly side
+    # (ADR-0012 documents the caveat; the in-stats toggle is the remedy).
+    player_playstate = next(
+        (
+            state.player_playstate.upper()
+            for state in reversed(states)
+            if state.player_playstate.upper() in ("WON", "LOST", "TIED")
+        ),
+        "",
+    )
+    if not player_playstate:
+        opponent_playstate = next(
+            (
+                state.opponent_playstate.upper()
+                for state in reversed(states)
+                if state.opponent_playstate.upper() in ("WON", "LOST")
+            ),
+            "",
+        )
+        player_playstate = {
+            "WON": "LOST",
+            "LOST": "WON",
+        }.get(opponent_playstate, "UNKNOWN")
+
+    def latest(getter) -> str:
+        return next(
+            (
+                value
+                for state in reversed(states)
+                if (value := str(getter(state) or "").strip())
+            ),
+            "",
+        )
+
+    return _ImportMetadata(
+        friendly_class=latest(lambda state: state.player_hero.hero_class),
+        opponent_class=latest(lambda state: state.opponent_hero.hero_class),
+        result=player_playstate,
+        turns=max(state.turn for state in states),
+        game_type=latest(lambda state: state.game_type),
+        format_type=latest(lambda state: state.format_type),
+        played_at=datetime.fromtimestamp(path.stat().st_mtime)
+        .astimezone()
+        .isoformat(),
+    )

@@ -22,6 +22,8 @@ from stonereader.surfaces.deck_detail import build_deck_detail
 from stonereader.surfaces.decks import build_decks
 from stonereader.surfaces.home import build_home
 from stonereader.surfaces.import_deck import ImportDeckField, build_import_deck
+from stonereader.surfaces.import_replays import build_import_replays
+from stonereader.surfaces.replays import build_replays
 from stonereader.ui import (
     ActiveSurface,
     Announcer,
@@ -227,11 +229,18 @@ class StoneReaderApp(wx.App):
 
         # --- Replay persistence (PRD #7) ---
         from stonereader.services._build_info import current_build
+        from stonereader.services._deck_detect import DeckDetector
         from stonereader.services._replay_recorder import ReplayRecorder
         from stonereader.services._replay_store import ReplayStore, default_replay_dir
 
-        replay_store = ReplayStore(db_conn, default_replay_dir())
-        self._recorder = ReplayRecorder(replay_store, build_provider=current_build)
+        replay_store = ReplayStore(db_conn, default_replay_dir(), card_db)
+        self._deck_detector = DeckDetector(self._tracker, db_conn, card_db)
+        self._recorder = ReplayRecorder(
+            replay_store,
+            build_provider=current_build,
+            deck_provider=self._deck_detector.detected,
+            limit_provider=lambda: None,
+        )
         self._tracker.subscribe(self._recorder.on_state)
         self._tracker.add_raw_subscriber(
             self._recorder.on_lines,
@@ -245,6 +254,7 @@ class StoneReaderApp(wx.App):
         }
         targets["Decks"] = lambda: nav.jump("Decks")
         targets["Cards"] = lambda: nav.jump("Cards")
+        targets["Replays"] = lambda: nav.jump("Replays")
 
         def home_factory() -> ActiveSurface:
             return build_home(
@@ -295,11 +305,30 @@ class StoneReaderApp(wx.App):
                 import_field,
             )
 
+        def replays_factory() -> ActiveSurface:
+            return build_replays(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                replay_store,
+            )
+
+        def import_replays_factory() -> ActiveSurface:
+            return build_import_replays(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                replay_store,
+                _choose_replay_files,
+            )
+
         nav.register("Home", home_factory)
         nav.register("Cards", cards_factory)
         nav.register("Decks", decks_factory)
         nav.register("Deck detail", deck_detail_factory)
         nav.register("Import Deck", import_deck_factory)
+        nav.register("Replays", replays_factory)
+        nav.register("Import Replays", import_replays_factory)
 
         def accept_clipboard_deck(text: str) -> None:
             import_field.set(text)
@@ -310,7 +339,7 @@ class StoneReaderApp(wx.App):
 
         self._frame.Show()
 
-        # Register only this chunk's hotkey after Show() so Win32 has a handle.
+        # Register global Surface hotkeys after Show() so Win32 has a handle.
         from stonereader.services._global_hotkey import GlobalHotkeyService
 
         self._hotkeys = GlobalHotkeyService(self._frame)
@@ -320,6 +349,12 @@ class StoneReaderApp(wx.App):
             ord("C"),
             lambda: nav.jump("Cards"),
             "Cards",
+        )
+        self._hotkeys.register(
+            wx.MOD_CONTROL | wx.MOD_SHIFT,
+            ord("R"),
+            lambda: nav.jump("Replays"),
+            "Replays",
         )
         if self._hotkeys.failed:
             speech.speak(
@@ -363,6 +398,22 @@ def _copy_to_clipboard(text: str) -> None:
         wx.TheClipboard.Flush()
     finally:
         wx.TheClipboard.Close()
+
+
+def _choose_replay_files() -> list[str]:
+    """Delegate replay selection to the OS-native multi-select dialog."""
+    dialog = wx.FileDialog(
+        None,
+        message="Choose replay files",
+        wildcard="Replay files (*.hsreplay;*.xml)|*.hsreplay;*.xml",
+        style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST | wx.FD_MULTIPLE,
+    )
+    try:
+        if dialog.ShowModal() != wx.ID_OK:
+            return []
+        return list(dialog.GetPaths())
+    finally:
+        dialog.Destroy()
 
 
 def _is_deckstring(text: str) -> bool:

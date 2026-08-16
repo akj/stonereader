@@ -6,6 +6,8 @@ from stonereader.surfaces.deck_detail import build_deck_detail
 from stonereader.surfaces.decks import build_decks
 from stonereader.surfaces.home import build_home
 from stonereader.surfaces.import_deck import ImportDeckField, build_import_deck
+from stonereader.surfaces.import_replays import build_import_replays
+from stonereader.surfaces.replays import build_replays
 
 __all__ = [
     "CurrentDeck",
@@ -16,4 +18,6 @@ __all__ = [
     "build_decks",
     "build_home",
     "build_import_deck",
+    "build_import_replays",
+    "build_replays",
 ]

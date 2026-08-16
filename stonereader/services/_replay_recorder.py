@@ -151,10 +151,14 @@ class ReplayRecorder:
         *,
         now: Callable[[], datetime] = _default_now,
         build_provider: Optional[Callable[[], Optional[int]]] = None,
+        deck_provider: Callable[[], tuple[int, str] | None] | None = None,
+        limit_provider: Callable[[], int | None] | None = None,
     ) -> None:
         self._store = store
         self._now = now
         self._build_provider = build_provider
+        self._deck_provider = deck_provider
+        self._limit_provider = limit_provider or (lambda: None)
         self._segments: List[_Segment] = []
 
     # ------------------------------------------------------------- Watcher hooks
@@ -250,6 +254,7 @@ class ReplayRecorder:
                 selected.tree, selected.game_meta, build
             )
             xml = document.to_xml()
+            detected = self._deck_provider() if self._deck_provider is not None else None
             self._store.save_xml(
                 xml,
                 source="live_auto",
@@ -259,10 +264,14 @@ class ReplayRecorder:
                 turns=curr.turn,
                 game_type=curr.game_type,
                 format_type=curr.format_type,
+                deck_id=detected[0] if detected is not None else None,
+                deck_name=detected[1] if detected is not None else None,
+                in_stats=True,
                 played_at=selected.started_at.isoformat(),
                 duration_seconds=None,
                 raw_log="\n".join(selected.segment.lines) + "\n",
             )
+            self._store.prune(self._limit_provider())
         except Exception:
             logger.exception("live replay auto-save failed; dropping game")
         finally:
@@ -384,11 +393,11 @@ class ReplayRecorder:
 
     @staticmethod
     def _derive_result(curr: GameState) -> str:
-        """Result for a live auto-save — MUST NOT be 'UNKNOWN' on COMPLETE.
+        """Derive the Friendly Player result for a live auto-save.
 
         ``player_playstate`` is authoritative (WON / LOST / TIED). On the
         unexpected path where it is empty at COMPLETE, fall back to inverting
-        the opponent's playstate, then to 'TIED' — never 'UNKNOWN'.
+        the opponent's playstate, then preserve uncertainty as ``UNKNOWN``.
         """
         playstate = (curr.player_playstate or "").upper()
         if playstate in ("WON", "LOST", "TIED"):
@@ -398,4 +407,4 @@ class ReplayRecorder:
             return "LOST"
         if opponent == "LOST":
             return "WON"
-        return "TIED"
+        return "UNKNOWN"
