@@ -69,6 +69,7 @@ class CurrentReplay:
 @dataclass(frozen=True)
 class _EventItem:
     event: GameEvent
+    state: GameState
     title: str
     source_card_id: str | None
     source_title: str | None
@@ -106,6 +107,9 @@ def build_replay_viewer(
         turn_index = 0
         cached_replay = None
         cached_turns = []
+        if engine is not None:
+            shown = event_items()
+            engine.set_zone_cursor("events", len(shown) - 1)
 
     def turn_views() -> list[TurnView]:
         nonlocal cached_replay, cached_turns
@@ -124,7 +128,16 @@ def build_replay_viewer(
         return values[turn_index]
 
     def state() -> GameState:
-        return current_turn().state
+        turn = current_turn()
+        if engine is None:
+            return turn.state
+        shown = event_items()
+        if not shown:
+            return turn.state
+        cursor = engine.zone_cursor("events")
+        if cursor == len(shown) - 1:
+            return turn.state
+        return shown[cursor].state
 
     def context_label() -> str:
         if engine is None:
@@ -136,13 +149,15 @@ def build_replay_viewer(
     def event_items() -> list[_EventItem]:
         current = current_turn()
         values: list[_EventItem] = []
-        for event in current.events:
+        for turn_event in current.events:
+            event = turn_event.event
             title = phrase(event, current.state)
             if title is not None:
                 source_card_id, source_title = _event_source(event, current.state)
                 values.append(
                     _EventItem(
                         event,
+                        turn_event.state,
                         title,
                         source_card_id,
                         source_title,
@@ -167,6 +182,8 @@ def build_replay_viewer(
             sync_autoplay_location()
             return
         turn_index = target
+        shown = event_items()
+        engine.set_zone_cursor("events", len(shown) - 1)
         engine.on_landing()
         sync_autoplay_location()
 
@@ -313,6 +330,8 @@ def build_replay_viewer(
     if not isinstance(surface.engine, HorizontalListEngine):
         raise TypeError("Replay Viewer requires a horizontal-list engine")
     engine = surface.engine
+    shown = event_items()
+    engine.set_zone_cursor("events", len(shown) - 1)
 
     def autoplay_current_event() -> None:
         if (

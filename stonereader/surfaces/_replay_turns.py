@@ -11,13 +11,21 @@ from stonereader.services._events import GameEvent
 
 
 @dataclass(frozen=True)
+class TurnEvent:
+    """A derived event and the replay snapshot immediately after it."""
+
+    event: GameEvent
+    state: GameState
+
+
+@dataclass(frozen=True)
 class TurnView:
     """The final state and derived events for one Hearthstone turn."""
 
     number: int
     is_friendly: bool
     state: GameState
-    events: tuple[GameEvent, ...]
+    events: tuple[TurnEvent, ...]
 
 
 def turns(replay: ReplayState) -> list[TurnView]:
@@ -28,14 +36,14 @@ def turns(replay: ReplayState) -> list[TurnView]:
     with its predecessor. Turn-zero mulligan snapshots are folded into turn 1
     as its prelude instead of becoming a separately navigable turn.
     """
-    grouped: dict[int, tuple[GameState, list[GameEvent]]] = {}
+    grouped: dict[int, tuple[GameState, list[TurnEvent]]] = {}
     previous: GameState | None = None
     for state in replay.states:
         number = max(1, state.turn)
         if number not in grouped:
             grouped[number] = (state, [])
         _last_state, events = grouped[number]
-        events.extend(diff(previous, state))
+        events.extend(TurnEvent(event, state) for event in diff(previous, state))
         grouped[number] = (state, events)
         previous = state
 

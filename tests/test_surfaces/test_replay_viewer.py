@@ -374,6 +374,21 @@ def test_card_hidden_status_hero_and_event_rows_follow_the_spec() -> None:
     assert harness.horizontal.items_snapshot()[2] == ["Turn 1", "Boar"]
 
 
+def test_event_scrubbing_renders_the_selected_moment_and_end_restores_turn_final() -> None:
+    harness = _harness()
+    harness.press(Chord("y"))
+    titles = harness.horizontal.items_snapshot()[0]
+    harness.horizontal.jump_to_position(titles.index("Turn 1, yours") + 1)
+
+    harness.press(Chord("b"))
+    assert harness.horizontal.items_snapshot()[2][1] == "1 attack, 3 health"
+
+    harness.press(Chord("y"))
+    harness.press(Chord("end"))
+    harness.press(Chord("b"))
+    assert harness.horizontal.items_snapshot()[2][1] == "1 attack, 2 health"
+
+
 def test_speak_only_queries_are_subject_first_and_never_change_zone() -> None:
     harness = _harness()
     expected = [
@@ -409,6 +424,40 @@ def test_digits_cursor_persistence_across_zones_and_turns() -> None:
     assert harness.horizontal.items_snapshot()[1] == 1
     harness.press(Chord("0"))
     assert harness.speech.calls[-1] == ("Yeti", True)
+
+
+def test_turn_step_positions_events_at_turn_end_and_renders_final_state() -> None:
+    harness = _harness()
+    harness.press(Chord("y"))
+    harness.press(Chord("home"))
+    assert harness.horizontal.items_snapshot()[1] == 0
+
+    harness.press(Chord("b"))
+    harness.press(Chord("pagedown"))
+    harness.press(Chord("pageup"))
+    harness.press(Chord("y"))
+
+    titles, cursor, _details = harness.horizontal.items_snapshot()
+    assert cursor == len(titles) - 1
+    harness.press(Chord("b"))
+    assert harness.horizontal.items_snapshot()[2][1] == "1 attack, 2 health"
+
+
+def test_events_cursor_persists_across_zone_switch_and_back_reveal() -> None:
+    harness = _harness()
+    harness.press(Chord("y"))
+    harness.press(Chord("home"))
+    harness.press(Chord("right"))
+    expected_cursor = harness.horizontal.items_snapshot()[1]
+
+    harness.press(Chord("b"))
+    harness.press(Chord("y"))
+    assert harness.horizontal.items_snapshot()[1] == expected_cursor
+
+    harness.nav.drill_down("Child")
+    harness.nav.back()
+    assert harness.horizontal.current_zone().zone_id == "events"
+    assert harness.horizontal.items_snapshot()[1] == expected_cursor
 
 
 def test_second_replay_resets_turn_but_back_reveal_does_not() -> None:
@@ -493,6 +542,7 @@ def test_listen_handles_card_event_source_and_all_no_push_cases() -> None:
         sounds=event_sounds,
     )
     harness.press(Chord("y"))
+    harness.press(Chord("home"))
     harness.press(Chord("l"))
     assert harness.nav.stack[-1] == "Replay Viewer"
     titles = harness.horizontal.items_snapshot()[0]
@@ -566,6 +616,7 @@ def test_events_autoplay_on_event_item_landing_transitions() -> None:
         sounds=SoundsMenuHolder(),
     )
     harness.press(Chord("y"))
+    player.played.clear()
     titles = harness.horizontal.items_snapshot()[0]
     played_position = titles.index("You played Boar") + 1
 

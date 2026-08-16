@@ -68,9 +68,12 @@ def test_groups_turn_zero_as_turn_one_prelude_and_uses_last_state() -> None:
     assert result[0].state is turn_one_end
     assert result[1].state is turn_two
     assert [turn.is_friendly for turn in result] == [True, False]
-    assert any(isinstance(event, GameStarted) for event in result[0].events)
-    assert any(isinstance(event, CardPlayed) for event in result[0].events)
-    assert any(isinstance(event, TurnChanged) for event in result[1].events)
+    assert any(isinstance(item.event, GameStarted) for item in result[0].events)
+    played = next(
+        item for item in result[0].events if isinstance(item.event, CardPlayed)
+    )
+    assert played.state is turn_one_end
+    assert any(isinstance(item.event, TurnChanged) for item in result[1].events)
 
 
 def test_empty_replay_has_no_turns() -> None:

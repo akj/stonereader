@@ -322,6 +322,26 @@ class HorizontalListEngine:
     def current_zone(self) -> ZoneSpec:
         return self._zones[self._active_zone_id]
 
+    def zone_cursor(self, zone_id: str) -> int:
+        """Return a zone's zero-based item cursor, clamped to its current items."""
+        try:
+            zone = self._zones[zone_id]
+        except KeyError as error:
+            raise ValueError(f"Unknown zone id: {zone_id}") from error
+        self._clamp(zone)
+        return self._item_cursors[zone_id]
+
+    def set_zone_cursor(self, zone_id: str, target: int) -> None:
+        """Set a zone's zero-based item cursor without landing there."""
+        try:
+            zone = self._zones[zone_id]
+        except KeyError as error:
+            raise ValueError(f"Unknown zone id: {zone_id}") from error
+        items = list(zone.items())
+        self._item_cursors[zone_id] = min(max(target, 0), max(len(items) - 1, 0))
+        self._detail_cursors[zone_id] = 0
+        self._clamp(zone, items)
+
     def _previous_item(self) -> None:
         self._move_item(-1)
 
