@@ -68,6 +68,7 @@ def make_surface(
     )
     navigation.register("Deck detail", lambda: placeholder("Deck detail"))
     navigation.register("Import Deck", lambda: placeholder("Import Deck"))
+    navigation.register("Statistics", lambda: placeholder("Statistics"))
     actual_offer_sink = offer_sink or SeenSink()
     surface = build_decks(
         announcer,
@@ -205,12 +206,12 @@ def test_enter_dispatches_for_deck_import_and_statistics_rows(
         sink.handle_chord(Chord("enter"))
         assert nav.stack == ("Home", "Import Deck")
 
-        _surface, sink, speech, _nav, _current, _copied, _seen = make_surface(
+        _surface, sink, _speech, nav, _current, _copied, _seen = make_surface(
             empty_conn
         )
         sink.handle_chord(Chord("right"))
         sink.handle_chord(Chord("enter"))
-        assert speech.calls[-1] == ("Statistics: not yet migrated", True)
+        assert nav.stack == ("Home", "Statistics")
     finally:
         empty_conn.close()
 

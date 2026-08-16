@@ -85,7 +85,7 @@ def build_decks(
         elif item.action_id == "import":
             nav.drill_down("Import Deck")
         else:
-            announcer.noop("Statistics: not yet migrated")
+            nav.drill_down("Statistics")
 
     def finish_delete(item: DeckRow) -> None:
         if armed is not None:

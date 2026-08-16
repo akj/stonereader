@@ -27,6 +27,7 @@ from stonereader.surfaces.import_replays import build_import_replays
 from stonereader.surfaces.live_game import CurrentGame, build_live_game
 from stonereader.surfaces.replays import build_replays
 from stonereader.surfaces.replay_viewer import CurrentReplay, build_replay_viewer
+from stonereader.surfaces.statistics import build_statistics
 from stonereader.ui import (
     ActiveSurface,
     Announcer,
@@ -348,6 +349,14 @@ class StoneReaderApp(wx.App):
                 _choose_replay_files,
             )
 
+        def statistics_factory() -> ActiveSurface:
+            return build_statistics(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                db_conn,
+            )
+
         nav.register("Home", home_factory)
         nav.register("Live Game", live_game_factory)
         nav.register("Cards", cards_factory)
@@ -357,6 +366,7 @@ class StoneReaderApp(wx.App):
         nav.register("Replays", replays_factory)
         nav.register("Replay Viewer", replay_viewer_factory)
         nav.register("Import Replays", import_replays_factory)
+        nav.register("Statistics", statistics_factory)
 
         def accept_clipboard_deck(text: str) -> None:
             import_field.set(text)
