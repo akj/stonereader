@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
-
 from stonereader.models.card import Card, CardDatabase
 from stonereader.models.game_state import AttackInProgress, GameEntity, GameState, Hero
 from stonereader.services._narrator import Narrator
@@ -76,17 +74,20 @@ def _narrator(preset: list[str], *cards: Card) -> tuple[Narrator, _FakeAnnouncer
 
 
 def test_off_and_live_preset_changes_filter_at_each_state_update() -> None:
+    yeti = _card("YETI", "Yeti")
     preset = ["off"]
-    narrator, announcer = _narrator(preset)
-    prev = _state(active_player_id=1)
-    curr = replace(prev, turn=2, active_player_id=2)
+    narrator, announcer = _narrator(preset, yeti)
+    alive = _entity(20, yeti, "PLAY", 2)
+    dead = _entity(20, yeti, "GRAVEYARD", 2)
+    prev = _state(opponent_board=(alive,))
+    curr = _state(graveyard=(dead,))
 
     narrator.on_state(prev, curr)
     assert announcer.spoken == []
 
     preset[0] = "key_moments"
     narrator.on_state(prev, curr)
-    assert announcer.spoken == ["Turn 2, opponent's"]
+    assert announcer.spoken == ["Yeti died"]
 
 
 def test_key_moments_speaks_decision_changing_events_only() -> None:
@@ -134,7 +135,6 @@ def test_key_moments_speaks_decision_changing_events_only() -> None:
     )
 
     assert announcer.spoken == [
-        "Turn 2, opponent's",
         "Opponent played Fireball",
         "Yeti died",
         "Opponent played a secret",
@@ -143,7 +143,7 @@ def test_key_moments_speaks_decision_changing_events_only() -> None:
     ]
 
 
-def test_everything_adds_draws_and_attacks_but_never_friendly_plays() -> None:
+def test_everything_adds_your_draws_and_attacks_but_never_friendly_plays() -> None:
     fireball = _card("FIREBALL", "Fireball")
     boar = _card("BOAR", "Boar")
     yeti = _card("YETI", "Yeti")
@@ -183,9 +183,27 @@ def test_everything_adds_draws_and_attacks_but_never_friendly_plays() -> None:
 
     assert announcer.spoken == [
         "You drew Fireball",
-        "Opponent drew a card",
         "Boar attacks Yeti",
     ]
+
+
+def test_client_covered_events_are_never_narrated() -> None:
+    # Turn flips and opponent draws are the client's to announce, so even
+    # the widest preset stays silent on them.
+    fireball = _card("FIREBALL", "Fireball")
+    preset = ["everything"]
+    narrator, announcer = _narrator(preset, fireball)
+
+    narrator.on_state(_state(active_player_id=1), _state(turn=2, active_player_id=2))
+
+    opponent_deck = _entity(41, fireball, "DECK", 2)
+    opponent_hand = _entity(41, fireball, "HAND", 2)
+    narrator.on_state(
+        _state(player_deck=(opponent_deck,)),
+        _state(opponent_hand=(opponent_hand,)),
+    )
+
+    assert announcer.spoken == []
 
 
 def test_key_moments_excludes_draws_and_attacks() -> None:

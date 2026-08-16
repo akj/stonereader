@@ -76,7 +76,8 @@ future research candidate rather than a spec ruling. No other counters.
 Live zone landings keep the plain `"{Zone label}, {title}, {position} of
 {count}"` utterance — no turn prefix. The Replay Viewer's "Turn {t}, {yours |
 opponent's}" label exists because turn stepping changes what every zone
-means; live, the turn is ambient (the client and Lane 2 both announce it).
+means; live, the turn is ambient (the client announces it; Lane 2 originally
+doubled it, until the ui-spec dropped turn narration as client-redundant).
 One dialect means the same keys mean the same things, not that every
 utterance carries the same prefix.
 

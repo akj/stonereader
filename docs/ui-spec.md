@@ -461,9 +461,9 @@ system-wide hotkeys Ctrl+Shift+L (landing on Remaining Deck) and Ctrl+Shift+O
 `"{Zone label}, {title}, {position} of {count}"`, degrading to
 `"{Zone label}: empty"` when the zone holds nothing, which is also what a Live
 Game with no game in progress sounds like (ADR-0007). Labels carry **no turn
-prefix**: live, the turn is ambient — the client and Lane 2 both announce it —
-and the Replay Viewer's turn-carrying label exists only because turn stepping
-changes what every zone means (ADR-0013).
+prefix**: live, the turn is ambient — the client announces it — and the Replay
+Viewer's turn-carrying label exists only because turn stepping changes what
+every zone means (ADR-0013).
 
 **Zones.** Live Game speaks the Replay Viewer's full dialect — ADR-0004's "one
 dialect, live or replayed", completed by ADR-0013: the same fifteen navigable
@@ -1163,17 +1163,18 @@ Space is unbound here and therefore silent.
 
 **Narration presets** — the Lane-2 content (ADR-0011). Membership test for Key
 moments: *things you'd miss by not watching that change your next decision*. The
-User's own plays are narrated by no preset.
+User's own plays are narrated by no preset, and neither are turn flips or
+opponent draws — the client announces both itself, and StoneReader does not
+double the client (ADR-0013's principle; *this spec's amendment* to ADR-0011's
+original table).
 
 | Game event | Key moments | Everything |
 |---|---|---|
-| Turn flip | yes | yes |
 | Opponent plays a card | yes | yes |
 | Minion dies | yes | yes |
 | Secret played / revealed | yes | yes |
 | Game over (result) | yes | yes |
 | Friendly Player draws (card name) | — | yes |
-| Opponent draws (count only) | — | yes |
 | Attacks (attacker → target) | — | yes |
 | Hero power used | — | yes |
 | Triggers / deathrattles | — | yes |

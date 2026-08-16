@@ -18,13 +18,11 @@ from stonereader.services._events import (
     MinionDied,
     SecretPlayed,
     SecretRevealed,
-    TurnChanged,
 )
 from stonereader.ui.announcer import Announcer
 
 
 _KEY_MOMENTS = (
-    TurnChanged,
     MinionDied,
     SecretPlayed,
     SecretRevealed,
@@ -67,10 +65,14 @@ class Narrator:
 
 
 def _included(event: GameEvent, preset: str) -> bool:
+    # Turn flips and opponent draws are never narrated: the client
+    # announces both itself, and StoneReader does not double the client.
     if isinstance(event, CardPlayed):
         return event.controller != 1 and preset in {"key_moments", "everything"}
     if isinstance(event, _KEY_MOMENTS):
         return preset in {"key_moments", "everything"}
-    if isinstance(event, (CardDrawn, AttackStarted)):
+    if isinstance(event, CardDrawn):
+        return event.controller == 1 and preset == "everything"
+    if isinstance(event, AttackStarted):
         return preset == "everything"
     return False

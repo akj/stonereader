@@ -113,7 +113,9 @@ User's own plays are narrated by neither preset — you did them.
 
 This table is the preset definition; per-surface PRDs may amend membership
 without reopening this ADR — the Narrator seam (ADR-0010) makes it one
-table.
+table. (The ui-spec later removed turn flips and opponent draws from every
+preset as client-redundant — the client announces both itself, ADR-0013's
+principle. The ui-spec table is current.)
 
 ### Apply, persist, reset
 
