@@ -29,8 +29,10 @@ def test_invalid_chords_raise(source: str) -> None:
 @pytest.mark.parametrize(
     ("chord", "spoken"),
     [
-        (Chord("l", ctrl=True, shift=True), "Control Shift L"),
+        (Chord("l", ctrl=True, shift=True), "Ctrl Shift L"),
         (Chord("enter", ctrl=True), "Control Enter"),
+        (Chord("enter", ctrl=True, shift=True), "Ctrl Shift Enter"),
+        (Chord("enter", ctrl=True, alt=True), "Ctrl Alt Enter"),
         (Chord("pagedown"), "Page Down"),
         (Chord("pageup"), "Page Up"),
         (Chord("f1"), "F1"),

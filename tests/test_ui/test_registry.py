@@ -5,7 +5,6 @@ import pytest
 from stonereader.ui.chords import Chord
 from stonereader.ui.registry import (
     SLOT_CHORDS,
-    SLOT_DEFAULT_PHRASES,
     Command,
     CommandRegistry,
     Layer,
@@ -35,6 +34,13 @@ def test_lower_layer_cannot_shadow_upper_layer() -> None:
         registry.register(Layer.SURFACE, Chord("f1"), command("other"))
 
 
+@pytest.mark.parametrize("layer", [Layer.WIDGET_TYPE, Layer.SURFACE])
+def test_f1_is_structurally_reserved_for_the_universal_layer(layer: Layer) -> None:
+    registry = CommandRegistry()
+    with pytest.raises(RegistrationError):
+        registry.register(layer, Chord("f1"), command("help"))
+
+
 @pytest.mark.parametrize(
     "chord",
     [Chord("enter", ctrl=True), Chord("escape"), Chord("backspace")],
@@ -51,7 +57,9 @@ def test_every_slot_defaults_to_an_announced_noop(slot: Slot) -> None:
     for chord in SLOT_CHORDS[slot]:
         result = registry.dispatch(chord)
         assert result.handled is True
-        assert result.announce == SLOT_DEFAULT_PHRASES[slot]
+        # The registry names the slot; the Announcer owns its phrase.
+        assert result.announce is None
+        assert result.noop_slot is slot
 
 
 @pytest.mark.parametrize("slot", list(Slot))
@@ -63,6 +71,7 @@ def test_every_slot_can_be_filled(slot: Slot) -> None:
         result = registry.dispatch(chord)
         assert result.handled is True
         assert result.announce is None
+        assert result.noop_slot is None
     assert calls == [slot.name] * len(SLOT_CHORDS[slot])
 
 
@@ -116,6 +125,20 @@ def test_surface_bindings_preserve_registration_order_including_slots() -> None:
         (Chord("a"), first),
         (Chord("f", ctrl=True), search),
         (Chord("b"), last),
+    ]
+
+
+def test_all_bindings_include_each_explicit_layer_and_slot_fill() -> None:
+    registry = CommandRegistry([(Chord("f1"), command("universal"))])
+    registry.register(Layer.WIDGET_TYPE, Chord("up"), command("widget"))
+    registry.register(Layer.SURFACE, Chord("a"), command("surface"))
+    registry.fill_slot(Slot.SEARCH, command("search"))
+
+    assert [command.id for _chord, command in registry.all_bindings()] == [
+        "universal",
+        "widget",
+        "surface",
+        "search",
     ]
 
 

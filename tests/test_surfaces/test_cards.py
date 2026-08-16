@@ -1,47 +1,23 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import pytest
 
 from stonereader.models.card import Card, CardDatabase
 from stonereader.services._audio_index import CardClip
+from stonereader.surfaces._help_content import screen_bindings
 from stonereader.surfaces.cards import build_cards
 from stonereader.surfaces.sounds_menu import SoundsMenuHolder
-from stonereader.ui._sink_core import _SinkCore
-from stonereader.ui.announcer import Announcer
 from stonereader.ui.builder import build_active_surface
 from stonereader.ui.chords import Chord
-from stonereader.ui.engines import HorizontalListEngine
-from stonereader.ui.navigation import ActiveSurface, NavigationController
+from stonereader.ui.navigation import ActiveSurface
 from stonereader.ui.surface import SurfaceSpec, WidgetType
 
-from tests.test_ui.conftest import FakeSpeech
+from .conftest import Harness, make_harness as make_base_harness, placeholder_surface
 
 
 @pytest.fixture(scope="module")
 def real_card_db() -> CardDatabase:
     return CardDatabase.load()
-
-
-@dataclass
-class Harness:
-    surface: ActiveSurface
-    sink: _SinkCore
-    speech: FakeSpeech
-    nav: NavigationController
-
-    @property
-    def engine(self) -> HorizontalListEngine:
-        assert isinstance(self.surface.engine, HorizontalListEngine)
-        return self.surface.engine
-
-    def press(self, chord: Chord) -> bool:
-        return self.sink.handle_chord(chord)
-
-    def type(self, text: str) -> None:
-        for character in text:
-            self.press(Chord("space") if character == " " else Chord(character))
 
 
 def card(
@@ -91,7 +67,8 @@ class FakeAudioIndex:
         self.reason = reason
         self._clips = clips or []
 
-    def clips_for_card(self, _card_id: str) -> list[CardClip]:
+    def clips_for_card(self, card_id: str) -> list[CardClip]:
+        del card_id
         return list(self._clips)
 
 
@@ -99,41 +76,25 @@ def make_harness(
     card_db: CardDatabase,
     audio_index: FakeAudioIndex | None = None,
     sounds: SoundsMenuHolder | None = None,
-) -> Harness:
-    speech = FakeSpeech()
-    announcer = Announcer(speech)
-    sink = _SinkCore(announcer, lambda: None)
-    nav = NavigationController(
-        lambda _title: None,
-        announcer,
-        lambda: None,
-        lambda surface: sink.set_active(surface.registry),
-    )
+) -> Harness[None]:
+    harness = make_base_harness(None)
     if audio_index is not None and sounds is not None:
-        nav.register(
+        harness.nav.register(
             "Sounds menu",
-            lambda: build_active_surface(
-                SurfaceSpec(
-                    "Sounds menu",
-                    WidgetType.VERTICAL_MENU,
-                    options=lambda: [],
-                ),
-                announcer,
-                [],
-                nav,
-            ),
+            lambda: placeholder_surface("Sounds menu"),
         )
-    surface = build_cards(
-        announcer,
-        [],
-        nav,
-        card_db,
-        sink,
-        audio_index=audio_index,
-        sounds=sounds,
+    harness.set_surface(
+        build_cards(
+            harness.announcer,
+            [],
+            harness.nav,
+            card_db,
+            harness.sink,
+            audio_index=audio_index,
+            sounds=sounds,
+        )
     )
-    sink.set_active(surface.registry)
-    return Harness(surface, sink, speech, nav)
+    return harness
 
 
 def test_listen_handles_empty_warming_no_clips_and_pushes_ready_card() -> None:
@@ -175,16 +136,16 @@ def test_listen_handles_empty_warming_no_clips_and_pushes_ready_card() -> None:
     assert ready_sounds.get().card_name == "Fireball"
 
 
-def current_names(harness: Harness) -> list[str]:
-    return harness.engine.items_snapshot()[0]
+def current_names(harness: Harness[None]) -> list[str]:
+    return harness.horizontal.items_snapshot()[0]
 
 
-def cycle_to_mage(harness: Harness) -> None:
+def cycle_to_mage(harness: Harness[None]) -> None:
     for _ in range(5):
         harness.press(Chord("tab"))
 
 
-def commit_search(harness: Harness, query: str) -> None:
+def commit_search(harness: Harness[None], query: str) -> None:
     harness.press(Chord("f", ctrl=True))
     harness.type(query)
     harness.press(Chord("enter"))
@@ -194,7 +155,7 @@ def test_real_database_is_loaded_once_and_initial_results_are_name_sorted(
     real_card_db: CardDatabase,
 ) -> None:
     harness = make_harness(real_card_db)
-    values = list(harness.surface.spec.zones[0].items())
+    values = list(harness.subject_surface.spec.zones[0].items())
 
     assert values
     assert [value.name for value in values] == sorted(value.name for value in values)
@@ -208,7 +169,7 @@ def test_context_label_composes_all_spec_rows_verbatim() -> None:
             card(2, "Other", cost=3, card_class="MAGE"),
         )
     )
-    label = harness.surface.spec.context_label
+    label = harness.subject_surface.spec.context_label
     assert label is not None
 
     assert label() == "All cards"
@@ -241,8 +202,8 @@ def test_filters_and_search_and_clearing_one_leaves_the_others() -> None:
 
     harness.press(Chord("3"))
     assert current_names(harness) == ["Mage Fire Four", "Mage Fire Three"]
-    assert harness.surface.spec.context_label is not None
-    assert harness.surface.spec.context_label() == "Mage cards, matching fire"
+    assert harness.subject_surface.spec.context_label is not None
+    assert harness.subject_surface.spec.context_label() == "Mage cards, matching fire"
 
     harness.press(Chord("f", ctrl=True))
     for _ in "fire":
@@ -253,7 +214,7 @@ def test_filters_and_search_and_clearing_one_leaves_the_others() -> None:
         "Mage Fire Three",
         "Mage Water Three",
     ]
-    assert harness.surface.spec.context_label() == "Mage cards"
+    assert harness.subject_surface.spec.context_label() == "Mage cards"
 
 
 def test_digits_toggle_exact_zero_and_nine_plus_filters() -> None:
@@ -273,15 +234,15 @@ def test_digits_toggle_exact_zero_and_nine_plus_filters() -> None:
 
     harness.press(Chord("9"))
     assert current_names(harness) == ["Nine", "Twelve"]
-    assert harness.surface.spec.context_label is not None
-    assert harness.surface.spec.context_label() == "All cards, 9 plus mana"
+    assert harness.subject_surface.spec.context_label is not None
+    assert harness.subject_surface.spec.context_label() == "All cards, 9 plus mana"
     harness.press(Chord("9"))
     assert current_names(harness) == ["Eight", "Nine", "Twelve", "Zero"]
 
 
 def test_tab_cycles_both_directions_with_wraparound() -> None:
     harness = make_harness(database(card(1, "Only")))
-    label = harness.surface.spec.context_label
+    label = harness.subject_surface.spec.context_label
     assert label is not None
 
     harness.press(Chord("tab"))
@@ -305,20 +266,20 @@ def test_search_commit_abandon_and_empty_commit_clear() -> None:
     commit_search(harness, "fire")
     assert harness.sink.text_mode_active is False
     assert current_names(harness) == ["Fireball"]
-    assert harness.surface.spec.context_label is not None
-    assert harness.surface.spec.context_label() == "All cards matching fire"
+    assert harness.subject_surface.spec.context_label is not None
+    assert harness.subject_surface.spec.context_label() == "All cards matching fire"
 
     harness.press(Chord("f", ctrl=True))
     harness.type("x")
     harness.press(Chord("escape"))
-    assert harness.surface.spec.context_label() == "All cards matching fire"
+    assert harness.subject_surface.spec.context_label() == "All cards matching fire"
     assert current_names(harness) == ["Fireball"]
 
     harness.press(Chord("f", ctrl=True))
     for _ in "fire":
         harness.press(Chord("backspace"))
     harness.press(Chord("enter"))
-    assert harness.surface.spec.context_label() == "All cards"
+    assert harness.subject_surface.spec.context_label() == "All cards"
     assert current_names(harness) == ["Fireball", "Frostbolt"]
 
 
@@ -350,15 +311,30 @@ def test_paging_moves_ten_and_clamps_at_both_ends() -> None:
     )
 
     harness.press(Chord("pagedown"))
-    assert harness.engine.items_snapshot()[1] == 10
+    assert harness.horizontal.items_snapshot()[1] == 10
     harness.press(Chord("pagedown"))
     harness.press(Chord("pagedown"))
-    assert harness.engine.items_snapshot()[1] == 24
+    assert harness.horizontal.items_snapshot()[1] == 24
     harness.press(Chord("pageup"))
-    assert harness.engine.items_snapshot()[1] == 14
+    assert harness.horizontal.items_snapshot()[1] == 14
     harness.press(Chord("pageup"))
     harness.press(Chord("pageup"))
-    assert harness.engine.items_snapshot()[1] == 0
+    assert harness.horizontal.items_snapshot()[1] == 0
+
+
+def test_help_documents_both_directions_for_class_and_page_chords() -> None:
+    harness = make_harness(database(card(1, "Only")))
+    phrases = [
+        entry.phrase for entry in screen_bindings(harness.subject_surface)
+    ]
+
+    assert phrases[-5:] == [
+        "Tab: jump to the next class",
+        "Shift+Tab: jump to the previous class",
+        "Ctrl+F: search for a card",
+        "Page Up: jump ten cards back",
+        "Page Down: jump ten cards forward",
+    ]
 
 
 def test_detail_lines_cover_minion_weapon_spell_and_empty_text() -> None:
@@ -402,7 +378,7 @@ def test_detail_lines_cover_minion_weapon_spell_and_empty_text() -> None:
         )
     )
 
-    assert harness.engine.items_snapshot()[2] == [
+    assert harness.horizontal.items_snapshot()[2] == [
         "2 mana",
         "Minion",
         "3 attack, 4 health",
@@ -412,7 +388,7 @@ def test_detail_lines_cover_minion_weapon_spell_and_empty_text() -> None:
         "CORE",
     ]
     harness.press(Chord("right"))
-    assert harness.engine.items_snapshot()[2] == [
+    assert harness.horizontal.items_snapshot()[2] == [
         "3 mana",
         "Weapon",
         "4 attack, 2 durability",
@@ -422,7 +398,7 @@ def test_detail_lines_cover_minion_weapon_spell_and_empty_text() -> None:
         "EXPERT1",
     ]
     harness.press(Chord("right"))
-    assert harness.engine.items_snapshot()[2] == [
+    assert harness.horizontal.items_snapshot()[2] == [
         "1 mana",
         "Spell",
         "Mage",
@@ -452,50 +428,47 @@ def test_filter_state_survives_leave_and_return() -> None:
         card(1, "Fire Three", cost=3, card_class="MAGE", text="fire"),
         card(2, "Other", cost=4),
     )
-    speech = FakeSpeech()
-    announcer = Announcer(speech)
-    sink = _SinkCore(announcer, lambda: None)
-    nav = NavigationController(
-        lambda _title: None,
-        announcer,
-        lambda: None,
-        lambda surface: sink.set_active(surface.registry),
-    )
+    harness = make_base_harness(None)
     builds = 0
     cards_surface: ActiveSurface | None = None
 
     def cards_factory() -> ActiveSurface:
         nonlocal builds, cards_surface
         builds += 1
-        cards_surface = build_cards(announcer, [], nav, card_db, sink)
+        cards_surface = build_cards(
+            harness.announcer,
+            [],
+            harness.nav,
+            card_db,
+            harness.sink,
+        )
         return cards_surface
 
     def home_factory() -> ActiveSurface:
         return build_active_surface(
             SurfaceSpec("Home", WidgetType.VERTICAL_MENU, options=lambda: []),
-            announcer,
+            harness.announcer,
             [],
-            nav,
+            harness.nav,
         )
 
-    nav.register("Home", home_factory)
-    nav.register("Cards", cards_factory)
-    nav.jump("Cards")
+    harness.nav.register("Home", home_factory)
+    harness.nav.register("Cards", cards_factory)
+    harness.nav.jump("Cards")
     assert cards_surface is not None
-    harness = Harness(cards_surface, sink, speech, nav)
     cycle_to_mage(harness)
-    sink.handle_chord(Chord("3"))
+    harness.press(Chord("3"))
     commit_search(harness, "fire")
 
-    nav.jump("Home")
-    nav.jump("Cards")
+    harness.nav.jump("Home")
+    harness.nav.jump("Cards")
 
     assert cards_surface.spec.context_label is not None
     assert cards_surface.spec.context_label() == (
         "Mage cards, 3 mana, matching fire"
     )
     assert builds == 1
-    assert speech.calls[-1] == (
+    assert harness.speech.calls[-1] == (
         "Mage cards, 3 mana, matching fire, Fire Three, 1 of 1",
         True,
     )

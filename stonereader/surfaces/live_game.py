@@ -7,14 +7,17 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from stonereader.models.card import Card
-from stonereader.models.game_state import GameEntity, GameState, Hero
-from stonereader.surfaces._zone_format import (
-    CardItem,
-    card_detail_lines,
-    card_title,
-    hero_detail_lines,
-    hero_title,
+from stonereader.models.game_state import GameEntity, GameState
+from stonereader.surfaces._game_surface import (
+    card_items,
+    card_zone,
+    hero_items,
+    opponent_hero_details,
+    player_hero_details,
+    require_engine,
+    singleton,
 )
+from stonereader.surfaces._zone_format import hero_title
 from stonereader.ui.announcer import Announcer
 from stonereader.ui.builder import build_active_surface
 from stonereader.ui.chords import Chord
@@ -79,30 +82,6 @@ def build_live_game(
     def state() -> GameState | None:
         return current_game.get()
 
-    def card_items(attribute: str) -> Callable[[], list[CardItem]]:
-        def items() -> list[CardItem]:
-            current = state()
-            return [] if current is None else list(getattr(current, attribute))
-
-        return items
-
-    def singleton(attribute: str) -> Callable[[], list[CardItem]]:
-        def items() -> list[CardItem]:
-            current = state()
-            if current is None:
-                return []
-            item = getattr(current, attribute)
-            return [] if item is None else [item]
-
-        return items
-
-    def hero_items(attribute: str) -> Callable[[], list[Hero]]:
-        def items() -> list[Hero]:
-            current = state()
-            return [] if current is None else [getattr(current, attribute)]
-
-        return items
-
     def remaining_deck() -> list[RemainingDeckItem]:
         current = state()
         if current is None:
@@ -134,22 +113,6 @@ def build_live_game(
             for position, entity in enumerate(current.opponent_hand, start=1)
         ]
 
-    def player_hero_details(hero: Hero) -> list[str]:
-        current = state()
-        if current is None:
-            return []
-        return hero_detail_lines(hero, current.player_weapon, len(current.player_secrets))
-
-    def opponent_hero_details(hero: Hero) -> list[str]:
-        current = state()
-        if current is None:
-            return []
-        return hero_detail_lines(
-            hero,
-            current.opponent_weapon,
-            len(current.opponent_secrets),
-        )
-
     def query(subject: str, value: Callable[[GameState], str]) -> None:
         current = state()
         if current is None:
@@ -169,26 +132,26 @@ def build_live_game(
             Chord("d"),
             "D: jump to Remaining Deck",
         ),
-        _card_zone(
+        card_zone(
             "your_board",
             "Your board",
             "b",
             "B: your minions",
-            card_items("player_board"),
+            card_items(state, "player_board"),
         ),
-        _card_zone(
+        card_zone(
             "opponent_board",
             "Opponent board",
             "g",
             "G: opponent minions",
-            card_items("opponent_board"),
+            card_items(state, "opponent_board"),
         ),
-        _card_zone(
+        card_zone(
             "your_hand",
             "Your hand",
             "c",
             "C: your hand",
-            card_items("player_hand"),
+            card_items(state, "player_hand"),
         ),
         ZoneSpec(
             "opponent_hand",
@@ -199,85 +162,85 @@ def build_live_game(
             Chord("c", shift=True),
             "Shift+C: opponent hand",
         ),
-        _card_zone(
+        card_zone(
             "your_secrets",
             "Your secrets",
             "s",
             "S: your secrets",
-            card_items("player_secrets"),
+            card_items(state, "player_secrets"),
         ),
-        _card_zone(
+        card_zone(
             "opponent_secrets",
             "Opponent secrets",
             "s",
             "Shift+S: opponent secrets",
-            card_items("opponent_secrets"),
+            card_items(state, "opponent_secrets"),
             shift=True,
         ),
         ZoneSpec(
             "your_hero",
             "Your hero",
-            hero_items("player_hero"),
+            hero_items(state, "player_hero"),
             hero_title,
-            player_hero_details,
+            player_hero_details(state),
             Chord("v"),
             "V: your hero",
         ),
         ZoneSpec(
             "opponent_hero",
             "Opponent hero",
-            hero_items("opponent_hero"),
+            hero_items(state, "opponent_hero"),
             hero_title,
-            opponent_hero_details,
+            opponent_hero_details(state),
             Chord("f"),
             "F: opponent hero",
         ),
-        _card_zone(
+        card_zone(
             "your_weapon",
             "Your weapon",
             "w",
             "W: your weapon",
-            singleton("player_weapon"),
+            singleton(state, "player_weapon"),
         ),
-        _card_zone(
+        card_zone(
             "opponent_weapon",
             "Opponent weapon",
             "w",
             "Shift+W: opponent weapon",
-            singleton("opponent_weapon"),
+            singleton(state, "opponent_weapon"),
             shift=True,
         ),
-        _card_zone(
+        card_zone(
             "your_played",
             "Your played",
             "p",
             "P: cards you played",
-            card_items("player_played"),
+            card_items(state, "player_played"),
             with_turn=True,
         ),
-        _card_zone(
+        card_zone(
             "opponent_played",
             "Opponent played",
             "p",
             "Shift+P: cards your opponent played",
-            card_items("opponent_played"),
+            card_items(state, "opponent_played"),
             shift=True,
             with_turn=True,
         ),
-        _card_zone(
+        card_zone(
             "your_drawn",
             "Your drawn",
             "n",
             "N: cards you drew",
-            card_items("player_drawn"),
+            card_items(state, "player_drawn"),
             with_turn=True,
         ),
-        _card_zone(
+        card_zone(
             "opponent_drawn",
             "Opponent drawn",
             "n",
             "Shift+N: cards your opponent drew",
-            card_items("opponent_drawn"),
+            card_items(state, "opponent_drawn"),
             shift=True,
             with_turn=True,
         ),
@@ -358,9 +321,9 @@ def build_live_game(
             Command(
                 f"live.position.{position}",
                 "1 to 9: jump to that position in the list",
-                lambda position=position: _require_engine(engine).jump_to_position(
-                    position
-                ),
+                lambda position=position: require_engine(
+                    engine, "Live Game"
+                ).jump_to_position(position),
             ),
         )
         for position in range(1, 10)
@@ -371,7 +334,7 @@ def build_live_game(
             Command(
                 "live.position.10",
                 "0: jump to the tenth item",
-                lambda: _require_engine(engine).jump_to_position(10),
+                lambda: require_engine(engine, "Live Game").jump_to_position(10),
             ),
         )
     )
@@ -392,27 +355,6 @@ def build_live_game(
     engine = surface.engine
     current_game.subscribe(engine.refresh)
     return surface
-
-
-def _card_zone(
-    zone_id: str,
-    label: str,
-    key: str,
-    help_phrase: str,
-    items: Callable[[], list[CardItem]],
-    *,
-    shift: bool = False,
-    with_turn: bool = False,
-) -> ZoneSpec:
-    return ZoneSpec(
-        zone_id,
-        label,
-        items,
-        lambda item: card_title(item, with_turn=with_turn),
-        card_detail_lines,
-        Chord(key, shift=shift),
-        help_phrase,
-    )
 
 
 def _remaining_deck_title(item: RemainingDeckItem) -> str:
@@ -442,7 +384,6 @@ def _remaining_deck_details(item: RemainingDeckItem) -> list[str]:
         lines.append(card.text)
     return lines
 
-
 def _opponent_hand_title(item: OpponentHandItem) -> str:
     identity = item.entity.name if item.entity is not None else ""
     return f"Card {item.position}, {identity or 'unknown'}"
@@ -461,9 +402,3 @@ def _opponent_hand_details(item: OpponentHandItem) -> list[str]:
     if entity is not None and entity.creation_lineage:
         lines.append(f"Created by {entity.creation_lineage}")
     return lines
-
-
-def _require_engine(engine: HorizontalListEngine | None) -> HorizontalListEngine:
-    if engine is None:
-        raise RuntimeError("Live Game engine is not active")
-    return engine

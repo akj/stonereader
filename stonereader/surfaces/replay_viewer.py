@@ -6,7 +6,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Protocol
 
-from stonereader.models.game_state import GameEntity, GameState, Hero, PlayedCard
+from stonereader.models.game_state import GameEntity, GameState, PlayedCard
 from stonereader.models.replay import ReplayState
 from stonereader.services._event_phrases import phrase
 from stonereader.services._events import (
@@ -15,21 +15,23 @@ from stonereader.services._events import (
     CardPlayed,
     CardRemoved,
     CardRevealed,
-    GameEnded,
     GameEvent,
     MinionDied,
-    SecretPlayed,
-    SecretRevealed,
-    TurnChanged,
+)
+from stonereader.surfaces._game_surface import (
+    card_items,
+    card_zone,
+    hero_items,
+    opponent_hero_details,
+    player_hero_details,
+    require_engine,
+    singleton,
 )
 from stonereader.surfaces._game_audio import CardAudioIndex, open_sounds_for_card
 from stonereader.surfaces._replay_turns import TurnView, turns
 from stonereader.surfaces._zone_format import (
-    CardItem,
     card_detail_lines,
     card_name,
-    card_title,
-    hero_detail_lines,
     hero_title,
 )
 from stonereader.surfaces.sounds_menu import SoundsMenuHolder
@@ -131,32 +133,6 @@ def build_replay_viewer(
         side = "yours" if turn.is_friendly else "opponent's"
         return f"Turn {turn.number}, {side}, {engine.current_zone().label}"
 
-    def card_items(attribute: str) -> Callable[[], list[CardItem]]:
-        return lambda: list(getattr(state(), attribute))
-
-    def singleton(attribute: str) -> Callable[[], list[CardItem]]:
-        def items() -> list[CardItem]:
-            item = getattr(state(), attribute)
-            return [] if item is None else [item]
-
-        return items
-
-    def player_hero_details(hero: Hero) -> list[str]:
-        current = state()
-        return hero_detail_lines(
-            hero,
-            current.player_weapon,
-            len(current.player_secrets),
-        )
-
-    def opponent_hero_details(hero: Hero) -> list[str]:
-        current = state()
-        return hero_detail_lines(
-            hero,
-            current.opponent_weapon,
-            len(current.opponent_secrets),
-        )
-
     def event_items() -> list[_EventItem]:
         current = current_turn()
         values: list[_EventItem] = []
@@ -188,9 +164,11 @@ def build_replay_viewer(
                 # A clamped coarse-axis step is a boundary, so it repeats the
                 # current bare Title line rather than pretending to re-land.
                 announcer.boundary(engine.current_zone().title(item))
+            sync_autoplay_location()
             return
         turn_index = target
         engine.on_landing()
+        sync_autoplay_location()
 
     def query(subject: str, value: str) -> None:
         announcer.query(subject, value)
@@ -211,21 +189,6 @@ def build_replay_viewer(
                 title=current.source_title or "No card focused",
             )
             return
-        card_zone_ids = {
-            "your_board",
-            "opponent_board",
-            "your_hand",
-            "opponent_hand",
-            "your_secrets",
-            "opponent_secrets",
-            "your_weapon",
-            "opponent_weapon",
-            "your_deck",
-            "your_played",
-            "opponent_played",
-            "your_drawn",
-            "opponent_drawn",
-        }
         if zone_id not in card_zone_ids or current is None:
             announcer.noop("No card focused")
             return
@@ -242,23 +205,23 @@ def build_replay_viewer(
         )
 
     zones = [
-        _card_zone("your_board", "Your board", "b", "B: your minions", card_items("player_board")),
-        _card_zone("opponent_board", "Opponent board", "g", "G: opponent minions", card_items("opponent_board")),
-        _card_zone("your_hand", "Your hand", "c", "C: your hand", card_items("player_hand")),
-        _card_zone("opponent_hand", "Opponent hand", "c", "Shift+C: opponent hand", card_items("opponent_hand"), shift=True),
-        _card_zone("your_secrets", "Your secrets", "s", "S: your secrets", card_items("player_secrets")),
-        _card_zone("opponent_secrets", "Opponent secrets", "s", "Shift+S: opponent secrets", card_items("opponent_secrets"), shift=True),
-        ZoneSpec("your_hero", "Your hero", lambda: [state().player_hero], hero_title, player_hero_details, Chord("v"), "V: your hero"),
-        ZoneSpec("opponent_hero", "Opponent hero", lambda: [state().opponent_hero], hero_title, opponent_hero_details, Chord("f"), "F: opponent hero"),
+        card_zone("your_board", "Your board", "b", "B: your minions", card_items(state, "player_board")),
+        card_zone("opponent_board", "Opponent board", "g", "G: opponent minions", card_items(state, "opponent_board")),
+        card_zone("your_hand", "Your hand", "c", "C: your hand", card_items(state, "player_hand")),
+        card_zone("opponent_hand", "Opponent hand", "c", "Shift+C: opponent hand", card_items(state, "opponent_hand"), shift=True),
+        card_zone("your_secrets", "Your secrets", "s", "S: your secrets", card_items(state, "player_secrets")),
+        card_zone("opponent_secrets", "Opponent secrets", "s", "Shift+S: opponent secrets", card_items(state, "opponent_secrets"), shift=True),
+        ZoneSpec("your_hero", "Your hero", hero_items(state, "player_hero"), hero_title, player_hero_details(state), Chord("v"), "V: your hero"),
+        ZoneSpec("opponent_hero", "Opponent hero", hero_items(state, "opponent_hero"), hero_title, opponent_hero_details(state), Chord("f"), "F: opponent hero"),
         # An absent weapon is deliberately an empty zone: the engine composes
         # its constant "No {label} on this screen" phrase from this label.
-        _card_zone("your_weapon", "Your weapon", "w", "W: your weapon", singleton("player_weapon")),
-        _card_zone("opponent_weapon", "Opponent weapon", "w", "Shift+W: opponent weapon", singleton("opponent_weapon"), shift=True),
-        _card_zone("your_deck", "Your deck", "d", "D: jump to Remaining Deck", card_items("player_deck")),
-        _card_zone("your_played", "Your played", "p", "P: cards you played", card_items("player_played"), with_turn=True),
-        _card_zone("opponent_played", "Opponent played", "p", "Shift+P: cards your opponent played", card_items("opponent_played"), shift=True, with_turn=True),
-        _card_zone("your_drawn", "Your drawn", "n", "N: cards you drew", card_items("player_drawn"), with_turn=True),
-        _card_zone("opponent_drawn", "Opponent drawn", "n", "Shift+N: cards your opponent drew", card_items("opponent_drawn"), shift=True, with_turn=True),
+        card_zone("your_weapon", "Your weapon", "w", "W: your weapon", singleton(state, "player_weapon")),
+        card_zone("opponent_weapon", "Opponent weapon", "w", "Shift+W: opponent weapon", singleton(state, "opponent_weapon"), shift=True),
+        card_zone("your_deck", "Your deck", "d", "D: jump to Remaining Deck", card_items(state, "player_deck")),
+        card_zone("your_played", "Your played", "p", "P: cards you played", card_items(state, "player_played"), with_turn=True),
+        card_zone("opponent_played", "Opponent played", "p", "Shift+P: cards your opponent played", card_items(state, "opponent_played"), shift=True, with_turn=True),
+        card_zone("your_drawn", "Your drawn", "n", "N: cards you drew", card_items(state, "player_drawn"), with_turn=True),
+        card_zone("opponent_drawn", "Opponent drawn", "n", "Shift+N: cards your opponent drew", card_items(state, "opponent_drawn"), shift=True, with_turn=True),
         ZoneSpec(
             "events",
             "Events",
@@ -272,6 +235,9 @@ def build_replay_viewer(
             "Y: the game's events",
         ),
     ]
+    card_zone_ids = {
+        zone.zone_id for zone in zones if zone.detail_lines is card_detail_lines
+    }
 
     bindings = [
         Binding(Chord("a"), Command("replay.query_mana", "A: how much mana you have", lambda: query("Your mana", f"{state().player_mana} of {state().player_max_mana}"))),
@@ -286,7 +252,9 @@ def build_replay_viewer(
             Command(
                 f"replay.position.{position}",
                 "1 to 9: jump to that position in the list",
-                lambda position=position: _require_engine(engine).jump_to_position(position),
+                lambda position=position: require_engine(
+                    engine, "Replay Viewer"
+                ).jump_to_position(position),
             ),
         )
         for position in range(1, 10)
@@ -297,7 +265,9 @@ def build_replay_viewer(
             Command(
                 "replay.position.10",
                 "0: jump to the tenth item",
-                lambda: _require_engine(engine).jump_to_position(10),
+                lambda: require_engine(
+                    engine, "Replay Viewer"
+                ).jump_to_position(10),
             ),
         )
     )
@@ -309,7 +279,7 @@ def build_replay_viewer(
     )
     reverse_turn = Command(
         "replay.previous_turn",
-        "Page Down: go to the next turn",
+        "Page Up: go to the previous turn",
         lambda: step_turn(-1),
     )
     spec = SurfaceSpec(
@@ -344,19 +314,9 @@ def build_replay_viewer(
         raise TypeError("Replay Viewer requires a horizontal-list engine")
     engine = surface.engine
 
-    last_transition = (engine.current_zone().zone_id, engine.items_snapshot()[1])
-
-    def autoplay_on_cursor_transition() -> None:
-        nonlocal last_transition
-        if engine is None:
-            return
-        transition = (engine.current_zone().zone_id, engine.items_snapshot()[1])
-        if transition == last_transition:
-            return
-        last_transition = transition
+    def autoplay_current_event() -> None:
         if (
-            transition[0] != "events"
-            or audio_index is None
+            audio_index is None
             or player is None
             or not replay_autoplay()
             or audio_index.status != "ready"
@@ -375,30 +335,31 @@ def build_replay_viewer(
         if wav_bytes:
             player.play(wav_bytes)
 
-    engine.subscribe(autoplay_on_cursor_transition)
+    autoplay_location = (
+        engine.current_zone().zone_id,
+        engine.items_snapshot()[1],
+    )
+
+    def current_autoplay_location() -> tuple[str, int]:
+        return engine.current_zone().zone_id, engine.items_snapshot()[1]
+
+    def sync_autoplay_location() -> None:
+        nonlocal autoplay_location
+        autoplay_location = current_autoplay_location()
+
+    def autoplay_on_landing_transition() -> None:
+        nonlocal autoplay_location
+        location = current_autoplay_location()
+        if location == autoplay_location:
+            return
+        autoplay_location = location
+        if location[0] == "events":
+            autoplay_current_event()
+
+    engine.subscribe(autoplay_on_landing_transition)
     current_replay.bind_viewer_reset(reset_for_new_replay)
     return surface
 
-
-def _card_zone(
-    zone_id: str,
-    label: str,
-    key: str,
-    help_phrase: str,
-    items: Callable[[], list[CardItem]],
-    *,
-    shift: bool = False,
-    with_turn: bool = False,
-) -> ZoneSpec:
-    return ZoneSpec(
-        zone_id,
-        label,
-        items,
-        lambda item: card_title(item, with_turn=with_turn),
-        card_detail_lines,
-        Chord(key, shift=shift),
-        help_phrase,
-    )
 
 def _event_source(
     event: GameEvent,
@@ -431,17 +392,6 @@ def _event_audio_kind(event: GameEvent) -> str | None:
         return "attack"
     if isinstance(event, MinionDied):
         return "minion_death"
-    if isinstance(event, CardDrawn):
-        return "draw"
-    if isinstance(event, TurnChanged):
-        return "turn"
-    if isinstance(event, (SecretPlayed, SecretRevealed)):
-        return "secret"
-    if isinstance(event, GameEnded):
-        if event.player_playstate == "WON":
-            return "victory"
-        if event.player_playstate == "LOST":
-            return "defeat"
     return None
 
 
@@ -462,9 +412,3 @@ def _state_cards(state: GameState) -> Iterable[GameEntity | PlayedCard | None]:
     yield state.opponent_weapon
     yield state.player_hero_entity
     yield state.opponent_hero_entity
-
-
-def _require_engine(engine: HorizontalListEngine | None) -> HorizontalListEngine:
-    if engine is None:
-        raise RuntimeError("Replay Viewer engine is not active")
-    return engine

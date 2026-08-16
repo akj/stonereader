@@ -55,6 +55,9 @@ def build_global_hotkeys(
     def start_capture(command: HotkeyCommand) -> None:
         nonlocal pending_single
         pending_single = None
+        registries = tuple(
+            (name, surface.registry) for name, surface in nav.all_surfaces()
+        )
         announcer.noop(
             f"Press the new shortcut for {command.label}. Escape cancels."
         )
@@ -67,8 +70,8 @@ def build_global_hotkeys(
         def candidate(chord: Chord) -> None:
             nonlocal pending_single
             if not (chord.ctrl or chord.shift or chord.alt):
-                # Refuse-and-stay lets the User retry without reopening capture.
                 pending_single = None
+                sink.exit_capture_mode()
                 announcer.noop("A shortcut needs a modifier key")
                 return
             current = hotkeys.current_chord(command.command_id)
@@ -76,7 +79,10 @@ def build_global_hotkeys(
                 sink.exit_capture_mode()
                 finish(command)
                 return
-            owner = hotkeys.is_taken(chord)
+            owner = hotkeys.is_taken(
+                chord,
+                registries,
+            )
             if owner is not None:
                 pending_single = None
                 announcer.noop(f"{chord.spoken()} is taken by {owner}")

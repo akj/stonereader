@@ -1,22 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+from typing import cast
 
 import pytest
 
-from stonereader.services._replay_store import ReplayImportError
+from stonereader.services._replay_store import ReplayImportError, ReplayStore
 from stonereader.surfaces.import_replays import build_import_replays
 from stonereader.surfaces.replay_viewer import CurrentReplay
 from stonereader.surfaces.replays import build_replays
-from stonereader.ui._sink_core import _SinkCore
-from stonereader.ui.announcer import Announcer
 from stonereader.ui.chords import Chord
-from stonereader.ui.engines import VerticalMenuEngine
-from stonereader.ui.navigation import NavigationController
 
-from tests.test_ui.conftest import FakeSpeech
-
-from .conftest import make_card_db
+from .conftest import Harness, make_card_db, make_harness
 
 
 @dataclass(frozen=True)
@@ -32,8 +28,14 @@ class FakeStore:
     def all_replays(self):
         return []
 
-    def import_file(self, path, *, source: str, in_stats: bool):
-        self.imported.append((str(path), source, in_stats))
+    def import_file(
+        self,
+        src_path: Path,
+        *,
+        source: str,
+        in_stats: bool,
+    ) -> Outcome:
+        self.imported.append((str(src_path), source, in_stats))
         outcome = self.outcomes.pop(0) if self.outcomes else True
         if isinstance(outcome, Exception):
             raise outcome
@@ -43,106 +45,104 @@ class FakeStore:
 def _harness(
     selections: list[list[str]],
     outcomes: list[bool | Exception] | None = None,
-):
-    speech = FakeSpeech()
-    announcer = Announcer(speech)
-    sink = _SinkCore(announcer, lambda: None)
+) -> Harness[FakeStore]:
     store = FakeStore(outcomes)
+    harness = make_harness(store)
     picks = list(selections)
 
     def choose_files() -> list[str]:
         return picks.pop(0)
 
-    nav = NavigationController(
-        lambda _title: None,
-        announcer,
-        lambda: None,
-        lambda surface: sink.set_active(surface.registry),
-    )
-    nav.register(
+    harness.nav.register(
         "Replays",
         lambda: build_replays(
-            announcer,
+            harness.announcer,
             [],
-            nav,
-            store,
+            harness.nav,
+            cast(ReplayStore, store),
             make_card_db(),
             CurrentReplay(),
         ),
     )
-    nav.register(
+    harness.nav.register(
         "Import Replays",
         lambda: build_import_replays(
-            announcer,
+            harness.announcer,
             [],
-            nav,
+            harness.nav,
             store,
             choose_files,
         ),
     )
-    nav.jump("Replays")
-    sink.handle_chord(Chord("enter"))
-    surface = nav._surfaces["Import Replays"]
-    assert isinstance(surface.engine, VerticalMenuEngine)
-    speech.calls.clear()
-    return nav, sink, speech, store, surface.engine
+    harness.nav.jump("Replays")
+    harness.press(Chord("enter"))
+    harness.speech.calls.clear()
+    return harness
 
 
 def test_choose_files_cancel_keeps_previous_selection_and_relands():
-    _nav, sink, speech, _store, engine = _harness(
+    harness = _harness(
         [["one.hsreplay", "two.xml"], []]
     )
 
-    sink.handle_chord(Chord("enter"))
-    assert engine.options_snapshot()[0][0] == "Choose files, 2 files chosen"
-    assert speech.calls == [
+    harness.press(Chord("enter"))
+    assert harness.vertical.options_snapshot()[0][0] == "Choose files, 2 files chosen"
+    assert harness.speech.calls == [
         ("Import Replays, Choose files, 2 files chosen", True)
     ]
 
-    before_cancel = list(speech.calls)
-    sink.handle_chord(Chord("enter"))
-    assert engine.options_snapshot()[0][0] == "Choose files, 2 files chosen"
-    assert speech.calls == before_cancel
+    before_cancel = list(harness.speech.calls)
+    harness.press(Chord("enter"))
+    assert harness.vertical.options_snapshot()[0][0] == "Choose files, 2 files chosen"
+    assert harness.speech.calls == before_cancel
+
+
+def test_one_selected_file_uses_singular_title():
+    harness = _harness([["one.hsreplay"]])
+
+    harness.press(Chord("enter"))
+
+    assert harness.vertical.options_snapshot()[0][0] == "Choose files, 1 file chosen"
 
 
 def test_toggle_announces_dynamic_title_and_applies_to_every_file():
-    _nav, sink, speech, store, engine = _harness(
+    harness = _harness(
         [["one.hsreplay", "two.xml"]], [True, True]
     )
-    sink.handle_chord(Chord("enter"))
-    sink.handle_chord(Chord("down"))
+    harness.press(Chord("enter"))
+    harness.press(Chord("down"))
 
-    sink.handle_chord(Chord("enter"))
+    harness.press(Chord("enter"))
 
-    assert engine.options_snapshot()[0][1] == "Count in stats, on"
-    assert speech.calls[-1] == ("Count in stats, on", True)
-    sink.handle_chord(Chord("down"))
-    sink.handle_chord(Chord("enter"))
-    assert store.imported == [
+    assert harness.vertical.options_snapshot()[0][1] == "Count in stats, on"
+    assert harness.speech.calls[-1] == ("Count in stats, on", True)
+    harness.press(Chord("down"))
+    harness.press(Chord("enter"))
+    assert harness.context.imported == [
         ("one.hsreplay", "manual_import", True),
         ("two.xml", "manual_import", True),
     ]
 
 
 def test_empty_import_is_refused_and_stays_on_form():
-    nav, sink, speech, store, _engine = _harness([])
-    sink.handle_chord(Chord("end"))
+    harness = _harness([])
+    harness.press(Chord("end"))
 
-    sink.handle_chord(Chord("enter"))
+    harness.press(Chord("enter"))
 
-    assert store.imported == []
-    assert nav.stack == ("Home", "Replays", "Import Replays")
-    assert speech.calls[-1] == ("No files chosen", True)
+    assert harness.context.imported == []
+    assert harness.nav.stack == ("Home", "Replays", "Import Replays")
+    assert harness.speech.calls[-1] == ("No files chosen", True)
 
 
 @pytest.mark.parametrize(
     ("outcomes", "expected"),
     [
         ([True, True], "2 imported"),
-        ([False, False], "0 imported, 2 already in Replays"),
+        ([False, False], "2 already in Replays"),
         (
             [ReplayImportError("bad"), ReplayImportError("worse")],
-            "0 imported, 2 failed",
+            "2 failed",
         ),
         (
             [True, False, ReplayImportError("bad")],
@@ -150,25 +150,27 @@ def test_empty_import_is_refused_and_stays_on_form():
         ),
     ],
 )
-def test_summary_composition_and_queued_back_to_replays(outcomes, expected):
+def test_summary_composition_and_continuing_back_to_replays(outcomes, expected):
     files = [f"replay-{index}.xml" for index in range(len(outcomes))]
-    nav, sink, speech, _store, engine = _harness([files], outcomes)
-    sink.handle_chord(Chord("enter"))
-    sink.handle_chord(Chord("end"))
+    harness = _harness([files], outcomes)
+    harness.press(Chord("enter"))
+    harness.press(Chord("end"))
 
-    sink.handle_chord(Chord("enter"))
+    harness.press(Chord("enter"))
 
-    assert nav.stack == ("Home", "Replays")
-    assert speech.calls[-2:] == [
+    assert harness.nav.stack == ("Home", "Replays")
+    assert harness.speech.calls[-2:] == [
         (expected, True),
         ("Replays, Import replays…, 1 of 1", False),
     ]
-    assert engine.options_snapshot()[0][0] == "Choose files, none chosen"
+    assert harness.menu("Import Replays").options_snapshot()[0][0] == (
+        "Choose files, none chosen"
+    )
 
 
 def test_delete_and_space_are_unbound():
-    _nav, sink, speech, _store, _engine = _harness([])
+    harness = _harness([])
 
-    assert sink.handle_chord(Chord("delete")) is False
-    assert sink.handle_chord(Chord("space")) is False
-    assert speech.calls == []
+    assert harness.press(Chord("delete")) is False
+    assert harness.press(Chord("space")) is False
+    assert harness.speech.calls == []

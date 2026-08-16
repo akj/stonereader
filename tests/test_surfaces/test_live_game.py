@@ -5,28 +5,9 @@ from dataclasses import replace
 from stonereader.models.card import Card
 from stonereader.models.game_state import GameEntity, GameState, Hero, PlayedCard
 from stonereader.surfaces.live_game import CurrentGame, build_live_game
-from stonereader.ui._sink_core import _SinkCore
-from stonereader.ui.announcer import Announcer
 from stonereader.ui.chords import Chord
-from stonereader.ui.engines import HorizontalListEngine
-from stonereader.ui.navigation import ActiveSurface, NavigationController
-from stonereader.ui.registry import CommandRegistry
-from stonereader.ui.surface import SurfaceSpec, WidgetType
 
-from tests.test_ui.conftest import FakeSpeech
-
-
-class _LandingEngine:
-    def on_landing(self, queued: bool = False) -> None:
-        pass
-
-
-def _placeholder(name: str) -> ActiveSurface:
-    return ActiveSurface(
-        SurfaceSpec(name, WidgetType.VERTICAL_MENU, options=lambda: []),
-        _LandingEngine(),
-        CommandRegistry(),
-    )
+from .conftest import Harness, make_harness, placeholder_surface
 
 
 def _card(
@@ -157,32 +138,23 @@ def _rich_state() -> GameState:
     )
 
 
-def _harness(state: GameState | None = None):
-    speech = FakeSpeech()
-    announcer = Announcer(speech)
-    sink = _SinkCore(announcer, lambda: None)
-    nav = NavigationController(
-        lambda _title: None,
-        announcer,
-        lambda: None,
-        lambda surface: sink.set_active(surface.registry),
-    )
+def _harness(state: GameState | None = None) -> Harness[CurrentGame]:
     current = CurrentGame()
     if state is not None:
         current.on_state(None, state)
-    nav.register("Home", lambda: _placeholder("Home"))
-    nav.register(
+    harness = make_harness(current)
+    harness.nav.register("Home", lambda: placeholder_surface("Home"))
+    harness.nav.register(
         "Live Game",
-        lambda: build_live_game(announcer, [], nav, current),
+        lambda: build_live_game(harness.announcer, [], harness.nav, current),
     )
-    nav.jump("Live Game")
-    surface = nav._surfaces["Live Game"]
-    assert isinstance(surface.engine, HorizontalListEngine)
-    return surface, sink, speech, nav, current
+    harness.nav.jump("Live Game")
+    return harness
 
 
 def test_all_fifteen_zone_providers_and_shared_formats() -> None:
-    surface, _sink, _speech, _nav, _current = _harness(_rich_state())
+    harness = _harness(_rich_state())
+    surface = harness.active_surface
     assert [zone.zone_id for zone in surface.spec.zones] == [
         "remaining_deck",
         "your_board",
@@ -238,25 +210,26 @@ def test_all_fifteen_zone_providers_and_shared_formats() -> None:
 
 
 def test_opponent_hand_slots_keep_positions_and_draw_provenance() -> None:
-    surface, sink, _speech, _nav, _current = _harness(_rich_state())
-    sink.handle_chord(Chord("c", shift=True))
-    assert surface.engine.items_snapshot() == (
+    harness = _harness(_rich_state())
+    harness.press(Chord("c", shift=True))
+    assert harness.horizontal.items_snapshot() == (
         ["Card 1, unknown", "Card 2, unknown", "Card 3, Yeti"],
         0,
         ["Drawn turn unknown"],
     )
-    surface.engine.jump_to_position(2)
-    assert surface.engine.items_snapshot()[2] == ["Drawn turn unknown"]
-    surface.engine.jump_to_position(3)
-    assert surface.engine.items_snapshot()[2] == [
+    harness.horizontal.jump_to_position(2)
+    assert harness.horizontal.items_snapshot()[2] == ["Drawn turn unknown"]
+    harness.horizontal.jump_to_position(3)
+    assert harness.horizontal.items_snapshot()[2] == [
         "Drawn in the mulligan",
         "Created by Wand",
     ]
 
 
 def test_no_game_entry_all_queries_and_state_updates_are_lane_one_silent() -> None:
-    surface, sink, speech, _nav, current = _harness()
-    assert speech.calls[-1] == ("Remaining Deck: empty", True)
+    harness = _harness()
+    assert harness.speech.calls[-1] == ("Remaining Deck: empty", True)
+    surface = harness.active_surface
     for zone in surface.spec.zones:
         assert list(zone.items()) == []
 
@@ -267,22 +240,24 @@ def test_no_game_entry_all_queries_and_state_updates_are_lane_one_silent() -> No
         Chord("r"),
         Chord("r", shift=True),
     ):
-        sink.handle_chord(chord)
-        assert speech.calls[-1] == ("No game in progress", True)
+        harness.press(chord)
+        assert harness.speech.calls[-1] == ("No game in progress", True)
 
-    speech.calls.clear()
+    harness.speech.calls.clear()
     changes: list[None] = []
-    surface.engine.subscribe(lambda: changes.append(None))
-    current.on_state(None, _rich_state())
-    assert speech.calls == []
+    harness.horizontal.subscribe(lambda: changes.append(None))
+    harness.context.on_state(None, _rich_state())
+    assert harness.speech.calls == []
     assert changes == [None]
 
-    current.on_state(_rich_state(), replace(_rich_state(), game_state="COMPLETE"))
+    harness.context.on_state(
+        _rich_state(), replace(_rich_state(), game_state="COMPLETE")
+    )
     assert all(not zone.items() for zone in surface.spec.zones)
 
 
 def test_queries_digits_y_slots_and_unbound_keys_match_live_contract() -> None:
-    surface, sink, speech, _nav, _current = _harness(_rich_state())
+    harness = _harness(_rich_state())
     for chord, expected in (
         (Chord("a"), "Your mana, 4 of 7"),
         (Chord("a", shift=True), "Opponent mana, 2 of 6"),
@@ -290,12 +265,12 @@ def test_queries_digits_y_slots_and_unbound_keys_match_live_contract() -> None:
         (Chord("r"), "Your hero power, Fireblast"),
         (Chord("r", shift=True), "Opponent hero power, Armor Up!"),
     ):
-        sink.handle_chord(chord)
-        assert speech.calls[-1] == (expected, True)
-        assert surface.engine.current_zone().zone_id == "remaining_deck"
+        harness.press(chord)
+        assert harness.speech.calls[-1] == (expected, True)
+        assert harness.horizontal.current_zone().zone_id == "remaining_deck"
 
-    sink.handle_chord(Chord("2"))
-    assert speech.calls[-1] == ("Fireball, 2 copies", True)
+    harness.press(Chord("2"))
+    assert harness.speech.calls[-1] == ("Fireball, 2 copies", True)
     for chord, expected in (
         (Chord("y"), "No events in a live game"),
         (Chord("pageup"), "No turns to step in a live game"),
@@ -305,34 +280,34 @@ def test_queries_digits_y_slots_and_unbound_keys_match_live_contract() -> None:
         (Chord("tab"), "No groups on this screen"),
         (Chord("f", ctrl=True), "No search on this screen"),
     ):
-        sink.handle_chord(chord)
-        assert speech.calls[-1] == (expected, True)
+        harness.press(chord)
+        assert harness.speech.calls[-1] == (expected, True)
 
-    before = list(speech.calls)
-    assert sink.handle_chord(Chord("delete")) is False
-    assert sink.handle_chord(Chord("space")) is False
-    assert speech.calls == before
+    before = list(harness.speech.calls)
+    assert harness.press(Chord("delete")) is False
+    assert harness.press(Chord("space")) is False
+    assert harness.speech.calls == before
 
 
 def test_compound_hotkeys_land_then_switch_to_the_requested_zone() -> None:
-    surface, _sink, speech, nav, _current = _harness(_rich_state())
-    surface.engine.switch_zone("your_board")
-    speech.calls.clear()
+    harness = _harness(_rich_state())
+    harness.horizontal.switch_zone("your_board")
+    harness.speech.calls.clear()
 
-    nav.jump(
+    harness.nav.jump(
         "Live Game",
-        then=lambda active: active.engine.switch_zone("remaining_deck"),  # type: ignore[attr-defined]
+        then=lambda _active: harness.horizontal.switch_zone("remaining_deck"),
     )
-    assert speech.calls[-1] == (
+    assert harness.speech.calls[-1] == (
         "Remaining Deck, Boar, 1 copy, 1 of 2",
         True,
     )
 
-    nav.jump(
+    harness.nav.jump(
         "Live Game",
-        then=lambda active: active.engine.switch_zone("opponent_hand"),  # type: ignore[attr-defined]
+        then=lambda _active: harness.horizontal.switch_zone("opponent_hand"),
     )
-    assert speech.calls[-1] == (
+    assert harness.speech.calls[-1] == (
         "Opponent hand, Card 1, unknown, 1 of 3",
         True,
     )

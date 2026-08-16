@@ -46,7 +46,8 @@ def build_import_replays(
     def chosen_title() -> str:
         if not chosen:
             return "Choose files, none chosen"
-        return f"Choose files, {len(chosen)} files chosen"
+        noun = "file" if len(chosen) == 1 else "files"
+        return f"Choose files, {len(chosen)} {noun} chosen"
 
     def stats_title() -> str:
         return f"Count in stats, {'on' if count_in_stats else 'off'}"
@@ -87,14 +88,8 @@ def build_import_replays(
                 else:
                     duplicates += 1
         chosen.clear()
-        # The leading count always speaks; ADR-0014 omits only zero-valued tails.
-        summary = f"{created} imported"
-        if duplicates:
-            summary += f", {duplicates} already in Replays"
-        if failed:
-            summary += f", {failed} failed"
-        announcer.confirmation(summary)
-        nav.back(queued=True)
+        announcer.import_replays_result(created, duplicates, failed)
+        nav.back(continues=True)
 
     options = [
         MenuOption("choose_files", chosen_title, choose),

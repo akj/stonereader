@@ -7,7 +7,7 @@ from stonereader.ui.navigation import ActiveSurface, NavigationController
 from stonereader.ui.registry import CommandRegistry
 from stonereader.ui.surface import SurfaceSpec, WidgetType
 
-from .conftest import FakeSpeech
+from tests.support import FakeSpeech
 
 
 class FakeEngine:
@@ -15,10 +15,10 @@ class FakeEngine:
         self.name = name
         self.events = events
         self.cursor = 0
-        self.queued_landings: list[bool] = []
+        self.continuations: list[bool] = []
 
-    def on_landing(self, queued: bool = False) -> None:
-        self.queued_landings.append(queued)
+    def on_landing(self, continues: bool = False) -> None:
+        self.continuations.append(continues)
         self.events.append(f"landing:{self.name}:{self.cursor}")
 
 
@@ -211,8 +211,8 @@ def test_back_can_queue_the_revealed_surface_landing() -> None:
     navigation.jump("Cards")
     navigation.drill_down("Detail")
 
-    navigation.back(queued=True)
+    navigation.back(continues=True)
 
     cards = navigation._surfaces["Cards"]
     assert isinstance(cards.engine, FakeEngine)
-    assert cards.engine.queued_landings == [False, True]
+    assert cards.engine.continuations == [False, True]

@@ -1,146 +1,123 @@
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import dataclass
 
 from stonereader.db import get_all_decks, save_deck
 from stonereader.surfaces._deck_data import CurrentDeck, DeckData
 from stonereader.surfaces.decks import build_decks
 from stonereader.surfaces.import_deck import ImportDeckField, build_import_deck
-from stonereader.ui._sink_core import _SinkCore
-from stonereader.ui.announcer import Announcer
 from stonereader.ui.chords import Chord
-from stonereader.ui.navigation import ActiveSurface, NavigationController
 
-from tests.test_ui.conftest import FakeSpeech
-
-from .conftest import make_card, make_card_db, make_deckstring
+from .conftest import Harness, make_card, make_card_db, make_deckstring, make_harness
 
 
-def type_text(sink: _SinkCore, text: str) -> None:
-    for character in text:
-        sink.handle_chord(
-            Chord(character.lower(), shift=character.isalpha() and character.isupper())
-        )
+@dataclass
+class ImportDeckContext:
+    field: ImportDeckField
+    code: str
 
 
 def make_navigation(
     conn: sqlite3.Connection,
-) -> tuple[
-    NavigationController,
-    _SinkCore,
-    FakeSpeech,
-    ImportDeckField,
-    str,
-]:
+) -> Harness[ImportDeckContext]:
     hero = make_card(274, "Malfurion", card_class="DRUID", card_type="HERO")
     card_db = make_card_db(hero)
     code = make_deckstring([])
-    speech = FakeSpeech()
-    announcer = Announcer(speech)
-    sink = _SinkCore(announcer, lambda: None)
     field = ImportDeckField()
-    navigation = NavigationController(
-        lambda _title: None,
-        announcer,
-        lambda: None,
-        lambda surface: sink.set_active(surface.registry),
-    )
+    harness = make_harness(ImportDeckContext(field, code))
     data = DeckData(conn, card_db)
     current = CurrentDeck()
-    navigation.register(
+    harness.nav.register(
         "Decks",
         lambda: build_decks(
-            announcer,
+            harness.announcer,
             [],
-            navigation,
+            harness.nav,
             conn,
             data,
             current,
-            sink,
+            harness.sink,
             lambda _text: None,
         ),
     )
-    navigation.register(
+    harness.nav.register(
         "Import Deck",
         lambda: build_import_deck(
-            announcer,
+            harness.announcer,
             [],
-            navigation,
+            harness.nav,
             conn,
             card_db,
-            sink,
+            harness.sink,
             field,
         ),
     )
-    return navigation, sink, speech, field, code
+    return harness
 
 
-def enter_import_from_empty_decks(
-    navigation: NavigationController,
-    sink: _SinkCore,
-) -> ActiveSurface:
-    navigation.jump("Decks")
-    sink.handle_chord(Chord("enter"))
-    return navigation._surfaces["Import Deck"]
+def enter_import_from_empty_decks(harness: Harness[ImportDeckContext]) -> None:
+    harness.nav.jump("Decks")
+    harness.press(Chord("enter"))
 
 
 def test_text_mode_commit_abandon_and_successful_import_queues_back_entry(
     db_conn: sqlite3.Connection,
 ) -> None:
-    navigation, sink, speech, field, code = make_navigation(db_conn)
-    surface = enter_import_from_empty_decks(navigation, sink)
-    assert surface.engine.options_snapshot() == (
+    harness = make_navigation(db_conn)
+    enter_import_from_empty_decks(harness)
+    assert harness.vertical.options_snapshot() == (
         ["Deck code, edit text", "Import"],
         0,
     )
 
-    sink.handle_chord(Chord("enter"))
-    assert sink.text_mode_active is True
-    type_text(sink, code)
-    sink.handle_chord(Chord("enter"))
-    assert sink.text_mode_active is False
-    assert field.value == code
-    assert speech.calls[-1] == ("Import Deck, Deck code, edit text", True)
+    harness.press(Chord("enter"))
+    assert harness.sink.text_mode_active is True
+    harness.type(harness.context.code)
+    harness.press(Chord("enter"))
+    assert harness.sink.text_mode_active is False
+    assert harness.context.field.value == harness.context.code
+    assert harness.speech.calls[-1] == ("Import Deck, Deck code, edit text", True)
 
-    sink.handle_chord(Chord("enter"))
-    type_text(sink, "x")
-    sink.handle_chord(Chord("escape"))
-    assert field.value == code
-    assert speech.calls[-1] == ("Import Deck, Deck code, edit text", True)
+    harness.press(Chord("enter"))
+    harness.type("x")
+    harness.press(Chord("escape"))
+    assert harness.context.field.value == harness.context.code
+    assert harness.speech.calls[-1] == ("Import Deck, Deck code, edit text", True)
 
-    sink.handle_chord(Chord("down"))
-    sink.handle_chord(Chord("enter"))
+    harness.press(Chord("down"))
+    harness.press(Chord("enter"))
 
     assert [deck.name for deck in get_all_decks(db_conn)] == ["Druid deck"]
-    assert navigation.stack == ("Home", "Decks")
-    assert speech.calls[-2:] == [
+    assert harness.nav.stack == ("Home", "Decks")
+    assert harness.speech.calls[-2:] == [
         ("Druid deck imported", True),
         ("Decks, Druid deck, 1 of 3", False),
     ]
 
 
 def test_failure_keeps_field_contents(db_conn: sqlite3.Connection) -> None:
-    navigation, sink, speech, field, _code = make_navigation(db_conn)
-    enter_import_from_empty_decks(navigation, sink)
-    field.set("not-a-deck-code")
+    harness = make_navigation(db_conn)
+    enter_import_from_empty_decks(harness)
+    harness.context.field.set("not-a-deck-code")
 
-    sink.handle_chord(Chord("down"))
-    sink.handle_chord(Chord("enter"))
+    harness.press(Chord("down"))
+    harness.press(Chord("enter"))
 
-    assert field.value == "not-a-deck-code"
+    assert harness.context.field.value == "not-a-deck-code"
     assert get_all_decks(db_conn) == []
-    assert speech.calls[-1] == ("Deck code not recognized", True)
+    assert harness.speech.calls[-1] == ("Deck code not recognized", True)
 
 
 def test_derived_name_uses_next_available_suffix(db_conn: sqlite3.Connection) -> None:
-    navigation, sink, _speech, field, code = make_navigation(db_conn)
-    save_deck(db_conn, "Druid deck", "DRUID", "Standard", code)
-    save_deck(db_conn, "Druid deck 2", "DRUID", "Standard", code)
-    navigation.jump_path(["Home", "Decks", "Import Deck"])
-    field.set(code)
+    harness = make_navigation(db_conn)
+    save_deck(db_conn, "Druid deck", "DRUID", "Standard", harness.context.code)
+    save_deck(db_conn, "Druid deck 2", "DRUID", "Standard", harness.context.code)
+    harness.nav.jump_path(["Home", "Decks", "Import Deck"])
+    harness.context.field.set(harness.context.code)
 
-    sink.handle_chord(Chord("down"))
-    sink.handle_chord(Chord("enter"))
+    harness.press(Chord("down"))
+    harness.press(Chord("enter"))
 
     assert get_all_decks(db_conn)[0].name == "Druid deck 3"
 
@@ -148,25 +125,23 @@ def test_derived_name_uses_next_available_suffix(db_conn: sqlite3.Connection) ->
 def test_offer_accept_sets_field_and_resets_exact_stack(
     db_conn: sqlite3.Connection,
 ) -> None:
-    navigation, sink, speech, field, code = make_navigation(db_conn)
-    navigation.jump("Decks")
-    navigation.drill_down("Import Deck")
-    navigation.back()
-    assert navigation.stack == ("Home", "Decks")
+    harness = make_navigation(db_conn)
+    harness.nav.jump("Decks")
+    harness.nav.drill_down("Import Deck")
+    harness.nav.back()
+    assert harness.nav.stack == ("Home", "Decks")
 
     def accept() -> None:
-        field.set(code)
-        navigation.jump_path(["Home", "Decks", "Import Deck"])
+        harness.context.field.set(harness.context.code)
+        harness.nav.jump_path(["Home", "Decks", "Import Deck"])
 
-    assert sink.arm_offer(code, accept) is True
-    Announcer(speech).offer(
-        "Deck code on clipboard — press Control Enter to import"
-    )
-    sink.handle_chord(Chord("enter", ctrl=True))
+    assert harness.sink.arm_offer(harness.context.code, accept) is True
+    harness.announcer.clipboard_deck_offer()
+    harness.press(Chord("enter", ctrl=True))
 
-    assert field.value == code
-    assert navigation.stack == ("Home", "Decks", "Import Deck")
-    assert speech.calls[-2:] == [
+    assert harness.context.field.value == harness.context.code
+    assert harness.nav.stack == ("Home", "Decks", "Import Deck")
+    assert harness.speech.calls[-2:] == [
         ("Deck code on clipboard — press Control Enter to import", True),
         ("Import Deck, Deck code, edit text", True),
     ]

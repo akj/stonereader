@@ -6,7 +6,7 @@ from stonereader.ui.chords import Chord
 from stonereader.ui.registry import Command, CommandRegistry, Layer
 from stonereader.ui.text_mode import TextSession
 
-from .conftest import FakeSpeech
+from tests.support import FakeSpeech
 
 
 def core(speech: FakeSpeech, stops: list[str]) -> _SinkCore:
@@ -29,6 +29,40 @@ def test_dispatches_commands_and_routes_announced_noops() -> None:
     assert sink.handle_chord(Chord("enter")) is True
     assert calls == ["z"]
     assert speech.calls == [("Nothing to do here", True)]
+
+
+def test_lane_one_keypress_drops_narration_even_when_it_speaks_nothing() -> None:
+    speech = FakeSpeech()
+    announcer = Announcer(speech)
+    sink = _SinkCore(announcer, lambda: None)
+    registry = CommandRegistry()
+    registry.register(
+        Layer.SURFACE,
+        Chord("z"),
+        Command("z", "Z: act", lambda: None),
+    )
+    sink.set_active(registry)
+    announcer.narrate("Opponent played Fireball")
+
+    assert sink.handle_chord(Chord("z")) is True
+
+    assert speech.silences == 1
+    assert speech.calls == [("Opponent played Fireball", False)]
+
+
+def test_typing_in_text_mode_does_not_drop_narration() -> None:
+    speech = FakeSpeech()
+    announcer = Announcer(speech)
+    sink = _SinkCore(announcer, lambda: None)
+    sink.set_active(CommandRegistry())
+    sink.enter_text_mode(
+        TextSession("Code", "", announcer, lambda _text: None, lambda: None)
+    )
+    announcer.narrate("Opponent played Fireball")
+
+    sink.handle_chord(Chord("a"))
+
+    assert speech.silences == 0
 
 
 def test_ctrl_combos_are_dispatched_and_unhandled_keys_are_not_consumed() -> None:

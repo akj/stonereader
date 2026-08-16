@@ -1,23 +1,22 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 from stonereader.ui.announcer import Announcer
 from stonereader.ui.chords import Chord
 from stonereader.ui.engines import HorizontalListEngine, VerticalMenuEngine
+from stonereader.ui.registry import Command
 from stonereader.ui.surface import MenuOption, SurfaceSpec, WidgetType, ZoneSpec
 
-from .conftest import FakeSpeech
+from tests.support import FakeSpeech
 
 
 def run_binding(
-    bindings: list[tuple[Chord, object]],
+    bindings: Sequence[tuple[Chord, Command]],
     chord: Chord,
 ) -> None:
     command = dict(bindings)[chord]
-    handler = getattr(command, "handler")
-    assert isinstance(handler, Callable)
-    handler()
+    command.handler()
 
 
 def menu_engine(options: list[MenuOption], speech: FakeSpeech) -> VerticalMenuEngine:
@@ -153,7 +152,8 @@ def test_horizontal_entry_movement_details_and_boundaries() -> None:
         "Frostbolt",
         "Frostbolt detail 1",
         "Frostbolt detail 2",
-        "Frostbolt detail 2",
+        # A boundary press repeats the bare Title line, not the detail line.
+        "Frostbolt",
         "Frostbolt detail 1",
     ]
 
@@ -193,17 +193,33 @@ def test_horizontal_orientation_reread_uses_current_line() -> None:
     assert speech.calls[-1] == ("Cards, Fireball detail 1, 1 of 3", True)
 
 
-def test_horizontal_read_remaining_uses_interrupt_then_queue() -> None:
+def test_horizontal_read_remaining_is_one_lane_one_utterance() -> None:
     speech = FakeSpeech()
     engine = horizontal_engine(speech)
     bindings = engine.widget_type_bindings()
     run_binding(bindings, Chord("down"))
     speech.calls.clear()
     run_binding(bindings, Chord("down", shift=True))
+    # Continuation lines follow the first on Lane 1; none of them queue behind
+    # narration, so a later drop has nothing pending to cut.
     assert speech.calls == [
         ("Fireball detail 1", True),
         ("Fireball detail 2", False),
     ]
+
+
+def test_horizontal_detail_boundary_repeats_the_bare_title() -> None:
+    speech = FakeSpeech()
+    engine = horizontal_engine(speech)
+    bindings = engine.widget_type_bindings()
+    run_binding(bindings, Chord("up"))
+    assert speech.calls[-1] == ("Fireball", True)
+
+    run_binding(bindings, Chord("down"))
+    run_binding(bindings, Chord("down"))
+    speech.calls.clear()
+    run_binding(bindings, Chord("down"))
+    assert speech.calls == [("Fireball", True)]
 
 
 def test_zone_switch_persists_each_zone_cursor() -> None:

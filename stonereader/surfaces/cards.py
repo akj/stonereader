@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from stonereader.models.card import Card, CardDatabase
+from stonereader.models.card import CARD_CLASS_NAMES, Card, CardDatabase
 from stonereader.surfaces._game_audio import CardAudioIndex, open_sounds_for_card
 from stonereader.surfaces.sounds_menu import SoundsMenuHolder
 from stonereader.ui.announcer import Announcer
@@ -26,20 +26,8 @@ class TextModeSink(Protocol):
 
 _CLASS_FILTERS: tuple[tuple[str, str | None], ...] = (
     ("All", None),
-    ("Demon Hunter", "DEMONHUNTER"),
-    ("Death Knight", "DEATHKNIGHT"),
-    ("Druid", "DRUID"),
-    ("Hunter", "HUNTER"),
-    ("Mage", "MAGE"),
-    ("Neutral", "NEUTRAL"),
-    ("Paladin", "PALADIN"),
-    ("Priest", "PRIEST"),
-    ("Rogue", "ROGUE"),
-    ("Shaman", "SHAMAN"),
-    ("Warlock", "WARLOCK"),
-    ("Warrior", "WARRIOR"),
+    *((label, value) for value, label in CARD_CLASS_NAMES.items()),
 )
-_CLASS_NAMES = {value: label for label, value in _CLASS_FILTERS if value is not None}
 
 
 @dataclass
@@ -69,7 +57,9 @@ class _CardsState:
 
     def context_label(self) -> str:
         class_name = (
-            "All" if self.class_filter is None else _CLASS_NAMES[self.class_filter]
+            "All"
+            if self.class_filter is None
+            else CARD_CLASS_NAMES[self.class_filter]
         )
         base = f"{class_name} cards"
         if self.search and self.class_filter is None and self.mana_filter is None:
@@ -186,8 +176,8 @@ def build_cards(
         lambda: cycle_class(1),
     )
     reverse_class = Command(
-        "cards.class_cycle",
-        "Tab: jump to the next class",
+        "cards.class_cycle.reverse",
+        "Shift+Tab: jump to the previous class",
         lambda: cycle_class(-1),
     )
     forward_page = Command(
@@ -196,8 +186,8 @@ def build_cards(
         lambda: page(10),
     )
     reverse_page = Command(
-        "cards.page",
-        "Page Down: jump ten cards forward",
+        "cards.page.reverse",
+        "Page Up: jump ten cards back",
         lambda: page(-10),
     )
     spec = SurfaceSpec(
@@ -238,14 +228,11 @@ def build_cards(
             Slot.GROUP_JUMP: reverse_class,
             Slot.COARSE_AXIS: reverse_page,
         },
-        slot_noops={
-            Slot.ENTER: "Nothing to do here",
-            **(
-                {}
-                if audio_index is not None and sounds is not None
-                else {Slot.LISTEN: "Game audio is not available"}
-            ),
-        },
+        slot_noops=(
+            {}
+            if audio_index is not None and sounds is not None
+            else {Slot.LISTEN: "Game audio is not available"}
+        ),
     )
     surface = build_active_surface(spec, announcer, universal_bindings, nav)
     if not isinstance(surface.engine, HorizontalListEngine):
@@ -268,7 +255,9 @@ def _detail_lines(card: Card) -> list[str]:
     if card.text:
         lines.append(card.text)
     if card.card_class:
-        lines.append(_CLASS_NAMES.get(card.card_class, _display_enum(card.card_class)))
+        lines.append(
+            CARD_CLASS_NAMES.get(card.card_class, _display_enum(card.card_class))
+        )
     if card.rarity:
         lines.append(_display_enum(card.rarity))
     if card.card_set:

@@ -208,6 +208,38 @@ def test_import_file_dedupes_same_content(tmp_path):
     conn.close()
 
 
+def test_import_file_prunes_oldest_on_write(tmp_path):
+    conn = get_connection(str(tmp_path / "test.db"))
+    init_db(conn)
+    replay_dir = tmp_path / "replays"
+    store = ReplayStore(conn, replay_dir, retention_provider=lambda: 2)
+    oldest = _save(
+        store,
+        xml="<r>oldest</r>",
+        played_at="2026-06-18T09:00:00",
+    ).meta
+    middle = _save(
+        store,
+        xml="<r>middle</r>",
+        played_at="2026-06-19T09:00:00",
+    ).meta
+    source = tmp_path / "newest.hsreplay"
+    source.write_text("<r>newest</r>", encoding="utf-8")
+
+    newest = store.import_file(
+        source,
+        friendly_class="MAGE",
+        opponent_class="WARRIOR",
+        result="WON",
+        turns=10,
+        played_at="2026-06-20T09:00:00",
+    ).meta
+
+    assert [replay.id for replay in store.all_replays()] == [newest.id, middle.id]
+    assert not Path(oldest.file_path).exists()
+    conn.close()
+
+
 def test_in_stats_write_and_toggle(tmp_path):
     store, conn, _ = _store(tmp_path)
     saved = _save(store, in_stats=True)

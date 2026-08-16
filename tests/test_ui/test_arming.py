@@ -5,7 +5,7 @@ from collections.abc import Callable
 from stonereader.ui.announcer import Announcer
 from stonereader.ui.arming import ArmedAction
 
-from .conftest import FakeSpeech
+from tests.support import FakeSpeech
 
 
 class FakeEngine:

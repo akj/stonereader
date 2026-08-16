@@ -34,6 +34,12 @@ class VerticalMenuEngine:
     def cursor(self) -> int:
         return self._cursor
 
+    @property
+    def current_option_id(self) -> str | None:
+        """Return the stable id of the option under the cursor."""
+        options = self._options()
+        return None if not options else options[self._cursor].option_id
+
     def set_cursor(self, index: int) -> None:
         """Set the cursor without speech, for holder-driven reusable menus."""
         options = self._options()
@@ -76,10 +82,15 @@ class VerticalMenuEngine:
             ),
         ]
 
-    def on_landing(self, queued: bool = False) -> None:
+    def on_landing(self, continues: bool = False) -> None:
+        """Fire the context-entry utterance for this landing.
+
+        `continues` marks the landing as a Lane-1 continuation: it follows a
+        confirmation already spoken instead of cutting it (ADR-0007).
+        """
         options = self._options()
         if not options:
-            self._announcer.context_empty(self._spec.name, queued=queued)
+            self._announcer.context_empty(self._spec.name, continues=continues)
             return
         label = (
             self._spec.context_label()
@@ -89,7 +100,7 @@ class VerticalMenuEngine:
         self._announcer.context_entry_menu(
             label,
             options[self._cursor].title(),
-            queued=queued,
+            continues=continues,
         )
 
     def activate_current(self) -> bool:
@@ -255,8 +266,13 @@ class HorizontalListEngine:
             )
         return bindings
 
-    def on_landing(self, queued: bool = False) -> None:
-        self._announce_context(queued=queued, current_line=False)
+    def on_landing(self, continues: bool = False) -> None:
+        """Fire the context-entry utterance for this landing.
+
+        `continues` marks the landing as a Lane-1 continuation: it follows a
+        confirmation already spoken instead of cutting it (ADR-0007).
+        """
+        self._announce_context(continues=continues, current_line=False)
 
     def switch_zone(self, zone_id: str) -> None:
         """Switch to a non-empty zone and fire its context-entry utterance."""
@@ -265,7 +281,7 @@ class HorizontalListEngine:
         except KeyError as error:
             raise ValueError(f"Unknown zone id: {zone_id}") from error
         if not zone.items():
-            self._announcer.noop(f"No {zone.label} on this screen")
+            self._announcer.empty_zone(zone.label)
             return
         changed = zone_id != self._active_zone_id
         self._active_zone_id = zone_id
@@ -349,15 +365,16 @@ class HorizontalListEngine:
         current = self._detail_cursors[zone_id]
         target = min(max(current + delta, 0), len(lines) - 1)
         if target == current:
-            # ADR-0007: detail boundaries repeat the line the cursor rests on.
-            self._announcer.boundary(lines[current])
+            # ADR-0007: every boundary press repeats the bare Title line —
+            # line 0 — not the detail line the cursor rests on.
+            self._announcer.boundary(lines[0])
             return
         self._detail_cursors[zone_id] = target
         self._notify()
         self._announcer.moved(lines[target])
 
     def _reread(self) -> None:
-        self._announce_context(queued=False, current_line=True)
+        self._announce_context(continues=False, current_line=True)
 
     def _read_remaining(self) -> None:
         lines = self._current_lines()
@@ -365,8 +382,7 @@ class HorizontalListEngine:
             self._announcer.context_empty(self._context_label())
             return
         start = self._detail_cursors[self._active_zone_id]
-        for index, line in enumerate(lines[start:]):
-            self._announcer.moved(line, queued=index > 0)
+        self._announcer.read_lines(lines[start:])
 
     def _first_item(self) -> None:
         items = self._items()
@@ -394,11 +410,11 @@ class HorizontalListEngine:
             self._notify()
         self._announcer.moved(self.current_zone().title(items[target]))
 
-    def _announce_context(self, *, queued: bool, current_line: bool) -> None:
+    def _announce_context(self, *, continues: bool, current_line: bool) -> None:
         items = self._items()
         label = self._context_label()
         if not items:
-            self._announcer.context_empty(label, queued=queued)
+            self._announcer.context_empty(label, continues=continues)
             return
         zone_id = self._active_zone_id
         item_index = self._item_cursors[zone_id]
@@ -411,7 +427,7 @@ class HorizontalListEngine:
             title,
             item_index + 1,
             len(items),
-            queued=queued,
+            continues=continues,
         )
 
     def _context_label(self) -> str:

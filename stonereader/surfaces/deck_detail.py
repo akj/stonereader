@@ -38,10 +38,7 @@ def build_deck_detail(
     def detail_lines(item: tuple[Card, int]) -> list[str]:
         card, _count = item
         lines = [f"{card.cost} mana", spoken_enum(card.card_type)]
-        if card.card_type == "WEAPON":
-            if card.attack is not None and card.health is not None:
-                lines.append(f"{card.attack} attack, {card.health} durability")
-        elif card.card_type == "MINION":
+        if card.card_type in {"MINION", "WEAPON"}:
             if card.attack is not None and card.health is not None:
                 lines.append(f"{card.attack} attack, {card.health} health")
         if card.text:
@@ -79,14 +76,11 @@ def build_deck_detail(
                 detail_lines,
             )
         ],
-        slot_noops={
-            Slot.ENTER: "Nothing to do here",
-            **(
-                {}
-                if audio_index is not None and sounds is not None
-                else {Slot.LISTEN: "Game audio is not available"}
-            ),
-        },
+        slot_noops=(
+            {}
+            if audio_index is not None and sounds is not None
+            else {Slot.LISTEN: "Game audio is not available"}
+        ),
         slot_fills=(
             {
                 Slot.LISTEN: Command(

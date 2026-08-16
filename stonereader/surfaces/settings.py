@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
@@ -40,16 +41,28 @@ class AudioChannelStatus(Protocol):
 
 
 _NO_INSTALL = "unavailable — no Hearthstone install found"
-_ROW_IDS = (
-    "narration",
-    "game_audio_volume",
-    "replay_autoplay",
-    "hs_install_path",
-    "hs_log_path",
-    "replay_retention",
-    "global_hotkeys",
-    "restore_all",
-)
+
+
+@dataclass(frozen=True)
+class _SettingsRow:
+    option_id: str
+    title: Callable[[], str]
+    on_enter: Callable[[], None] | None
+    reset_label: str
+    spoken_default: str
+    reset: Callable[[], None]
+
+
+def _narration_label(value: str) -> str:
+    return value.replace("_", " ")
+
+
+def _toggle_label(value: bool) -> str:
+    return "on" if value else "off"
+
+
+def _retention_label(value: int | None) -> str:
+    return "unlimited" if value is None else f"last {value}"
 
 
 def build_settings(
@@ -84,14 +97,14 @@ def build_settings(
         return effective_install() is not None
 
     def narration_title() -> str:
-        return f"Narration, {store.narration.replace('_', ' ')}"
+        return f"Narration, {_narration_label(store.narration)}"
 
     def volume_title() -> str:
         value = str(store.game_audio_volume) if audio_available() else _NO_INSTALL
         return f"Game audio volume, {value}"
 
     def autoplay_title() -> str:
-        return f"Replay auto-play, {'on' if store.replay_autoplay else 'off'}"
+        return f"Replay auto-play, {_toggle_label(store.replay_autoplay)}"
 
     def install_title() -> str:
         value = "custom" if store.hs_install_path is not None else "auto-detected"
@@ -102,12 +115,7 @@ def build_settings(
         return f"Hearthstone log path, {value}"
 
     def retention_title() -> str:
-        value = (
-            "unlimited"
-            if store.replay_retention is None
-            else f"last {store.replay_retention}"
-        )
-        return f"Replay retention, {value}"
+        return f"Replay retention, {_retention_label(store.replay_retention)}"
 
     def changed(title: Callable[[], str]) -> None:
         if engine is None:
@@ -218,43 +226,101 @@ def build_settings(
         restore_hotkeys()
         changed(lambda: "Restore all defaults")
 
+    rows = (
+        _SettingsRow(
+            "narration",
+            narration_title,
+            edit_narration,
+            "Narration",
+            _narration_label(DEFAULT_NARRATION),
+            lambda: store.set_narration(DEFAULT_NARRATION),
+        ),
+        _SettingsRow(
+            "game_audio_volume",
+            volume_title,
+            edit_volume,
+            "Game audio volume",
+            str(DEFAULT_GAME_AUDIO_VOLUME),
+            lambda: store.set_game_audio_volume(DEFAULT_GAME_AUDIO_VOLUME),
+        ),
+        _SettingsRow(
+            "replay_autoplay",
+            autoplay_title,
+            toggle_autoplay,
+            "Replay auto-play",
+            _toggle_label(DEFAULT_REPLAY_AUTOPLAY),
+            lambda: store.set_replay_autoplay(DEFAULT_REPLAY_AUTOPLAY),
+        ),
+        _SettingsRow(
+            "hs_install_path",
+            install_title,
+            lambda: edit_path(
+                "Hearthstone install path",
+                effective_install,
+                store.set_hs_install_path,
+            ),
+            "Hearthstone install path",
+            "auto-detected",
+            lambda: store.set_hs_install_path(None),
+        ),
+        _SettingsRow(
+            "hs_log_path",
+            log_title,
+            lambda: edit_path(
+                "Hearthstone log path",
+                effective_log,
+                store.set_hs_log_path,
+            ),
+            "Hearthstone log path",
+            "auto-detected",
+            lambda: store.set_hs_log_path(None),
+        ),
+        _SettingsRow(
+            "replay_retention",
+            retention_title,
+            edit_retention,
+            "Replay retention",
+            _retention_label(DEFAULT_REPLAY_RETENTION),
+            lambda: store.set_replay_retention(DEFAULT_REPLAY_RETENTION),
+        ),
+        _SettingsRow(
+            "global_hotkeys",
+            lambda: "Global hotkeys",
+            lambda: nav.drill_down("Global hotkeys"),
+            "Global hotkeys",
+            "defaults",
+            restore_hotkeys,
+        ),
+        _SettingsRow(
+            "restore_all",
+            lambda: "Restore all defaults",
+            None,
+            "Restore all defaults",
+            "defaults",
+            restore_all,
+        ),
+    )
+    rows_by_id = {row.option_id: row for row in rows}
+
     def options() -> list[MenuOption]:
         # Full custom paths stay reachable by Enter in Text mode; this vertical
         # menu intentionally keeps the row titles short (ADR-0011 ruling).
         return [
-            MenuOption("narration", narration_title, edit_narration),
-            MenuOption("game_audio_volume", volume_title, edit_volume),
-            MenuOption("replay_autoplay", autoplay_title, toggle_autoplay),
-            MenuOption(
-                "hs_install_path",
-                install_title,
-                lambda: edit_path(
-                    "Hearthstone install path",
-                    effective_install,
-                    store.set_hs_install_path,
-                ),
-            ),
-            MenuOption(
-                "hs_log_path",
-                log_title,
-                lambda: edit_path(
-                    "Hearthstone log path", effective_log, store.set_hs_log_path
-                ),
-            ),
-            MenuOption("replay_retention", retention_title, edit_retention),
-            MenuOption("global_hotkeys", lambda: "Global hotkeys", lambda: nav.drill_down("Global hotkeys")),
-            MenuOption("restore_all", lambda: "Restore all defaults", None),
+            MenuOption(row.option_id, row.title, row.on_enter) for row in rows
         ]
 
-    def current_row() -> str:
+    def current_row() -> _SettingsRow:
         if engine is None:
             raise RuntimeError("Settings engine is not active")
-        return _ROW_IDS[engine.cursor]
+        option_id = engine.current_option_id
+        if option_id is None:
+            raise RuntimeError("Settings has no current row")
+        return rows_by_id[option_id]
 
     def activate_current() -> None:
         if engine is None or enter_armed is None:
             raise RuntimeError("Settings actions are not active")
-        if current_row() == "restore_all":
+        if current_row().option_id == "restore_all":
             enter_armed.press(
                 "enter:restore_all",
                 "Press Enter again to restore all defaults",
@@ -266,56 +332,38 @@ def build_settings(
 
     def reset_current() -> None:
         row = current_row()
-        actions: dict[str, tuple[str, str, Callable[[], None], Callable[[], str]]] = {
-            "narration": ("Narration", "key moments", lambda: store.set_narration(DEFAULT_NARRATION), narration_title),
-            "game_audio_volume": ("Game audio volume", "80", lambda: store.set_game_audio_volume(DEFAULT_GAME_AUDIO_VOLUME), volume_title),
-            "replay_autoplay": ("Replay auto-play", "on", lambda: store.set_replay_autoplay(DEFAULT_REPLAY_AUTOPLAY), autoplay_title),
-            "hs_install_path": ("Hearthstone install path", "auto-detected", lambda: store.set_hs_install_path(None), install_title),
-            "hs_log_path": ("Hearthstone log path", "auto-detected", lambda: store.set_hs_log_path(None), log_title),
-            "replay_retention": ("Replay retention", "unlimited", lambda: store.set_replay_retention(DEFAULT_REPLAY_RETENTION), retention_title),
-            "global_hotkeys": ("Global hotkeys", "defaults", restore_hotkeys, lambda: "Global hotkeys"),
-            "restore_all": ("Restore all defaults", "defaults", restore_all, lambda: "Restore all defaults"),
-        }
-        label, default, action, title = actions[row]
 
         def finish() -> None:
-            action()
-            if row != "restore_all":
-                changed(title)
+            row.reset()
+            if row.option_id != "restore_all":
+                changed(row.title)
 
         if delete_armed is None:
             raise RuntimeError("Settings delete action is not active")
         delete_armed.press(
-            f"delete:{row}",
+            f"delete:{row.option_id}",
             (
                 "Press Delete again to restore all defaults"
-                if row == "restore_all"
-                else f"Press Delete again to reset {label} to {default}"
+                if row.option_id == "restore_all"
+                else (
+                    f"Press Delete again to reset {row.reset_label} "
+                    f"to {row.spoken_default}"
+                )
             ),
             finish,
         )
 
     def reset_current_now() -> None:
         row = current_row()
-        if row == "restore_all":
+        if row.option_id == "restore_all":
             restore_all()
             return
         # Reuse the reset table while bypassing ArmedAction's pending state.
         if delete_armed is None:
             raise RuntimeError("Settings delete action is not active")
         delete_armed.disarm()
-        resetters: dict[str, tuple[Callable[[], None], Callable[[], str]]] = {
-            "narration": (lambda: store.set_narration(DEFAULT_NARRATION), narration_title),
-            "game_audio_volume": (lambda: store.set_game_audio_volume(DEFAULT_GAME_AUDIO_VOLUME), volume_title),
-            "replay_autoplay": (lambda: store.set_replay_autoplay(DEFAULT_REPLAY_AUTOPLAY), autoplay_title),
-            "hs_install_path": (lambda: store.set_hs_install_path(None), install_title),
-            "hs_log_path": (lambda: store.set_hs_log_path(None), log_title),
-            "replay_retention": (lambda: store.set_replay_retention(DEFAULT_REPLAY_RETENTION), retention_title),
-            "global_hotkeys": (restore_hotkeys, lambda: "Global hotkeys"),
-        }
-        action, title = resetters[row]
-        action()
-        changed(title)
+        row.reset()
+        changed(row.title)
 
     spec = SurfaceSpec(
         "Settings",
@@ -332,7 +380,6 @@ def build_settings(
                 activate_current,
             )
         },
-        slot_noops={Slot.SEARCH: "No search on this screen"},
     )
     surface = build_active_surface(spec, announcer, universal_bindings, nav)
     if not isinstance(surface.engine, VerticalMenuEngine):

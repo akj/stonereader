@@ -10,6 +10,7 @@ import binascii
 import logging
 import sqlite3
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import wx
 from hearthstone.deckstrings import parse_deckstring
@@ -52,6 +53,10 @@ from stonereader.ui import (
 )
 from stonereader.views.surface_panel import SurfacePanel
 
+if TYPE_CHECKING:
+    from stonereader.services import GameTracker
+    from stonereader.services._global_hotkey import GlobalHotkeyService
+
 
 class MainWindow(wx.Frame):
     """Top-level frame hosting the single input sink and active Surface."""
@@ -72,6 +77,8 @@ class MainWindow(wx.Frame):
         self._current_panel: SurfacePanel | None = None
         self._current_surface: ActiveSurface | None = None
         self._help_origin = HelpOrigin()
+        self._tracker: GameTracker | None = None
+        self._hotkeys: GlobalHotkeyService | None = None
 
         self._audio_player = audio_player
         self._sink = InputSink(self, self._announcer, stop_audio=audio_player.stop)
@@ -80,6 +87,11 @@ class MainWindow(wx.Frame):
             announcer=self._announcer,
             stop_audio=audio_player.stop,
             activate=self._activate_surface,
+        )
+        quit_command = Command(
+            "app.quit",
+            "Ctrl+Q or Alt+F4: quit StoneReader",
+            self._quit,
         )
         self._universal_bindings = [
             (
@@ -92,12 +104,9 @@ class MainWindow(wx.Frame):
             ),
             (
                 Chord("q", ctrl=True),
-                Command(
-                    "app.quit",
-                    "Ctrl+Q: quit StoneReader",
-                    self._quit,
-                ),
+                quit_command,
             ),
+            (Chord("f4", alt=True), quit_command),
         ]
 
         self._db_conn = get_connection()
@@ -106,10 +115,6 @@ class MainWindow(wx.Frame):
         self._clipboard_offer_accept: Callable[[str], None] | None = None
         self.Bind(wx.EVT_ACTIVATE, self._on_activate)
         self.Bind(wx.EVT_CLOSE, self._on_close)
-
-    @property
-    def speech(self) -> SpeechService:
-        return self._speech
 
     @property
     def announcer(self) -> Announcer:
@@ -160,11 +165,8 @@ class MainWindow(wx.Frame):
         self,
         on_accept: Callable[[str], None],
     ) -> None:
-        """Install the Offer route and suppress the startup clipboard value."""
+        """Install the clipboard-deckstring Offer route."""
         self._clipboard_offer_accept = on_accept
-        initial = _read_clipboard_text()
-        if initial is not None:
-            self._sink.mark_offer_subject_seen(initial)
 
     def _on_activate(self, event: wx.ActivateEvent) -> None:
         accept = self._clipboard_offer_accept
@@ -176,9 +178,7 @@ class MainWindow(wx.Frame):
                     lambda text=text: accept(text),
                 )
                 if armed:
-                    self._announcer.offer(
-                        "Deck code on clipboard — press Control Enter to import"
-                    )
+                    self._announcer.clipboard_deck_offer()
         event.Skip()
 
     def _quit(self) -> None:
@@ -189,13 +189,13 @@ class MainWindow(wx.Frame):
         #   hotkeys.clear_all() -> tracker.stop() -> db_conn.close() -> Destroy()
         # Every step is isolated so a failure cannot prevent later cleanup.
         log = logging.getLogger(__name__)
-        hotkeys = getattr(self, "_hotkeys", None)
+        hotkeys = self._hotkeys
         if hotkeys is not None:
             try:
                 hotkeys.clear_all()
             except Exception:
                 log.exception("hotkeys.clear_all() failed; continuing cleanup")
-        tracker = getattr(self, "_tracker", None)
+        tracker = self._tracker
         if tracker is not None:
             try:
                 tracker.stop()
@@ -231,7 +231,6 @@ class StoneReaderApp(wx.App):
 
         self._frame = MainWindow(audio_player)
         nav = self._frame.nav
-        speech = self._frame.speech
         announcer = self._frame.announcer
         db_conn = self._frame.db_conn
 
@@ -258,7 +257,7 @@ class StoneReaderApp(wx.App):
         try:
             log_config_changed = ensure_log_config()
             if log_config_changed:
-                speech.speak("Hearthstone logging enabled.")
+                announcer.game_logging_enabled()
         except Exception:
             logging.getLogger(__name__).exception(
                 "ensure_log_config failed; continuing"
@@ -268,7 +267,7 @@ class StoneReaderApp(wx.App):
             card_db=card_db,
             log_path_provider=lambda: settings.hs_log_path,
         )
-        self._frame._tracker = self._tracker  # type: ignore[attr-defined]
+        self._frame._tracker = self._tracker
         self._current_game = current_game
         self._narrator = Narrator(
             announcer,
@@ -285,7 +284,12 @@ class StoneReaderApp(wx.App):
         from stonereader.services._replay_recorder import ReplayRecorder
         from stonereader.services._replay_store import ReplayStore, default_replay_dir
 
-        replay_store = ReplayStore(db_conn, default_replay_dir(), card_db)
+        replay_store = ReplayStore(
+            db_conn,
+            default_replay_dir(),
+            card_db,
+            retention_provider=lambda: settings.replay_retention,
+        )
         self._deck_detector = DeckDetector(self._tracker, db_conn, card_db)
         self._recorder = ReplayRecorder(
             replay_store,
@@ -511,7 +515,7 @@ class StoneReaderApp(wx.App):
         from stonereader.services._global_hotkey import GlobalHotkeyService
 
         self._hotkeys = GlobalHotkeyService(self._frame)
-        self._frame._hotkeys = self._hotkeys  # type: ignore[attr-defined]
+        self._frame._hotkeys = self._hotkeys
         hotkey_map = HotkeyMap(
             self._hotkeys,
             {
@@ -546,11 +550,7 @@ class StoneReaderApp(wx.App):
         self._hotkey_map = hotkey_map
         hotkey_map.apply(settings)
         if self._hotkeys.failed:
-            speech.speak(
-                "Could not register hotkeys: "
-                + ", ".join(self._hotkeys.failed)
-                + "."
-            )
+            announcer.hotkeys_unavailable(self._hotkeys.failed)
 
         # Start after Show() so wx.Timer cannot fire before the visible frame's
         # message loop is ready.

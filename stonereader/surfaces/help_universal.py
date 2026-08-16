@@ -16,21 +16,25 @@ def build_help_universal(
     universal_bindings: list[tuple[Chord, Command]],
     nav: NavigationController,
 ) -> ActiveSurface:
-    """Build the fixed read-only list of app-wide keys."""
+    """Build the registry-generated read-only list of app-wide keys."""
+    surface: ActiveSurface | None = None
 
     def options() -> list[MenuOption]:
+        if surface is None:
+            raise RuntimeError("Universal help Surface is not active")
         return [
             MenuOption(
                 f"universal.{index}",
                 lambda phrase=phrase: phrase,
                 None,
             )
-            for index, phrase in enumerate(universal_entries())
+            for index, phrase in enumerate(universal_entries(surface.registry))
         ]
 
-    return build_active_surface(
+    surface = build_active_surface(
         SurfaceSpec("Universal keys", WidgetType.VERTICAL_MENU, options=options),
         announcer,
         universal_bindings,
         nav,
     )
+    return surface

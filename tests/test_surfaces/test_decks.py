@@ -1,21 +1,22 @@
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import dataclass
 
 from stonereader.db import get_all_decks, insert_replay, save_deck
 from stonereader.surfaces._deck_data import CurrentDeck, DeckData
 from stonereader.surfaces.decks import build_decks
 from stonereader.ui._sink_core import _SinkCore
-from stonereader.ui.announcer import Announcer
 from stonereader.ui.chords import Chord
-from stonereader.ui.engines import HorizontalListEngine
-from stonereader.ui.navigation import ActiveSurface, NavigationController
-from stonereader.ui.registry import CommandRegistry
-from stonereader.ui.surface import SurfaceSpec, WidgetType
 
-from tests.test_ui.conftest import FakeSpeech
-
-from .conftest import make_card, make_card_db, make_deckstring
+from .conftest import (
+    Harness,
+    make_card,
+    make_card_db,
+    make_deckstring,
+    make_harness,
+    placeholder_surface,
+)
 
 
 class SeenSink:
@@ -26,62 +27,43 @@ class SeenSink:
         self.subjects.append(subject)
 
 
-class LandingEngine:
-    def on_landing(self, queued: bool = False) -> None:
-        pass
-
-
-def placeholder(name: str) -> ActiveSurface:
-    return ActiveSurface(
-        SurfaceSpec(name, WidgetType.VERTICAL_MENU, options=lambda: []),
-        LandingEngine(),
-        CommandRegistry(),
-    )
+@dataclass
+class DecksContext:
+    current: CurrentDeck
+    copied: list[str]
+    offer_sink: SeenSink | _SinkCore
 
 
 def make_surface(
     conn: sqlite3.Connection,
     *,
     offer_sink: SeenSink | _SinkCore | None = None,
-) -> tuple[
-    ActiveSurface,
-    _SinkCore,
-    FakeSpeech,
-    NavigationController,
-    CurrentDeck,
-    list[str],
-    SeenSink | _SinkCore,
-]:
+) -> Harness[DecksContext]:
     hero = make_card(274, "Jaina", card_class="MAGE", card_type="HERO")
     card = make_card(1000, "Arcane Bolt")
     card_db = make_card_db(hero, card)
-    speech = FakeSpeech()
-    announcer = Announcer(speech)
-    sink = _SinkCore(announcer, lambda: None)
     copied: list[str] = []
     current = CurrentDeck()
-    navigation = NavigationController(
-        lambda _title: None,
-        announcer,
-        lambda: None,
-        lambda active: sink.set_active(active.registry),
-    )
-    navigation.register("Deck detail", lambda: placeholder("Deck detail"))
-    navigation.register("Import Deck", lambda: placeholder("Import Deck"))
-    navigation.register("Statistics", lambda: placeholder("Statistics"))
     actual_offer_sink = offer_sink or SeenSink()
-    surface = build_decks(
-        announcer,
-        [],
-        navigation,
-        conn,
-        DeckData(conn, card_db),
-        current,
-        actual_offer_sink,
-        copied.append,
+    harness = make_harness(DecksContext(current, copied, actual_offer_sink))
+    harness.nav.register(
+        "Deck detail", lambda: placeholder_surface("Deck detail")
     )
-    sink.set_active(surface.registry)
-    return surface, sink, speech, navigation, current, copied, actual_offer_sink
+    harness.nav.register("Import Deck", lambda: placeholder_surface("Import Deck"))
+    harness.nav.register("Statistics", lambda: placeholder_surface("Statistics"))
+    harness.set_surface(
+        build_decks(
+            harness.announcer,
+            [],
+            harness.nav,
+            conn,
+            DeckData(conn, card_db),
+            current,
+            actual_offer_sink,
+            copied.append,
+        )
+    )
+    return harness
 
 
 def seed_decks(conn: sqlite3.Connection) -> tuple[str, str, int, int]:
@@ -108,39 +90,38 @@ def test_rows_are_decks_then_actions_with_every_detail_line(
         deck_id=second_id,
         played_at="2026-08-15T22:10:00",
     )
-    surface, sink, _speech, _nav, _current, _copied, _seen = make_surface(db_conn)
-    assert isinstance(surface.engine, HorizontalListEngine)
+    harness = make_surface(db_conn)
 
-    assert surface.engine.items_snapshot() == (
+    assert harness.horizontal.items_snapshot() == (
         ["Second", "First", "Import deck…", "Statistics…"],
         0,
         ["Mage, Standard", "2 cards", "Last played 2026-08-15"],
     )
-    sink.handle_chord(Chord("right"))
-    assert surface.engine.items_snapshot()[2] == [
+    harness.press(Chord("right"))
+    assert harness.horizontal.items_snapshot()[2] == [
         "Mage, Standard",
         "1 cards",
         "Never played",
     ]
-    sink.handle_chord(Chord("right"))
-    assert surface.engine.items_snapshot()[2] == []
+    harness.press(Chord("right"))
+    assert harness.horizontal.items_snapshot()[2] == []
 
 
-def test_armed_delete_move_disarms_then_repeat_deletes_with_queued_reentry(
+def test_armed_delete_move_disarms_then_repeat_deletes_with_continuing_reentry(
     db_conn: sqlite3.Connection,
 ) -> None:
     code = make_deckstring([(1000, 1)])
     save_deck(db_conn, "Aggro Shaman", "Mage", "Standard", code)
-    _surface, sink, speech, _nav, _current, _copied, _seen = make_surface(db_conn)
+    harness = make_surface(db_conn)
 
-    sink.handle_chord(Chord("delete"))
-    sink.handle_chord(Chord("right"))
-    sink.handle_chord(Chord("left"))
-    sink.handle_chord(Chord("delete"))
-    sink.handle_chord(Chord("delete"))
+    harness.press(Chord("delete"))
+    harness.press(Chord("right"))
+    harness.press(Chord("left"))
+    harness.press(Chord("delete"))
+    harness.press(Chord("delete"))
 
     assert get_all_decks(db_conn) == []
-    assert speech.calls == [
+    assert harness.speech.calls == [
         ("Press Delete again to delete Aggro Shaman", True),
         ("Import deck…", True),
         ("Aggro Shaman", True),
@@ -153,12 +134,12 @@ def test_armed_delete_move_disarms_then_repeat_deletes_with_queued_reentry(
 def test_shift_delete_is_immediate(db_conn: sqlite3.Connection) -> None:
     code = make_deckstring([(1000, 1)])
     save_deck(db_conn, "Tempo Mage", "Mage", "Standard", code)
-    _surface, sink, speech, _nav, _current, _copied, _seen = make_surface(db_conn)
+    harness = make_surface(db_conn)
 
-    sink.handle_chord(Chord("delete", shift=True))
+    harness.press(Chord("delete", shift=True))
 
     assert get_all_decks(db_conn) == []
-    assert speech.calls == [
+    assert harness.speech.calls == [
         ("Tempo Mage deleted", True),
         ("Decks, Import deck…, 1 of 2", False),
     ]
@@ -169,19 +150,17 @@ def test_copy_confirms_marks_seen_and_own_copy_never_offers(
 ) -> None:
     code = make_deckstring([(1000, 1)])
     save_deck(db_conn, "Copy Me", "Mage", "Standard", code)
-    speech = FakeSpeech()
-    offer_core = _SinkCore(Announcer(speech), lambda: None)
-    surface, sink, surface_speech, _nav, _current, copied, _seen = make_surface(
+    offer_harness = make_harness(None)
+    harness = make_surface(
         db_conn,
-        offer_sink=offer_core,
+        offer_sink=offer_harness.sink,
     )
-    assert surface is not None
 
-    sink.handle_chord(Chord("c"))
+    harness.press(Chord("c"))
 
-    assert copied == [code]
-    assert surface_speech.calls == [("Deck code copied", True)]
-    assert offer_core.arm_offer(code, lambda: None) is False
+    assert harness.context.copied == [code]
+    assert harness.speech.calls == [("Deck code copied", True)]
+    assert offer_harness.sink.arm_offer(code, lambda: None) is False
 
 
 def test_enter_dispatches_for_deck_import_and_statistics_rows(
@@ -189,10 +168,10 @@ def test_enter_dispatches_for_deck_import_and_statistics_rows(
 ) -> None:
     code = make_deckstring([(1000, 1)])
     save_deck(db_conn, "Open Me", "Mage", "Standard", code)
-    _surface, sink, _speech, nav, current, _copied, _seen = make_surface(db_conn)
-    sink.handle_chord(Chord("enter"))
-    assert current.get().name == "Open Me"
-    assert nav.stack == ("Home", "Deck detail")
+    harness = make_surface(db_conn)
+    harness.press(Chord("enter"))
+    assert harness.context.current.get().name == "Open Me"
+    assert harness.nav.stack == ("Home", "Deck detail")
 
     empty_conn = sqlite3.connect(":memory:")
     empty_conn.row_factory = sqlite3.Row
@@ -200,18 +179,14 @@ def test_enter_dispatches_for_deck_import_and_statistics_rows(
 
     init_db(empty_conn)
     try:
-        _surface, sink, _speech, nav, _current, _copied, _seen = make_surface(
-            empty_conn
-        )
-        sink.handle_chord(Chord("enter"))
-        assert nav.stack == ("Home", "Import Deck")
+        harness = make_surface(empty_conn)
+        harness.press(Chord("enter"))
+        assert harness.nav.stack == ("Home", "Import Deck")
 
-        _surface, sink, _speech, nav, _current, _copied, _seen = make_surface(
-            empty_conn
-        )
-        sink.handle_chord(Chord("right"))
-        sink.handle_chord(Chord("enter"))
-        assert nav.stack == ("Home", "Statistics")
+        harness = make_surface(empty_conn)
+        harness.press(Chord("right"))
+        harness.press(Chord("enter"))
+        assert harness.nav.stack == ("Home", "Statistics")
     finally:
         empty_conn.close()
 
@@ -219,10 +194,10 @@ def test_enter_dispatches_for_deck_import_and_statistics_rows(
 def test_action_rows_get_exact_delete_and_copy_noops(
     db_conn: sqlite3.Connection,
 ) -> None:
-    _surface, sink, speech, _nav, _current, _copied, _seen = make_surface(db_conn)
+    harness = make_surface(db_conn)
     for chord in (Chord("delete"), Chord("delete", shift=True), Chord("c")):
-        sink.handle_chord(chord)
-    assert speech.calls == [
+        harness.press(chord)
+    assert harness.speech.calls == [
         ("Nothing to delete here", True),
         ("Nothing to delete here", True),
         ("Nothing to copy here", True),

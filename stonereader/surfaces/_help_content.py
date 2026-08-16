@@ -4,9 +4,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from stonereader.ui._sink_core import BARE_CTRL_HELP_PHRASE
 from stonereader.ui.chords import Chord
 from stonereader.ui.navigation import ActiveSurface
-from stonereader.ui.registry import SLOT_CHORDS, Command, Slot
+from stonereader.ui.registry import (
+    END_JUMP_UNIVERSAL_HELP_PHRASE,
+    SLOT_CHORDS,
+    SLOT_UNIVERSAL_HELP_PHRASES,
+    Command,
+    CommandRegistry,
+    Slot,
+)
 from stonereader.ui.surface import SurfaceSpec, WidgetType
 
 
@@ -17,19 +25,6 @@ class HelpEntry:
     phrase: str
     command: Command | None
 
-
-UNIVERSAL_HELP_ENTRIES = (
-    "Enter: act on the current item",
-    "Escape or Backspace: go back",
-    "Home and End: jump to the ends",
-    "Page Up and Page Down: pages or turns where the screen has them",
-    "Tab and Shift+Tab: jump between groups where the screen has them",
-    "Ctrl+F: search where the screen has it",
-    "F1: help for this screen",
-    "L: listen to a card's sounds",
-    "Ctrl: stop game audio",
-    "Ctrl+Q: quit StoneReader",
-)
 
 _NON_EXECUTABLE_CHORDS: frozenset[Chord] = frozenset(
     (*SLOT_CHORDS[Slot.ENTER], *SLOT_CHORDS[Slot.SEARCH])
@@ -72,6 +67,30 @@ def screen_bindings(surface: ActiveSurface) -> list[HelpEntry]:
     return entries
 
 
-def universal_entries() -> list[str]:
-    """Return the fixed app-wide key layer in its specified order."""
-    return list(UNIVERSAL_HELP_ENTRIES)
+def universal_entries(registry: CommandRegistry) -> list[str]:
+    """Assemble the complete universal layer in the UI-spec order."""
+    bindings = registry.universal_bindings()
+    commands_by_chord = dict(bindings)
+    included_ids: set[str] = set()
+
+    def registered_phrase(chord: Chord) -> str:
+        command = commands_by_chord[chord]
+        included_ids.add(command.id)
+        return command.help_phrase
+
+    entries = [
+        SLOT_UNIVERSAL_HELP_PHRASES[Slot.ENTER],
+        registered_phrase(Chord("escape")),
+        END_JUMP_UNIVERSAL_HELP_PHRASE,
+        SLOT_UNIVERSAL_HELP_PHRASES[Slot.COARSE_AXIS],
+        SLOT_UNIVERSAL_HELP_PHRASES[Slot.GROUP_JUMP],
+        SLOT_UNIVERSAL_HELP_PHRASES[Slot.SEARCH],
+        registered_phrase(Chord("f1")),
+        SLOT_UNIVERSAL_HELP_PHRASES[Slot.LISTEN],
+        BARE_CTRL_HELP_PHRASE,
+    ]
+    for _chord, command in bindings:
+        if command.id not in included_ids:
+            included_ids.add(command.id)
+            entries.append(command.help_phrase)
+    return entries

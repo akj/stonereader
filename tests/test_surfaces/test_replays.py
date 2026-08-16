@@ -1,63 +1,49 @@
 from __future__ import annotations
 
+import sqlite3
+from dataclasses import dataclass
 from pathlib import Path
 
 from stonereader.db import get_connection, init_db
 from stonereader.services._replay_store import ReplayStore
 from stonereader.surfaces.replay_viewer import CurrentReplay
 from stonereader.surfaces.replays import build_replays
-from stonereader.ui._sink_core import _SinkCore
-from stonereader.ui.announcer import Announcer
 from stonereader.ui.chords import Chord
 from stonereader.ui.engines import HorizontalListEngine
-from stonereader.ui.navigation import ActiveSurface, NavigationController
-from stonereader.ui.registry import CommandRegistry
-from stonereader.ui.surface import SurfaceSpec, WidgetType
 
-from tests.test_ui.conftest import FakeSpeech
-
-from .conftest import make_card_db
+from .conftest import Harness, make_card_db, make_harness, placeholder_surface
 
 
-class LandingEngine:
-    def on_landing(self, queued: bool = False) -> None:
-        pass
+@dataclass
+class ReplaysContext:
+    conn: sqlite3.Connection
+    store: ReplayStore
+    current_replay: CurrentReplay
 
 
-def _placeholder(name: str) -> ActiveSurface:
-    return ActiveSurface(
-        SurfaceSpec(name, WidgetType.VERTICAL_MENU, options=lambda: []),
-        LandingEngine(),
-        CommandRegistry(),
-    )
-
-
-def _harness(tmp_path):
+def _harness(tmp_path: Path) -> Harness[ReplaysContext]:
     conn = get_connection(str(tmp_path / "test.db"))
     init_db(conn)
     store = ReplayStore(conn, tmp_path / "replays")
-    speech = FakeSpeech()
-    announcer = Announcer(speech)
-    sink = _SinkCore(announcer, lambda: None)
-    nav = NavigationController(
-        lambda _title: None,
-        announcer,
-        lambda: None,
-        lambda surface: sink.set_active(surface.registry),
-    )
-    nav.register("Import Replays", lambda: _placeholder("Import Replays"))
-    nav.register("Replay Viewer", lambda: _placeholder("Replay Viewer"))
     current_replay = CurrentReplay()
-    surface = build_replays(
-        announcer,
-        [],
-        nav,
-        store,
-        make_card_db(),
-        current_replay,
+    harness = make_harness(ReplaysContext(conn, store, current_replay))
+    harness.nav.register(
+        "Import Replays", lambda: placeholder_surface("Import Replays")
     )
-    sink.set_active(surface.registry)
-    return conn, store, surface, sink, speech, nav, current_replay
+    harness.nav.register(
+        "Replay Viewer", lambda: placeholder_surface("Replay Viewer")
+    )
+    harness.set_surface(
+        build_replays(
+            harness.announcer,
+            [],
+            harness.nav,
+            store,
+            make_card_db(),
+            current_replay,
+        )
+    )
+    return harness
 
 
 def _save(store: ReplayStore, xml: str, **overrides):
@@ -77,9 +63,9 @@ def _save(store: ReplayStore, xml: str, **overrides):
 
 
 def test_rows_are_newest_first_then_action_with_every_detail_variant(tmp_path):
-    conn, store, surface, _sink, _speech, _nav, _current = _harness(tmp_path)
+    harness = _harness(tmp_path)
     _save(
-        store,
+        harness.context.store,
         "<old/>",
         source="manual_import",
         result="LOST",
@@ -91,7 +77,7 @@ def test_rows_are_newest_first_then_action_with_every_detail_variant(tmp_path):
         played_at="2026-08-15T21:05:00",
     )
     _save(
-        store,
+        harness.context.store,
         "<new/>",
         result="UNKNOWN",
         opponent_class="MAGE",
@@ -102,9 +88,7 @@ def test_rows_are_newest_first_then_action_with_every_detail_variant(tmp_path):
         deck_name=None,
         played_at="2026-08-16T09:30:00",
     )
-    assert isinstance(surface.engine, HorizontalListEngine)
-
-    assert surface.engine.items_snapshot() == (
+    assert harness.horizontal.items_snapshot() == (
         [
             "Unknown versus Mage, 3 turns",
             "Lost versus Death Knight, 12 turns",
@@ -119,131 +103,134 @@ def test_rows_are_newest_first_then_action_with_every_detail_variant(tmp_path):
             "Live recorded",
         ],
     )
-    surface.engine.jump_to_position(2)
-    assert surface.engine.items_snapshot()[2] == [
+    harness.horizontal.jump_to_position(2)
+    assert harness.horizontal.items_snapshot()[2] == [
         "2026-08-15, 21:05",
         "Played Control Mage",
         "Ranked, Standard",
         "Not counted",
         "Imported",
     ]
-    surface.engine.jump_to_position(3)
-    assert surface.engine.items_snapshot()[2] == []
-    conn.close()
+    harness.horizontal.jump_to_position(3)
+    assert harness.horizontal.items_snapshot()[2] == []
+    harness.context.conn.close()
 
 
 def test_all_result_titles_are_spoken_in_title_case(tmp_path):
-    conn, store, surface, _sink, _speech, _nav, _current = _harness(tmp_path)
+    harness = _harness(tmp_path)
     for index, result in enumerate(("WON", "LOST", "TIED", "UNKNOWN")):
         _save(
-            store,
+            harness.context.store,
             f"<{result}/>",
             result=result,
             played_at=f"2026-08-{12 + index:02d}T09:30:00",
         )
 
-    assert surface.engine.items_snapshot()[0] == [
+    assert harness.horizontal.items_snapshot()[0] == [
         "Unknown versus Warrior, 8 turns",
         "Tied versus Warrior, 8 turns",
         "Lost versus Warrior, 8 turns",
         "Won versus Warrior, 8 turns",
         "Import replays…",
     ]
-    conn.close()
+    harness.context.conn.close()
 
 
 def test_space_toggles_cursor_neutrally_and_action_row_is_noop(tmp_path):
-    conn, store, surface, sink, speech, _nav, _current = _harness(tmp_path)
-    replay = _save(store, "<one/>", in_stats=False)
+    harness = _harness(tmp_path)
+    replay = _save(harness.context.store, "<one/>", in_stats=False)
 
-    sink.handle_chord(Chord("space"))
-    assert store.all_replays()[0].in_stats is True
-    assert surface.engine.items_snapshot()[1] == 0
-    assert speech.calls == [("Included in stats", True)]
+    harness.press(Chord("space"))
+    assert harness.context.store.all_replays()[0].in_stats is True
+    assert harness.horizontal.items_snapshot()[1] == 0
+    assert harness.speech.calls == [("Included in stats", True)]
 
-    sink.handle_chord(Chord("space"))
-    assert store.all_replays()[0].in_stats is False
-    assert speech.calls[-1] == ("Excluded from stats", True)
-    assert len(speech.calls) == 2
+    harness.press(Chord("space"))
+    assert harness.context.store.all_replays()[0].in_stats is False
+    assert harness.speech.calls[-1] == ("Excluded from stats", True)
+    assert len(harness.speech.calls) == 2
 
-    surface.engine.jump_to_position(2)
-    sink.handle_chord(Chord("space"))
-    assert speech.calls[-1] == ("Nothing to count here", True)
+    harness.horizontal.jump_to_position(2)
+    harness.press(Chord("space"))
+    assert harness.speech.calls[-1] == ("Nothing to count here", True)
     assert Path(replay.file_path).exists()
-    conn.close()
+    harness.context.conn.close()
 
 
 def test_armed_delete_lifecycle_and_shift_delete_queue_reentry(tmp_path):
-    conn, store, surface, sink, speech, _nav, _current = _harness(tmp_path)
-    first = _save(store, "<first/>", played_at="2026-08-16T09:30:00")
-    second = _save(store, "<second/>", played_at="2026-08-15T09:30:00")
+    harness = _harness(tmp_path)
+    first = _save(harness.context.store, "<first/>", played_at="2026-08-16T09:30:00")
+    second = _save(harness.context.store, "<second/>", played_at="2026-08-15T09:30:00")
 
-    sink.handle_chord(Chord("delete"))
-    sink.handle_chord(Chord("right"))
-    sink.handle_chord(Chord("left"))
-    sink.handle_chord(Chord("delete"))
-    sink.handle_chord(Chord("delete"))
+    harness.press(Chord("delete"))
+    harness.press(Chord("right"))
+    harness.press(Chord("left"))
+    harness.press(Chord("delete"))
+    harness.press(Chord("delete"))
 
-    assert [meta.id for meta in store.all_replays()] == [second.id]
+    assert [meta.id for meta in harness.context.store.all_replays()] == [second.id]
     assert not Path(first.file_path).exists()
-    assert speech.calls[-2:] == [
+    assert harness.speech.calls[-2:] == [
         ("Replay deleted", True),
         ("Replays, Won versus Warrior, 8 turns, 1 of 2", False),
     ]
 
-    sink.handle_chord(Chord("delete", shift=True))
-    assert store.all_replays() == []
-    assert speech.calls[-2:] == [
+    harness.press(Chord("delete", shift=True))
+    assert harness.context.store.all_replays() == []
+    assert harness.speech.calls[-2:] == [
         ("Replay deleted", True),
         ("Replays, Import replays…, 1 of 1", False),
     ]
 
-    sink.handle_chord(Chord("delete"))
-    assert speech.calls[-1] == ("Nothing to delete here", True)
-    conn.close()
+    harness.press(Chord("delete"))
+    assert harness.speech.calls[-1] == ("Nothing to delete here", True)
+    harness.context.conn.close()
 
 
 def test_enter_loads_replay_drills_down_and_search_has_exact_noop(
     tmp_path, monkeypatch
 ):
-    conn, store, surface, sink, speech, nav, current = _harness(tmp_path)
-    _save(store, "<one/>")
+    harness = _harness(tmp_path)
+    _save(harness.context.store, "<one/>")
     loaded = object()
     monkeypatch.setattr(
         "stonereader.surfaces.replays.load_replay",
         lambda _path, _card_db: loaded,
     )
 
-    sink.handle_chord(Chord("enter"))
-    assert current.get() is loaded
-    assert nav.stack == ("Home", "Replay Viewer")
+    harness.press(Chord("enter"))
+    assert harness.context.current_replay.get() is loaded
+    assert harness.nav.stack == ("Home", "Replay Viewer")
 
-    sink.set_active(surface.registry)
-    surface.engine.jump_to_position(2)
-    sink.handle_chord(Chord("enter"))
-    assert nav.stack == ("Home", "Replay Viewer", "Import Replays")
+    replays = harness.surface
+    assert replays is not None
+    assert isinstance(replays.engine, HorizontalListEngine)
+    harness.sink.set_active(replays.registry)
+    replays.engine.jump_to_position(2)
+    harness.press(Chord("enter"))
+    assert harness.nav.stack == ("Home", "Replay Viewer", "Import Replays")
 
-    sink.set_active(surface.registry)
-    sink.handle_chord(Chord("f", ctrl=True))
-    assert speech.calls[-1] == ("No search on this screen", True)
-    conn.close()
+    harness.sink.set_active(replays.registry)
+    harness.press(Chord("f", ctrl=True))
+    assert harness.speech.calls[-1] == ("No search on this screen", True)
+    harness.context.conn.close()
 
 
 def test_invalid_replay_is_announced_without_navigation(tmp_path, monkeypatch):
     from stonereader.services._replay_loader import ReplayLoadError
 
-    conn, store, _surface, sink, speech, nav, _current = _harness(tmp_path)
-    _save(store, "<bad/>")
+    harness = _harness(tmp_path)
+    _save(harness.context.store, "<bad/>")
 
     def fail(_path, _card_db):
         raise ReplayLoadError("bad replay")
 
     monkeypatch.setattr("stonereader.surfaces.replays.load_replay", fail)
-    sink.handle_chord(Chord("enter"))
+    harness.press(Chord("enter"))
 
-    assert nav.stack == ("Home",)
-    assert speech.calls[-1] == (
+    assert harness.nav.stack == ("Home",)
+    assert harness.speech.calls[-1] == (
         "Could not open replay; the file may be invalid",
         True,
     )
-    conn.close()
+    harness.context.conn.close()

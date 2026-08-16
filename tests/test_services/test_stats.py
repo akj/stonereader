@@ -60,6 +60,13 @@ def test_corpus_attribution_zero_decks_and_row_order(
     save_deck(conn, "Alpha Zero", "MAGE", "Standard", "c")
     deleted_id = save_deck(conn, "Deleted saved name", "MAGE", "Standard", "d")
     delete_deck(conn, deleted_id)
+    conn.execute(
+        "UPDATE decks SET created_at = CASE name "
+        "WHEN 'Alpha Zero' THEN '2026-08-17T12:00:00' "
+        "WHEN 'Zulu Zero' THEN '2026-08-15T12:00:00' END "
+        "WHERE name IN ('Alpha Zero', 'Zulu Zero')"
+    )
+    conn.commit()
 
     _replay(
         conn,
@@ -92,29 +99,37 @@ def test_corpus_attribution_zero_decks_and_row_order(
         played_at="2026-08-16T09:00:00",
     )
     _replay(conn, "not-member", in_stats=False)
-    _replay(conn, "arena", game_type="ARENA")
+    _replay(
+        conn,
+        "arena",
+        game_type="ARENA",
+        deck_id=current_id,
+        deck_name="Current snapshot",
+    )
     _replay(conn, "battlegrounds", game_type="BATTLEGROUNDS")
 
     rows = compute_stats(conn)
 
     assert [row.name for row in rows] == [
         "All decks",
+        "Alpha Zero",
         "Renamed snapshot",
         "Current snapshot",
-        "Alpha Zero",
         "Zulu Zero",
         "Other games",
     ]
     assert (rows[0].wins, rows[0].losses, rows[0].ties, rows[0].unknowns) == (
-        1,
+        3,
         1,
         1,
         1,
     )
-    assert rows[0].total_games == 4
-    assert rows[1].total_games == 2
-    assert rows[3].total_games == 0
+    assert rows[0].total_games == 6
+    assert rows[1].total_games == 0
+    assert rows[2].total_games == 2
+    assert rows[3].total_games == 1
     assert rows[-1].unknowns == 1
+    assert rows[-1].total_games == 2
 
 
 def test_unknowns_rate_rounding_and_per_class_order(

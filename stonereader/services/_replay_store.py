@@ -24,7 +24,7 @@ import zipfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from stonereader import db
 from stonereader.services._exceptions import ServicesError
@@ -130,10 +130,13 @@ class ReplayStore:
         conn,
         replay_dir: Path,
         card_db: CardDatabase | None = None,
+        *,
+        retention_provider: Callable[[], int | None] = lambda: None,
     ) -> None:
         self._conn = conn
         self._replay_dir = Path(replay_dir)
         self._card_db = card_db
+        self._retention_provider = retention_provider
 
     def save_xml(
         self,
@@ -263,7 +266,7 @@ class ReplayStore:
         assert result is not None
         assert turns is not None
         assert played_at is not None
-        return self.save_xml(
+        saved = self.save_xml(
             xml,
             source=source,
             in_stats=in_stats,
@@ -278,6 +281,9 @@ class ReplayStore:
             played_at=played_at,
             duration_seconds=duration_seconds,
         )
+        if saved.created:
+            self.prune(self._retention_provider())
+        return saved
 
     def all_replays(self) -> list[ReplayMeta]:
         """Return all stored replays, newest first."""

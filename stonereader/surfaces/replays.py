@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import TypeAlias
 
-from stonereader.models.card import CardDatabase
+from stonereader.models.card import CARD_CLASS_NAMES, CardDatabase
 from stonereader.services._replay_loader import ReplayLoadError, load_replay
 from stonereader.services._replay_store import ReplayMeta, ReplayStore
+from stonereader.surfaces._action_row import ActionRow
 from stonereader.surfaces._deck_data import spoken_enum
 from stonereader.surfaces.replay_viewer import CurrentReplay
 from stonereader.ui.announcer import Announcer
@@ -22,12 +22,6 @@ from stonereader.ui.registry import Command, Slot
 from stonereader.ui.surface import Binding, SurfaceSpec, WidgetType, ZoneSpec
 
 
-@dataclass(frozen=True)
-class ActionRow:
-    action_id: str
-    label: str
-
-
 ReplayItem: TypeAlias = ReplayMeta | ActionRow
 
 _IMPORT = ActionRow("import", "Import replays…")
@@ -38,12 +32,6 @@ _RESULTS = {
     # The spec pins no separate UNKNOWN string; title case is the ruling.
     "UNKNOWN": "Unknown",
 }
-_CLASS_NAMES = {
-    "DEATHKNIGHT": "Death Knight",
-    "DEMONHUNTER": "Demon Hunter",
-}
-
-
 def build_replays(
     announcer: Announcer,
     universal_bindings: list[tuple[Chord, Command]],
@@ -64,7 +52,7 @@ def build_replays(
             return item.label
         result = _RESULTS.get(item.result.upper(), "Unknown")
         class_key = (item.opponent_class or "UNKNOWN").upper()
-        opponent = _CLASS_NAMES.get(class_key, spoken_enum(class_key))
+        opponent = CARD_CLASS_NAMES.get(class_key, spoken_enum(class_key))
         return f"{result} versus {opponent}, {item.turns} turns"
 
     def details(item: ReplayItem) -> list[str]:
@@ -121,7 +109,7 @@ def build_replays(
         announcer.confirmation("Replay deleted")
         if engine is None:
             raise RuntimeError("Replays engine is not active")
-        engine.on_landing(queued=True)
+        engine.on_landing(continues=True)
 
     def arm_delete() -> None:
         item = selected()
@@ -180,7 +168,6 @@ def build_replays(
                 open_selected,
             )
         },
-        slot_noops={Slot.SEARCH: "No search on this screen"},
     )
     surface = build_active_surface(spec, announcer, universal_bindings, nav)
     if not isinstance(surface.engine, HorizontalListEngine):

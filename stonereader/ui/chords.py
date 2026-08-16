@@ -155,7 +155,10 @@ class Chord:
         parts = [
             name
             for name, enabled in (
-                ("Control", self.ctrl),
+                (
+                    "Control" if self == ACCEPT_OFFER_CHORD else "Ctrl",
+                    self.ctrl,
+                ),
                 ("Shift", self.shift),
                 ("Alt", self.alt),
             )
@@ -168,6 +171,9 @@ class Chord:
         else:
             spoken_key = _SPOKEN_KEYS.get(self.key, self.key)
         return " ".join([*parts, spoken_key])
+
+
+ACCEPT_OFFER_CHORD = Chord("enter", ctrl=True)
 
 
 def _is_printable_key(key: str) -> bool:

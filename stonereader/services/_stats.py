@@ -34,14 +34,14 @@ class _Game:
     result: str
     opponent_class: str
     played_at: str
+    game_type: str
 
 
 def compute_stats(conn: sqlite3.Connection) -> list[StatsRow]:
     """Compute every Statistics row from current DB contents.
 
-    The constructed-game exclusion applies to the whole surface, including
-    All decks and Other games. Arena and Battlegrounds games do not use saved
-    decks, and Statistics lives under Decks as a constructed-games view.
+    All decks covers the complete Stats corpus. The constructed-game exclusion
+    applies only while attributing games to per-deck rows.
     """
     games = [
         _Game(
@@ -50,13 +50,12 @@ def compute_stats(conn: sqlite3.Connection) -> list[StatsRow]:
             result=str(row["result"]).upper(),
             opponent_class=str(row["opponent_class"] or "UNKNOWN").upper(),
             played_at=str(row["played_at"]),
+            game_type=str(row["game_type"] or "").upper(),
         )
         for row in conn.execute(
-            "SELECT deck_id, deck_name, result, opponent_class, played_at "
+            "SELECT deck_id, deck_name, result, opponent_class, played_at, game_type "
             "FROM replays WHERE in_stats = 1 "
-            "AND UPPER(game_type) NOT IN (?, ?) "
-            "ORDER BY played_at DESC, id DESC",
-            tuple(sorted(_NON_CONSTRUCTED_GAME_TYPES)),
+            "ORDER BY played_at DESC, id DESC"
         ).fetchall()
     ]
 
@@ -66,10 +65,11 @@ def compute_stats(conn: sqlite3.Connection) -> list[StatsRow]:
     for game in games:
         if game.deck_id is None:
             other_games.append(game)
-        else:
+        elif game.game_type not in _NON_CONSTRUCTED_GAME_TYPES:
             attributed.setdefault(game.deck_id, []).append(game)
 
     rows = [_summarize("All decks", games)]
+    deck_rows: list[tuple[str, int, StatsRow]] = []
     for deck_id, deck_games in attributed.items():
         # Games are newest first, so the first snapshot is the identity's
         # current display name while deleted decks retain their last snapshot.
@@ -80,19 +80,24 @@ def compute_stats(conn: sqlite3.Connection) -> list[StatsRow]:
         saved_name = (
             saved_decks[deck_id].name if deck_id in saved_decks else None
         )
-        rows.append(
-            _summarize(snapshot_name or saved_name or "Unknown deck", deck_games)
+        deck_rows.append(
+            (
+                deck_games[0].played_at,
+                deck_id,
+                _summarize(
+                    snapshot_name or saved_name or "Unknown deck",
+                    deck_games,
+                ),
+            )
         )
 
-    zero_game_decks = sorted(
-        (
-            deck
-            for deck_id, deck in saved_decks.items()
-            if deck_id not in attributed
-        ),
-        key=lambda deck: (deck.name, deck.deck_id),
+    deck_rows.extend(
+        (deck.created_at, deck.deck_id, _summarize(deck.name, []))
+        for deck_id, deck in saved_decks.items()
+        if deck_id not in attributed
     )
-    rows.extend(_summarize(deck.name, []) for deck in zero_game_decks)
+    deck_rows.sort(key=lambda entry: (entry[0], entry[1]), reverse=True)
+    rows.extend(row for _recency, _deck_id, row in deck_rows)
 
     if other_games:
         rows.append(_summarize("Other games", other_games))

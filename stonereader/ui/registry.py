@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import cast
 
-from stonereader.ui.chords import Chord
+from stonereader.ui.chords import ACCEPT_OFFER_CHORD, Chord
 
 
 class Layer(Enum):
@@ -51,19 +51,25 @@ SLOT_CHORDS: dict[Slot, tuple[Chord, ...]] = {
     Slot.LISTEN: (Chord("l"),),
 }
 
-SLOT_DEFAULT_PHRASES: dict[Slot, str] = {
-    Slot.ENTER: "Nothing to do here",
-    Slot.GROUP_JUMP: "No groups on this screen",
-    Slot.SEARCH: "No search on this screen",
-    Slot.COARSE_AXIS: "No pages on this screen",
-    Slot.LISTEN: "No card focused",
+SLOT_UNIVERSAL_HELP_PHRASES: dict[Slot, str] = {
+    Slot.ENTER: "Enter: act on the current item",
+    Slot.COARSE_AXIS: (
+        "Page Up and Page Down: pages or turns where the screen has them"
+    ),
+    Slot.GROUP_JUMP: (
+        "Tab and Shift+Tab: jump between groups where the screen has them"
+    ),
+    Slot.SEARCH: "Ctrl+F: search where the screen has it",
+    Slot.LISTEN: "L: listen to a card's sounds",
 }
+
+END_JUMP_UNIVERSAL_HELP_PHRASE = "Home and End: jump to the ends"
 
 _SLOT_BY_CHORD = {
     chord: slot for slot, chords in SLOT_CHORDS.items() for chord in chords
 }
-_RESERVED_OFFER = Chord("enter", ctrl=True)
 _RESERVED_BACK = (Chord("escape"), Chord("backspace"))
+_RESERVED_HELP = Chord("f1")
 
 
 class RegistrationError(Exception):
@@ -72,10 +78,16 @@ class RegistrationError(Exception):
 
 @dataclass(frozen=True)
 class DispatchResult:
-    """The outcome the input sink needs to route a keypress."""
+    """The outcome the input sink needs to route a keypress.
+
+    An unfilled slot names itself rather than its prose: the phrase for a
+    slot's default no-op belongs to the Announcer (ADR-0010). `announce`
+    carries only a Surface's own override.
+    """
 
     handled: bool
     announce: str | None = None
+    noop_slot: Slot | None = None
 
 
 class CommandRegistry:
@@ -107,8 +119,10 @@ class CommandRegistry:
 
     def register(self, layer: Layer, chord: Chord, command: Command) -> None:
         """Register one binding while enforcing the layer and reserved seams."""
-        if chord == _RESERVED_OFFER:
+        if chord == ACCEPT_OFFER_CHORD:
             raise RegistrationError("ctrl+enter is reserved for Offer acceptance")
+        if chord == _RESERVED_HELP and layer is not Layer.UNIVERSAL:
+            raise RegistrationError("F1 may only be installed by the universal layer")
         if chord in _RESERVED_BACK:
             raise RegistrationError(
                 "escape and backspace may only be installed by navigation"
@@ -134,7 +148,7 @@ class CommandRegistry:
         """Install the navigation controller's reserved Back command."""
         if any(self._layer_for(chord) is not None for chord in _RESERVED_BACK):
             raise RegistrationError("Back is already registered")
-        command = Command("back", "Go back", handler)
+        command = Command("back", "Escape or Backspace: go back", handler)
         for chord in _RESERVED_BACK:
             self._store(Layer.UNIVERSAL, chord, command)
 
@@ -173,8 +187,10 @@ class CommandRegistry:
             if command is not None:
                 command.handler()
                 return DispatchResult(handled=True)
-            phrase = self._slot_noops.get(slot, SLOT_DEFAULT_PHRASES[slot])
-            return DispatchResult(handled=True, announce=phrase)
+            phrase = self._slot_noops.get(slot)
+            if phrase is not None:
+                return DispatchResult(handled=True, announce=phrase)
+            return DispatchResult(handled=True, noop_slot=slot)
 
         for layer in Layer:
             command = self._bindings[layer].get(chord)
@@ -190,6 +206,14 @@ class CommandRegistry:
     def universal_bindings(self) -> list[tuple[Chord, Command]]:
         """Return explicitly registered universal bindings in order."""
         return list(self._orders[Layer.UNIVERSAL])
+
+    def all_bindings(self) -> list[tuple[Chord, Command]]:
+        """Return every explicit binding and slot fill in layer order."""
+        return [
+            *self._orders[Layer.UNIVERSAL],
+            *self._orders[Layer.WIDGET_TYPE],
+            *self._surface_order,
+        ]
 
     def _ensure_slot_unfilled(self, slot: Slot) -> None:
         if slot in self._slot_fills or slot in self._slot_noops:

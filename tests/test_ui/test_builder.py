@@ -10,7 +10,7 @@ from stonereader.ui.navigation import NavigationController
 from stonereader.ui.registry import Command, Slot
 from stonereader.ui.surface import Binding, MenuOption, SurfaceSpec, WidgetType, ZoneSpec
 
-from .conftest import FakeSpeech
+from tests.support import FakeSpeech
 
 
 def navigation(announcer: Announcer) -> NavigationController:

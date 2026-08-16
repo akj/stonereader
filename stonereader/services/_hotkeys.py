@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
 import wx
 
 from stonereader.services._settings import SettingsStore
-from stonereader.ui.chords import Chord
+from stonereader.ui.chords import ACCEPT_OFFER_CHORD, Chord
+from stonereader.ui.registry import CommandRegistry
 
 
 @dataclass(frozen=True)
@@ -39,8 +40,32 @@ HOTKEY_COMMANDS = (
 )
 
 _COMMAND_BY_ID = {command.command_id: command for command in HOTKEY_COMMANDS}
-_ACCEPT_OFFER = Chord("enter", ctrl=True)
+_APP_CHORD_OWNERS = {
+    ACCEPT_OFFER_CHORD: "Accept offer",
+    Chord("f", ctrl=True): "Search",
+    Chord("q", ctrl=True): "Quit StoneReader",
+    Chord("f4", alt=True): "Quit StoneReader",
+    Chord("tab", shift=True): "Previous group",
+}
 _ID_BASE = 2000
+
+_NAMED_KEY_VKS = {
+    "backspace": 0x08,
+    "tab": 0x09,
+    "enter": 0x0D,
+    "escape": 0x1B,
+    "space": 0x20,
+    "pageup": 0x21,
+    "pagedown": 0x22,
+    "end": 0x23,
+    "home": 0x24,
+    "left": 0x25,
+    "up": 0x26,
+    "right": 0x27,
+    "down": 0x28,
+    "delete": 0x2E,
+    **{f"f{number}": 0x6F + number for number in range(1, 13)},
+}
 
 
 class HotkeyBackend(Protocol):
@@ -111,12 +136,22 @@ class HotkeyMap:
         self._command(command_id)
         return self._current[command_id]
 
-    def is_taken(self, chord: Chord) -> str | None:
-        if chord == _ACCEPT_OFFER:
-            return "Accept offer"
+    def is_taken(
+        self,
+        chord: Chord,
+        registries: Iterable[tuple[str, CommandRegistry]] = (),
+    ) -> str | None:
+        """Name a StoneReader command that already owns ``chord``."""
         for command in HOTKEY_COMMANDS:
             if self._current[command.command_id] == chord:
                 return command.label
+        app_owner = _APP_CHORD_OWNERS.get(chord)
+        if app_owner is not None:
+            return app_owner
+        for surface_name, registry in registries:
+            for bound_chord, command in registry.all_bindings():
+                if bound_chord == chord:
+                    return f"{surface_name}: {command.help_phrase}"
         return None
 
     def rebind(self, command_id: str, chord: Chord) -> str | None:
@@ -179,9 +214,14 @@ class HotkeyMap:
 
 
 def chord_to_win32(chord: Chord) -> tuple[int, int]:
-    """Translate the supported letter/digit Chords into wx/Win32 values."""
-    if len(chord.key) != 1 or not chord.key.isalnum():
-        raise ValueError("Only letter and number shortcuts can be registered")
+    """Translate a registerable Chord into wx/Win32 values."""
+    if len(chord.key) == 1 and chord.key.isalnum():
+        vk = ord(chord.key.upper())
+    else:
+        try:
+            vk = _NAMED_KEY_VKS[chord.key]
+        except KeyError as error:
+            raise ValueError("This shortcut key cannot be registered") from error
     modifiers = 0
     if chord.ctrl:
         modifiers |= wx.MOD_CONTROL
@@ -189,4 +229,4 @@ def chord_to_win32(chord: Chord) -> tuple[int, int]:
         modifiers |= wx.MOD_SHIFT
     if chord.alt:
         modifiers |= wx.MOD_ALT
-    return modifiers, ord(chord.key.upper())
+    return modifiers, vk

@@ -6,30 +6,25 @@ from stonereader.models.card import Card
 from stonereader.models.game_state import GameEntity, GameState, Hero, PlayedCard
 from stonereader.models.replay import ReplayState
 from stonereader.services._audio_index import CardClip
+from stonereader.services._events import (
+    AttackStarted,
+    CardDrawn,
+    CardPlayed,
+    GameEnded,
+    MinionDied,
+    SecretPlayed,
+    SecretRevealed,
+    TurnChanged,
+)
 from stonereader.surfaces.sounds_menu import SoundsMenuHolder
-from stonereader.surfaces.replay_viewer import CurrentReplay, build_replay_viewer
-from stonereader.ui._sink_core import _SinkCore
-from stonereader.ui.announcer import Announcer
+from stonereader.surfaces.replay_viewer import (
+    CurrentReplay,
+    _event_audio_kind,
+    build_replay_viewer,
+)
 from stonereader.ui.chords import Chord
-from stonereader.ui.engines import HorizontalListEngine
-from stonereader.ui.navigation import ActiveSurface, NavigationController
-from stonereader.ui.registry import CommandRegistry
-from stonereader.ui.surface import SurfaceSpec, WidgetType
 
-from tests.test_ui.conftest import FakeSpeech
-
-
-class _LandingEngine:
-    def on_landing(self, queued: bool = False) -> None:
-        pass
-
-
-def _placeholder(name: str) -> ActiveSurface:
-    return ActiveSurface(
-        SurfaceSpec(name, WidgetType.VERTICAL_MENU, options=lambda: []),
-        _LandingEngine(),
-        CommandRegistry(),
-    )
+from .conftest import Harness, make_harness, placeholder_surface
 
 
 def _card(
@@ -74,7 +69,7 @@ def _entity(
         card.name if name is None else name,
         card.cost,
         card.attack or 0,
-        card.health if current_health is None else current_health,
+        (card.health or 0) if current_health is None else current_health,
         card.card_type,
         zone,
         1,
@@ -213,7 +208,8 @@ class FakeAudioIndex:
         self.clips = clips or []
         self.event_requests: list[tuple[str | None, str]] = []
 
-    def clips_for_card(self, _card_id: str) -> list[CardClip]:
+    def clips_for_card(self, card_id: str) -> list[CardClip]:
+        del card_id
         return list(self.clips)
 
     def event_clip(self, card_id: str | None, kind: str) -> str | None:
@@ -239,25 +235,17 @@ def _harness(
     player: FakePlayer | None = None,
     autoplay: bool = True,
     sounds: SoundsMenuHolder | None = None,
-):
-    speech = FakeSpeech()
-    announcer = Announcer(speech)
-    sink = _SinkCore(announcer, lambda: None)
-    nav = NavigationController(
-        lambda _title: None,
-        announcer,
-        lambda: None,
-        lambda surface: sink.set_active(surface.registry),
-    )
+) -> Harness[CurrentReplay]:
     current = CurrentReplay()
     current.set(replay or _replay())
-    nav.register("Replays", lambda: _placeholder("Replays"))
-    nav.register(
+    harness = make_harness(current)
+    harness.nav.register("Replays", lambda: placeholder_surface("Replays"))
+    harness.nav.register(
         "Replay Viewer",
         lambda: build_replay_viewer(
-            announcer,
+            harness.announcer,
             [],
-            nav,
+            harness.nav,
             current,
             audio_index=audio_index,
             player=player,
@@ -265,52 +253,52 @@ def _harness(
             sounds=sounds,
         ),
     )
-    nav.register("Child", lambda: _placeholder("Child"))
-    nav.register("Sounds menu", lambda: _placeholder("Sounds menu"))
-    nav.jump("Replays")
-    speech.calls.clear()
-    nav.drill_down("Replay Viewer")
-    surface = nav._surfaces["Replay Viewer"]
-    assert isinstance(surface.engine, HorizontalListEngine)
-    return surface, sink, speech, nav, current
+    harness.nav.register("Child", lambda: placeholder_surface("Child"))
+    harness.nav.register(
+        "Sounds menu", lambda: placeholder_surface("Sounds menu")
+    )
+    harness.nav.jump("Replays")
+    harness.speech.calls.clear()
+    harness.nav.drill_down("Replay Viewer")
+    return harness
 
 
 def test_entry_zone_switch_orientation_and_turn_step_share_one_template() -> None:
-    surface, sink, speech, _nav, _current = _harness()
-    assert speech.calls[-1] == (
+    harness = _harness()
+    assert harness.speech.calls[-1] == (
         "Turn 1, yours, Your board, Boar, 1 of 2",
         True,
     )
 
-    sink.handle_chord(Chord("g"))
-    assert speech.calls[-1] == (
+    harness.press(Chord("g"))
+    assert harness.speech.calls[-1] == (
         "Turn 1, yours, Opponent board, Enemy, 1 of 1",
         True,
     )
-    sink.handle_chord(Chord("up", shift=True))
-    assert speech.calls[-1] == (
+    harness.press(Chord("up", shift=True))
+    assert harness.speech.calls[-1] == (
         "Turn 1, yours, Opponent board, Enemy, 1 of 1",
         True,
     )
-    sink.handle_chord(Chord("pagedown"))
-    assert speech.calls[-1] == (
+    harness.press(Chord("pagedown"))
+    assert harness.speech.calls[-1] == (
         "Turn 2, opponent's, Opponent board, Enemy on turn two, 1 of 1",
         True,
     )
-    assert surface.engine.current_zone().zone_id == "opponent_board"
+    assert harness.horizontal.current_zone().zone_id == "opponent_board"
 
 
 def test_clamped_turn_step_repeats_only_the_bare_title() -> None:
-    _surface, sink, speech, _nav, _current = _harness()
-    speech.calls.clear()
+    harness = _harness()
+    harness.speech.calls.clear()
 
-    sink.handle_chord(Chord("pageup"))
+    harness.press(Chord("pageup"))
 
-    assert speech.calls == [("Boar", True)]
+    assert harness.speech.calls == [("Boar", True)]
 
 
 def test_all_zone_letters_shift_pairs_and_empty_weapon_phrase() -> None:
-    surface, sink, speech, _nav, _current = _harness()
+    harness = _harness()
     cases = [
         (Chord("b"), "your_board"),
         (Chord("g"), "opponent_board"),
@@ -329,18 +317,18 @@ def test_all_zone_letters_shift_pairs_and_empty_weapon_phrase() -> None:
         (Chord("y"), "events"),
     ]
     for chord, zone_id in cases:
-        sink.handle_chord(chord)
-        assert surface.engine.current_zone().zone_id == zone_id
+        harness.press(chord)
+        assert harness.horizontal.current_zone().zone_id == zone_id
 
-    active_before = surface.engine.current_zone().zone_id
-    sink.handle_chord(Chord("w"))
-    assert surface.engine.current_zone().zone_id == active_before
-    assert speech.calls[-1] == ("No Your weapon on this screen", True)
+    active_before = harness.horizontal.current_zone().zone_id
+    harness.press(Chord("w"))
+    assert harness.horizontal.current_zone().zone_id == active_before
+    assert harness.speech.calls[-1] == ("No Your weapon on this screen", True)
 
 
 def test_card_hidden_status_hero_and_event_rows_follow_the_spec() -> None:
-    surface, sink, _speech, _nav, _current = _harness()
-    assert surface.engine.items_snapshot() == (
+    harness = _harness()
+    assert harness.horizontal.items_snapshot() == (
         ["Boar", "Yeti"],
         0,
         [
@@ -355,39 +343,39 @@ def test_card_hidden_status_hero_and_event_rows_follow_the_spec() -> None:
         ],
     )
 
-    sink.handle_chord(Chord("p"))
-    assert surface.engine.items_snapshot()[0] == ["Boar, turn 1"]
-    sink.handle_chord(Chord("n"))
-    assert surface.engine.items_snapshot()[0] == ["Fireball, turn 1"]
-    sink.handle_chord(Chord("c", shift=True))
-    assert surface.engine.items_snapshot()[0] == ["Unknown card", "Unknown card"]
+    harness.press(Chord("p"))
+    assert harness.horizontal.items_snapshot()[0] == ["Boar, turn 1"]
+    harness.press(Chord("n"))
+    assert harness.horizontal.items_snapshot()[0] == ["Fireball, turn 1"]
+    harness.press(Chord("c", shift=True))
+    assert harness.horizontal.items_snapshot()[0] == ["Unknown card", "Unknown card"]
 
-    sink.handle_chord(Chord("v"))
-    assert surface.engine.items_snapshot() == (
+    harness.press(Chord("v"))
+    assert harness.horizontal.items_snapshot() == (
         ["Jaina, 30 health"],
         0,
         ["No hero power", "No weapon", "1 secrets"],
     )
-    sink.handle_chord(Chord("f"))
-    assert surface.engine.items_snapshot() == (
+    harness.press(Chord("f"))
+    assert harness.horizontal.items_snapshot() == (
         ["Garrosh, 30 health, 5 armor"],
         0,
         ["Armor Up!", "Fiery Axe", "1 secrets"],
     )
 
-    sink.handle_chord(Chord("y"))
-    titles = surface.engine.items_snapshot()[0]
+    harness.press(Chord("y"))
+    titles = harness.horizontal.items_snapshot()[0]
     assert "Game started, Mage versus Warrior" in titles
     assert "Turn 1, yours" in titles
     assert "Mulligan complete" in titles
     assert not any("damage" in title.lower() for title in titles)
     played_index = titles.index("You played Boar")
-    surface.engine.jump_to_position(played_index + 1)
-    assert surface.engine.items_snapshot()[2] == ["Turn 1", "Boar"]
+    harness.horizontal.jump_to_position(played_index + 1)
+    assert harness.horizontal.items_snapshot()[2] == ["Turn 1", "Boar"]
 
 
 def test_speak_only_queries_are_subject_first_and_never_change_zone() -> None:
-    surface, sink, speech, _nav, _current = _harness()
+    harness = _harness()
     expected = [
         (Chord("a"), "Your mana, 1 of 3"),
         (Chord("a", shift=True), "Opponent mana, 2 of 4"),
@@ -396,51 +384,59 @@ def test_speak_only_queries_are_subject_first_and_never_change_zone() -> None:
         (Chord("r", shift=True), "Opponent hero power, Armor Up!"),
     ]
     for chord, utterance in expected:
-        sink.handle_chord(chord)
-        assert speech.calls[-1] == (utterance, True)
-        assert surface.engine.current_zone().zone_id == "your_board"
+        harness.press(chord)
+        assert harness.speech.calls[-1] == (utterance, True)
+        assert harness.horizontal.current_zone().zone_id == "your_board"
 
 
 def test_digits_cursor_persistence_across_zones_and_turns() -> None:
-    surface, sink, speech, _nav, _current = _harness()
-    sink.handle_chord(Chord("2"))
-    assert speech.calls[-1] == ("Yeti", True)
-    sink.handle_chord(Chord("c"))
-    sink.handle_chord(Chord("b"))
-    assert speech.calls[-1] == (
+    harness = _harness()
+    harness.press(Chord("2"))
+    assert harness.speech.calls[-1] == ("Yeti", True)
+    harness.press(Chord("c"))
+    harness.press(Chord("b"))
+    assert harness.speech.calls[-1] == (
         "Turn 1, yours, Your board, Yeti, 2 of 2",
         True,
     )
 
-    sink.handle_chord(Chord("pagedown"))
-    assert speech.calls[-1] == (
+    harness.press(Chord("pagedown"))
+    assert harness.speech.calls[-1] == (
         "Turn 2, opponent's, Your board, Second on turn two, 2 of 2",
         True,
     )
-    sink.handle_chord(Chord("pageup"))
-    assert surface.engine.items_snapshot()[1] == 1
-    sink.handle_chord(Chord("0"))
-    assert speech.calls[-1] == ("Yeti", True)
+    harness.press(Chord("pageup"))
+    assert harness.horizontal.items_snapshot()[1] == 1
+    harness.press(Chord("0"))
+    assert harness.speech.calls[-1] == ("Yeti", True)
 
 
 def test_second_replay_resets_turn_but_back_reveal_does_not() -> None:
-    _surface, sink, speech, nav, current = _harness()
-    sink.handle_chord(Chord("pagedown"))
-    nav.drill_down("Child")
-    speech.calls.clear()
+    harness = _harness()
+    harness.press(Chord("pagedown"))
+    harness.nav.drill_down("Child")
+    harness.speech.calls.clear()
 
-    nav.back()
+    harness.nav.back()
 
-    assert speech.calls[-1][0].startswith("Turn 2, opponent's, Your board")
+    assert harness.speech.calls[-1][0].startswith("Turn 2, opponent's, Your board")
 
-    current.set(_replay())
-    speech.calls.clear()
-    nav._surfaces["Replay Viewer"].engine.on_landing()
-    assert speech.calls[-1][0].startswith("Turn 1, yours, Your board")
+    harness.context.set(_replay())
+    harness.speech.calls.clear()
+    harness.list_engine("Replay Viewer").on_landing()
+    assert harness.speech.calls[-1][0].startswith("Turn 1, yours, Your board")
 
 
 def test_slots_and_unbound_keys_match_replay_viewer_contract() -> None:
-    _surface, sink, speech, _nav, _current = _harness()
+    harness = _harness()
+    surface = harness.active_surface
+    help_by_chord = {
+        str(chord): command.help_phrase
+        for chord, command in surface.registry.surface_bindings()
+    }
+    assert help_by_chord["pageup"] == "Page Up: go to the previous turn"
+    assert help_by_chord["pagedown"] == "Page Down: go to the next turn"
+
     cases = [
         (Chord("enter"), "Nothing to do here"),
         (Chord("l"), "Game audio is not available"),
@@ -448,103 +444,179 @@ def test_slots_and_unbound_keys_match_replay_viewer_contract() -> None:
         (Chord("f", ctrl=True), "No search on this screen"),
     ]
     for chord, expected in cases:
-        sink.handle_chord(chord)
-        assert speech.calls[-1] == (expected, True)
+        harness.press(chord)
+        assert harness.speech.calls[-1] == (expected, True)
 
-    before = list(speech.calls)
-    assert sink.handle_chord(Chord("delete")) is False
-    assert sink.handle_chord(Chord("space")) is False
-    assert speech.calls == before
+    before = list(harness.speech.calls)
+    assert harness.press(Chord("delete")) is False
+    assert harness.press(Chord("space")) is False
+    assert harness.speech.calls == before
 
 
 def test_listen_handles_card_event_source_and_all_no_push_cases() -> None:
     sounds = SoundsMenuHolder()
     ready_index = FakeAudioIndex(clips=[CardClip("Play", "key")])
-    surface, sink, _speech, nav, _current = _harness(
+    harness = _harness(
         audio_index=ready_index,
         player=FakePlayer(),
         sounds=sounds,
     )
-    sink.handle_chord(Chord("l"))
-    assert nav.stack[-1] == "Sounds menu"
+    harness.press(Chord("l"))
+    assert harness.nav.stack[-1] == "Sounds menu"
     assert sounds.get().card_name == "Boar"
 
     warming = FakeAudioIndex("indexing", "Game audio is not ready yet")
-    _surface, sink, speech, nav, _current = _harness(
+    harness = _harness(
         audio_index=warming,
         player=FakePlayer(),
         sounds=SoundsMenuHolder(),
     )
-    sink.handle_chord(Chord("l"))
-    assert nav.stack[-1] == "Replay Viewer"
-    assert speech.calls[-1] == ("Game audio is not ready yet", True)
+    harness.press(Chord("l"))
+    assert harness.nav.stack[-1] == "Replay Viewer"
+    assert harness.speech.calls[-1] == ("Game audio is not ready yet", True)
 
     silent = FakeAudioIndex(clips=[])
-    _surface, sink, speech, nav, _current = _harness(
+    harness = _harness(
         audio_index=silent,
         player=FakePlayer(),
         sounds=SoundsMenuHolder(),
     )
-    sink.handle_chord(Chord("l"))
-    assert nav.stack[-1] == "Replay Viewer"
-    assert speech.calls[-1] == ("Boar: no sounds", True)
+    harness.press(Chord("l"))
+    assert harness.nav.stack[-1] == "Replay Viewer"
+    assert harness.speech.calls[-1] == ("Boar: no sounds", True)
 
     event_sounds = SoundsMenuHolder()
     event_index = FakeAudioIndex(clips=[CardClip("Play", "key")])
-    surface, sink, _speech, nav, _current = _harness(
+    harness = _harness(
         audio_index=event_index,
         player=FakePlayer(),
         sounds=event_sounds,
     )
-    sink.handle_chord(Chord("y"))
-    sink.handle_chord(Chord("l"))
-    assert nav.stack[-1] == "Replay Viewer"
-    titles = surface.engine.items_snapshot()[0]
-    surface.engine.jump_to_position(titles.index("You played Boar") + 1)
-    sink.handle_chord(Chord("l"))
-    assert nav.stack[-1] == "Sounds menu"
+    harness.press(Chord("y"))
+    harness.press(Chord("l"))
+    assert harness.nav.stack[-1] == "Replay Viewer"
+    titles = harness.horizontal.items_snapshot()[0]
+    harness.horizontal.jump_to_position(titles.index("You played Boar") + 1)
+    harness.press(Chord("l"))
+    assert harness.nav.stack[-1] == "Sounds menu"
     assert event_sounds.get().card_name == "Boar"
 
 
 def test_events_zone_autoplay_gates_and_turn_step_is_silent() -> None:
     disabled_index = FakeAudioIndex()
     disabled_player = FakePlayer()
-    surface, sink, _speech, _nav, _current = _harness(
+    harness = _harness(
         audio_index=disabled_index,
         player=disabled_player,
         autoplay=False,
         sounds=SoundsMenuHolder(),
     )
-    sink.handle_chord(Chord("y"))
-    titles = surface.engine.items_snapshot()[0]
-    surface.engine.jump_to_position(titles.index("You played Boar") + 1)
+    harness.press(Chord("y"))
+    titles = harness.horizontal.items_snapshot()[0]
+    harness.horizontal.jump_to_position(titles.index("You played Boar"))
+    harness.press(Chord("right"))
     assert disabled_player.played == []
 
     warming_index = FakeAudioIndex("indexing", "Game audio is not ready yet")
     warming_player = FakePlayer()
-    surface, sink, _speech, _nav, _current = _harness(
+    harness = _harness(
         audio_index=warming_index,
         player=warming_player,
         sounds=SoundsMenuHolder(),
     )
-    sink.handle_chord(Chord("y"))
-    titles = surface.engine.items_snapshot()[0]
-    surface.engine.jump_to_position(titles.index("You played Boar") + 1)
+    harness.press(Chord("y"))
+    titles = harness.horizontal.items_snapshot()[0]
+    harness.horizontal.jump_to_position(titles.index("You played Boar"))
+    harness.press(Chord("right"))
     assert warming_player.played == []
 
     ready_index = FakeAudioIndex()
     ready_player = FakePlayer()
-    surface, sink, _speech, _nav, _current = _harness(
+    harness = _harness(
         audio_index=ready_index,
         player=ready_player,
         sounds=SoundsMenuHolder(),
     )
-    sink.handle_chord(Chord("y"))
-    titles = surface.engine.items_snapshot()[0]
-    surface.engine.jump_to_position(titles.index("You played Boar") + 1)
+    harness.press(Chord("y"))
+    titles = harness.horizontal.items_snapshot()[0]
+    harness.horizontal.jump_to_position(titles.index("You played Boar"))
+    harness.press(Chord("right"))
     assert ready_index.event_requests[-1] == ("BOAR", "play")
     assert ready_player.played[-1] == b"wav:play-key"
 
     ready_player.played.clear()
-    sink.handle_chord(Chord("pagedown"))
+    harness.horizontal.jump_to_position(10)
+    ready_player.played.clear()
+    # Stepping into a shorter turn clamps the item cursor; that clamp is part
+    # of the turn step, so it stays silent like the step itself.
+    assert harness.horizontal.items_snapshot()[1] == 9
+    harness.press(Chord("pagedown"))
+    assert harness.horizontal.items_snapshot()[1] == 0
     assert ready_player.played == []
+    harness.press(Chord("pagedown"))
+    assert ready_player.played == []
+
+
+def test_events_autoplay_on_event_item_landing_transitions() -> None:
+    audio_index = FakeAudioIndex()
+    player = FakePlayer()
+    harness = _harness(
+        audio_index=audio_index,
+        player=player,
+        sounds=SoundsMenuHolder(),
+    )
+    harness.press(Chord("y"))
+    titles = harness.horizontal.items_snapshot()[0]
+    played_position = titles.index("You played Boar") + 1
+
+    harness.press(Chord(str(played_position)))
+    assert player.played == [b"wav:play-key"]
+
+    player.played.clear()
+    harness.press(Chord("b"))
+    harness.press(Chord("y"))
+    assert player.played == [b"wav:play-key"]
+
+    player.played.clear()
+    harness.press(Chord("home"))
+    assert player.played == []
+    harness.press(Chord("end"))
+    assert player.played == [b"wav:play-key"]
+
+    player.played.clear()
+    harness.press(Chord("end"))
+    assert player.played == []
+
+    harness.press(Chord("left"))
+    assert player.played == []
+    harness.press(Chord("right"))
+    assert audio_index.event_requests[-1] == ("AXE", "play")
+    assert player.played == [b"wav:play-key"]
+
+    player.played.clear()
+    # Right at the last event clamps: a boundary repeats the Title line but
+    # must not replay the clip already heard on landing there.
+    harness.press(Chord("right"))
+    assert player.played == []
+
+
+def test_event_autoplay_coverage_is_play_attack_and_death_only() -> None:
+    card = _card("BOAR", "Boar")
+    supported = [
+        (CardPlayed(0, 1, 1, "BOAR", card, "Boar", 1), "play"),
+        (AttackStarted(0, 1, 1, 2, 1), "attack"),
+        (MinionDied(0, 1, 1, "BOAR", "Boar", 1), "minion_death"),
+    ]
+    unsupported = [
+        CardDrawn(0, 1, 1, "BOAR", card, "Boar", 1),
+        TurnChanged(0, 1, 1),
+        SecretPlayed(0, 1, 1),
+        SecretRevealed(0, 1, "Counterspell", 1),
+        GameEnded(0, 1, "WON", "LOST"),
+        GameEnded(0, 1, "LOST", "WON"),
+    ]
+
+    assert [(_event_audio_kind(event), kind) for event, kind in supported] == [
+        (kind, kind) for _event, kind in supported
+    ]
+    assert all(_event_audio_kind(event) is None for event in unsupported)

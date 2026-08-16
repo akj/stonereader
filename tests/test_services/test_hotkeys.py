@@ -8,6 +8,7 @@ import wx
 from stonereader.services._hotkeys import HOTKEY_COMMANDS, HotkeyMap, chord_to_win32
 from stonereader.services._settings import SettingsStore
 from stonereader.ui.chords import Chord
+from stonereader.ui.registry import Command, CommandRegistry, Layer
 
 
 class FakeBackend:
@@ -70,7 +71,7 @@ def test_rebind_success_persists_and_failure_restores_old_binding(
     backend.calls.clear()
     backend.register_results = [False, True]
     failure = hotkeys.rebind("jump_cards", Chord.parse("ctrl+alt+x"))
-    assert failure == "Could not register Control Alt X; keeping Control Alt C"
+    assert failure == "Could not register Ctrl Alt X; keeping Ctrl Alt C"
     assert hotkeys.current_chord("jump_cards") == replacement
     assert store.hotkey_chord("jump_cards") == "ctrl+alt+c"
     assert [call[0] for call in backend.calls] == [
@@ -80,23 +81,45 @@ def test_rebind_success_persists_and_failure_restores_old_binding(
     ]
 
 
-def test_is_taken_includes_six_commands_and_accept_offer(tmp_path: Path) -> None:
+def test_is_taken_includes_hotkeys_app_chords_and_instantiated_registries(
+    tmp_path: Path,
+) -> None:
     hotkeys, _backend, _store = make_map(tmp_path)
     assert hotkeys.is_taken(Chord.parse("ctrl+shift+c")) == "Jump to Cards"
     assert hotkeys.is_taken(Chord("enter", ctrl=True)) == "Accept offer"
+    assert hotkeys.is_taken(Chord("f", ctrl=True)) == "Search"
+    assert hotkeys.is_taken(Chord("q", ctrl=True)) == "Quit StoneReader"
+
+    registry = CommandRegistry()
+    registry.register(
+        Layer.SURFACE,
+        Chord("d", shift=True),
+        Command(
+            "live_game.opponent_deck",
+            "Shift+D: how many cards are in your opponent's deck",
+            lambda: None,
+        ),
+    )
+    assert hotkeys.is_taken(
+        Chord("d", shift=True), [("Live Game", registry)]
+    ) == (
+        "Live Game: Shift+D: how many cards are in your opponent's deck"
+    )
     assert hotkeys.is_taken(Chord.parse("ctrl+alt+x")) is None
 
 
-def test_chord_translation_supports_letters_digits_and_rejects_named_keys() -> None:
+def test_chord_translation_supports_letters_digits_and_named_keys() -> None:
     assert chord_to_win32(Chord.parse("ctrl+shift+a")) == (
         wx.MOD_CONTROL | wx.MOD_SHIFT,
         ord("A"),
     )
     assert chord_to_win32(Chord.parse("alt+7")) == (wx.MOD_ALT, ord("7"))
 
+    assert chord_to_win32(Chord("f5", ctrl=True)) == (wx.MOD_CONTROL, 0x74)
+
     try:
-        chord_to_win32(Chord("f1", ctrl=True))
+        chord_to_win32(Chord("+", ctrl=True))
     except ValueError as error:
-        assert str(error) == "Only letter and number shortcuts can be registered"
+        assert str(error) == "This shortcut key cannot be registered"
     else:
-        raise AssertionError("named keys must not be translated")
+        raise AssertionError("untranslatable punctuation must not be registered")

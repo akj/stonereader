@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import Protocol, TypeAlias
 
 from stonereader.db import delete_deck
+from stonereader.surfaces._action_row import ActionRow
 from stonereader.surfaces._deck_data import CurrentDeck, DeckData, DeckRow, spoken_enum
 from stonereader.ui.announcer import Announcer
 from stonereader.ui.arming import ArmedAction
@@ -21,12 +21,6 @@ from stonereader.ui.surface import Binding, SurfaceSpec, WidgetType, ZoneSpec
 
 class OfferSubjectSink(Protocol):
     def mark_offer_subject_seen(self, subject: str) -> None: ...
-
-
-@dataclass(frozen=True)
-class ActionRow:
-    action_id: str
-    label: str
 
 
 DeckItem: TypeAlias = DeckRow | ActionRow
@@ -94,7 +88,7 @@ def build_decks(
         announcer.confirmation(f"{item.summary.name} deleted")
         if engine is None:
             raise RuntimeError("Decks engine is not active")
-        engine.on_landing(queued=True)
+        engine.on_landing(continues=True)
 
     def arm_delete() -> None:
         item = selected()

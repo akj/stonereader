@@ -6,7 +6,6 @@ import pytest
 
 from stonereader.surfaces._help_content import (
     screen_bindings,
-    universal_entries,
     widget_type_sentence,
 )
 from stonereader.surfaces.help import HelpOrigin, build_help, open_help
@@ -16,13 +15,11 @@ from stonereader.surfaces.help_reference import (
     build_help_reference,
 )
 from stonereader.surfaces.help_universal import build_help_universal
-from stonereader.ui._sink_core import _SinkCore
-from stonereader.ui.announcer import Announcer
 from stonereader.ui.arming import ArmedAction
 from stonereader.ui.builder import build_active_surface
 from stonereader.ui.chords import Chord
-from stonereader.ui.engines import HorizontalListEngine, VerticalMenuEngine
-from stonereader.ui.navigation import ActiveSurface, NavigationController
+from stonereader.ui.engines import HorizontalListEngine
+from stonereader.ui.navigation import ActiveSurface
 from stonereader.ui.registry import Command, Slot
 from stonereader.ui.surface import (
     Binding,
@@ -32,75 +29,43 @@ from stonereader.ui.surface import (
     ZoneSpec,
 )
 
-
-class RecordingSpeech:
-    def __init__(self, events: list[str]) -> None:
-        self.calls: list[tuple[str, bool]] = []
-        self._events = events
-
-    def speak(self, text: str, interrupt: bool = True) -> None:
-        self.calls.append((text, interrupt))
-        self._events.append(f"speech:{text}")
-
+from .conftest import Harness, make_harness as make_base_harness
 
 @dataclass
-class Harness:
-    nav: NavigationController
-    sink: _SinkCore
-    speech: RecordingSpeech
-    events: list[str]
-    titles: list[str]
+class HelpContext:
     origin: HelpOrigin
     reference: CommandReferenceHolder
-    current: dict[str, ActiveSurface]
     deleted: list[str]
     live_builds: list[str]
 
-    def press(self, chord: Chord) -> bool:
-        return self.sink.handle_chord(chord)
 
-    def type(self, text: str) -> None:
-        for character in text:
-            self.press(Chord(character))
-
-    def menu(self, name: str) -> VerticalMenuEngine:
-        engine = self.nav.peek(name).engine
-        assert isinstance(engine, VerticalMenuEngine)
-        return engine
-
-
-def make_harness() -> Harness:
-    events: list[str] = []
-    titles: list[str] = []
+def make_harness() -> Harness[HelpContext]:
     deleted: list[str] = []
     live_builds: list[str] = []
-    speech = RecordingSpeech(events)
-    announcer = Announcer(speech)
-    sink = _SinkCore(announcer, lambda: None)
-    current: dict[str, ActiveSurface] = {}
-
-    def activate(surface: ActiveSurface) -> None:
-        current["surface"] = surface
-        sink.set_active(surface.registry)
-        events.append(f"activate:{surface.spec.name}")
-
-    nav = NavigationController(
-        lambda title: titles.append(title),
-        announcer,
-        lambda: events.append("stop"),
-        activate,
-    )
     origin = HelpOrigin()
     reference = CommandReferenceHolder()
+    harness = make_base_harness(
+        HelpContext(origin, reference, deleted, live_builds)
+    )
 
     def invoke_help() -> None:
-        open_help(announcer, nav, origin, current["surface"])
+        open_help(
+            harness.announcer,
+            harness.nav,
+            origin,
+            harness.active_surface,
+        )
 
+    quit_command = Command(
+        "app.quit", "Ctrl+Q or Alt+F4: quit StoneReader", lambda: None
+    )
     universal = [
         (
             Chord("f1"),
             Command("app.help", "F1: help for this screen", invoke_help),
-        )
+        ),
+        (Chord("q", ctrl=True), quit_command),
+        (Chord("f4", alt=True), quit_command),
     ]
 
     def cards_factory() -> ActiveSurface:
@@ -127,7 +92,7 @@ def make_harness() -> Harness:
                     Command(
                         "cards.destination",
                         "D: jump to Remaining Deck",
-                        lambda: events.append("handler:d"),
+                        lambda: harness.events.append("handler:d"),
                     ),
                 ),
                 Binding(
@@ -153,16 +118,18 @@ def make_harness() -> Harness:
                 Slot.SEARCH: Command(
                     "cards.search",
                     "Ctrl+F: search for a card",
-                    lambda: events.append("handler:search"),
+                    lambda: harness.events.append("handler:search"),
                 ),
             },
             slot_reverse_fills={Slot.GROUP_JUMP: group},
             slot_noops={Slot.LISTEN: "Game audio is not available"},
         )
-        surface = build_active_surface(spec, announcer, universal, nav)
+        surface = build_active_surface(
+            spec, harness.announcer, universal, harness.nav
+        )
         assert isinstance(surface.engine, HorizontalListEngine)
         engine = surface.engine
-        armed = ArmedAction(engine, announcer)
+        armed = ArmedAction(engine, harness.announcer)
         return surface
 
     def settings_factory() -> ActiveSurface:
@@ -172,9 +139,9 @@ def make_harness() -> Harness:
                 WidgetType.VERTICAL_MENU,
                 options=lambda: [MenuOption("setting", lambda: "A setting", None)],
             ),
-            announcer,
+            harness.announcer,
             universal,
-            nav,
+            harness.nav,
         )
 
     def live_game_factory() -> ActiveSurface:
@@ -193,46 +160,47 @@ def make_harness() -> Harness:
                     )
                 ],
             ),
-            announcer,
+            harness.announcer,
             universal,
-            nav,
+            harness.nav,
         )
 
-    nav.register("Cards", cards_factory)
-    nav.register("Settings", settings_factory)
-    nav.register("Live Game", live_game_factory)
-    nav.register(
+    harness.nav.register("Cards", cards_factory)
+    harness.nav.register("Settings", settings_factory)
+    harness.nav.register("Live Game", live_game_factory)
+    harness.nav.register(
         "Help menu",
-        lambda: build_help(announcer, universal, nav, origin, sink),
+        lambda: build_help(
+            harness.announcer,
+            universal,
+            harness.nav,
+            origin,
+            harness.sink,
+        ),
     )
-    nav.register(
+    harness.nav.register(
         "Universal keys",
-        lambda: build_help_universal(announcer, universal, nav),
+        lambda: build_help_universal(
+            harness.announcer, universal, harness.nav
+        ),
     )
-    nav.register(
+    harness.nav.register(
         "All commands",
-        lambda: build_help_all(announcer, universal, nav, reference),
+        lambda: build_help_all(
+            harness.announcer, universal, harness.nav, reference
+        ),
     )
-    nav.register(
+    harness.nav.register(
         "Command reference",
-        lambda: build_help_reference(announcer, universal, nav, reference),
+        lambda: build_help_reference(
+            harness.announcer, universal, harness.nav, reference
+        ),
     )
-    nav.jump("Cards")
-    return Harness(
-        nav,
-        sink,
-        speech,
-        events,
-        titles,
-        origin,
-        reference,
-        current,
-        deleted,
-        live_builds,
-    )
+    harness.nav.jump("Cards")
+    return harness
 
 
-def option_titles(harness: Harness, name: str) -> list[str]:
+def option_titles(harness: Harness[HelpContext], name: str) -> list[str]:
     return harness.menu(name).options_snapshot()[0]
 
 
@@ -308,7 +276,7 @@ def test_delete_from_help_only_arms_the_origin_action() -> None:
 
     harness.press(Chord("enter"))
 
-    assert harness.deleted == []
+    assert harness.context.deleted == []
     assert harness.speech.calls[-1] == (
         "Press Delete again to delete Card one",
         True,
@@ -335,7 +303,18 @@ def test_universal_keys_are_exact_and_read_only() -> None:
     harness.press(Chord("f1"))
     harness.nav.drill_down("Universal keys")
 
-    assert option_titles(harness, "Universal keys") == universal_entries()
+    assert option_titles(harness, "Universal keys") == [
+        "Enter: act on the current item",
+        "Escape or Backspace: go back",
+        "Home and End: jump to the ends",
+        "Page Up and Page Down: pages or turns where the screen has them",
+        "Tab and Shift+Tab: jump between groups where the screen has them",
+        "Ctrl+F: search where the screen has it",
+        "F1: help for this screen",
+        "L: listen to a card's sounds",
+        "Ctrl: stop game audio",
+        "Ctrl+Q or Alt+F4: quit StoneReader",
+    ]
     assert harness.titles[-1] == "Universal keys — StoneReader"
     harness.press(Chord("enter"))
     assert harness.speech.calls[-1] == ("Nothing to do here", True)
@@ -346,12 +325,28 @@ def test_all_commands_reference_peeks_without_landing_and_is_read_only() -> None
     harness.press(Chord("f1"))
     harness.nav.drill_down("All commands")
 
-    assert option_titles(harness, "All commands") == list(COMMAND_SURFACE_NAMES)
-    assert harness.live_builds == []
+    assert option_titles(harness, "All commands") == [
+        "Home",
+        "Live Game",
+        "Decks",
+        "Deck detail",
+        "Import Deck",
+        "Statistics",
+        "Cards",
+        "Sounds menu",
+        "Replays",
+        "Replay Viewer",
+        "Import Replays",
+        "Settings",
+        "Global hotkeys",
+    ]
+    assert list(COMMAND_SURFACE_NAMES) == option_titles(harness, "All commands")
+    assert harness.context.live_builds == []
     harness.events.clear()
+    harness.menu("All commands").set_cursor(1)
     harness.press(Chord("enter"))
 
-    assert harness.live_builds == ["built"]
+    assert harness.context.live_builds == ["built"]
     assert harness.nav.current_name == "Command reference"
     assert harness.titles[-1] == "Live Game commands — StoneReader"
     assert all(event != "activate:Live Game" for event in harness.events)
@@ -405,7 +400,7 @@ def test_f1_inside_every_help_surface_is_announced_noop(help_name: str) -> None:
     harness = make_harness()
     harness.press(Chord("f1"))
     if help_name == "Command reference":
-        harness.reference.set("Live Game")
+        harness.context.reference.set("Live Game")
     if help_name != "Help menu":
         harness.nav.drill_down(help_name)
     stack = harness.nav.stack

@@ -14,17 +14,18 @@ from stonereader.ui.surface import MenuOption, SurfaceSpec, WidgetType
 # Home options first, with each Surface's drill-down children immediately after
 # their parent. Help-family Surfaces are the reference UI, not reference targets.
 COMMAND_SURFACE_NAMES = (
+    "Home",
     "Live Game",
     "Decks",
     "Deck detail",
     "Import Deck",
     "Statistics",
     "Cards",
+    "Sounds menu",
     "Replays",
     "Replay Viewer",
     "Import Replays",
     "Settings",
-    "Picker",
     "Global hotkeys",
 )
 

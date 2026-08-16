@@ -1,29 +1,26 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from stonereader.surfaces.picker import PickerHolder, PickerRequest, build_picker
-from stonereader.ui._sink_core import _SinkCore
-from stonereader.ui.announcer import Announcer
 from stonereader.ui.builder import build_active_surface
 from stonereader.ui.chords import Chord
-from stonereader.ui.navigation import NavigationController
 from stonereader.ui.surface import MenuOption, SurfaceSpec, WidgetType
 
-from tests.test_ui.conftest import FakeSpeech
+from .conftest import Harness, make_harness
 
 
-def harness():
-    speech = FakeSpeech()
-    announcer = Announcer(speech)
-    sink = _SinkCore(announcer, lambda: None)
-    nav = NavigationController(
-        lambda _title: None,
-        announcer,
-        lambda: None,
-        lambda surface: sink.set_active(surface.registry),
-    )
+@dataclass
+class PickerContext:
+    holder: PickerHolder
+    selected: dict[str, str]
+
+
+def picker_harness() -> Harness[PickerContext]:
     holder = PickerHolder()
     selected = {"value": "b"}
-    nav.register(
+    harness = make_harness(PickerContext(holder, selected))
+    harness.nav.register(
         "Settings",
         lambda: build_active_surface(
             SurfaceSpec(
@@ -37,61 +34,57 @@ def harness():
                     )
                 ],
             ),
-            announcer,
+            harness.announcer,
             [],
-            nav,
+            harness.nav,
         ),
     )
-    nav.register("Picker", lambda: build_picker(announcer, [], nav, holder))
-    nav.jump("Settings")
-    return nav, sink, speech, holder, selected
+    harness.nav.register(
+        "Picker",
+        lambda: build_picker(harness.announcer, [], harness.nav, holder),
+    )
+    harness.nav.jump("Settings")
+    return harness
 
 
 def test_cursor_starts_on_current_and_display_name_is_request_label() -> None:
-    nav, _sink, _speech, holder, selected = harness()
-    holder.set(PickerRequest("Choice", [("A", "a"), ("B", "b")], "b", lambda raw: selected.update(value=raw)))
-    nav.drill_down("Picker")
-    surface = nav._surfaces["Picker"]
+    harness = picker_harness()
+    harness.context.holder.set(PickerRequest("Choice", [("A", "a"), ("B", "b")], "b", lambda raw: harness.context.selected.update(value=raw)))
+    harness.nav.drill_down("Picker")
+    surface = harness.nav.peek("Picker")
 
-    assert surface.engine.options_snapshot() == (["A", "B"], 1)
+    assert harness.menu("Picker").options_snapshot() == (["A", "B"], 1)
     assert surface.spec.display_name is not None
     assert surface.spec.display_name() == "Choice"
 
 
 def test_picker_can_be_built_before_a_request_for_command_reference() -> None:
-    speech = FakeSpeech()
-    announcer = Announcer(speech)
-    nav = NavigationController(
-        lambda _title: None,
-        announcer,
-        lambda: None,
-        lambda _surface: None,
-    )
     holder = PickerHolder()
+    harness = make_harness(holder)
 
-    surface = build_picker(announcer, [], nav, holder)
+    surface = build_picker(harness.announcer, [], harness.nav, holder)
 
     assert surface.spec.name == "Picker"
 
 
 def test_select_pops_and_reannounces_parent_with_updated_value() -> None:
-    nav, sink, speech, holder, selected = harness()
-    holder.set(PickerRequest("Choice", [("A", "a"), ("B", "b")], "b", lambda raw: selected.update(value=raw)))
-    nav.drill_down("Picker")
-    sink.handle_chord(Chord("up"))
-    sink.handle_chord(Chord("enter"))
+    harness = picker_harness()
+    harness.context.holder.set(PickerRequest("Choice", [("A", "a"), ("B", "b")], "b", lambda raw: harness.context.selected.update(value=raw)))
+    harness.nav.drill_down("Picker")
+    harness.press(Chord("up"))
+    harness.press(Chord("enter"))
 
-    assert selected["value"] == "a"
-    assert nav.stack == ("Home", "Settings")
-    assert speech.calls[-1] == ("Settings, Choice, a", True)
+    assert harness.context.selected["value"] == "a"
+    assert harness.nav.stack == ("Home", "Settings")
+    assert harness.speech.calls[-1] == ("Settings, Choice, a", True)
 
 
 def test_back_changes_nothing() -> None:
-    nav, sink, _speech, holder, selected = harness()
-    holder.set(PickerRequest("Choice", [("A", "a"), ("B", "b")], "b", lambda raw: selected.update(value=raw)))
-    nav.drill_down("Picker")
-    sink.handle_chord(Chord("up"))
-    sink.handle_chord(Chord("escape"))
+    harness = picker_harness()
+    harness.context.holder.set(PickerRequest("Choice", [("A", "a"), ("B", "b")], "b", lambda raw: harness.context.selected.update(value=raw)))
+    harness.nav.drill_down("Picker")
+    harness.press(Chord("up"))
+    harness.press(Chord("escape"))
 
-    assert selected["value"] == "b"
-    assert nav.stack == ("Home", "Settings")
+    assert harness.context.selected["value"] == "b"
+    assert harness.nav.stack == ("Home", "Settings")

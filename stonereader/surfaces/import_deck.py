@@ -76,7 +76,7 @@ def build_import_deck(
         name = unique_import_name(conn, deck.hero_class)
         save_deck(conn, name, deck.hero_class, deck.format, code)
         announcer.confirmation(f"{name} imported")
-        nav.back(queued=True)
+        nav.back(continues=True)
 
     # The field title stays constant: its contents remain reachable in Text mode.
     options = [

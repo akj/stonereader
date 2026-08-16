@@ -14,7 +14,7 @@ from stonereader.ui.surface import SurfaceSpec
 class SurfaceEngine(Protocol):
     """The engine behavior navigation needs at the landing seam."""
 
-    def on_landing(self, queued: bool = False) -> None: ...
+    def on_landing(self, continues: bool = False) -> None: ...
 
 
 @dataclass
@@ -66,6 +66,12 @@ class NavigationController:
         """Get or create a registered Surface without landing on it."""
         return self._get_surface(name)
 
+    def all_surfaces(self) -> tuple[tuple[str, ActiveSurface], ...]:
+        """Get or create every registered Surface without landing on one."""
+        return tuple(
+            (name, self._get_surface(name)) for name in tuple(self._factories)
+        )
+
     def jump(
         self,
         name: str,
@@ -103,14 +109,19 @@ class NavigationController:
         self._stack = list(names)
         self._land(name, surface)
 
-    def back(self, queued: bool = False) -> None:
-        """Pop one Drill-down, or announce the root no-op."""
+    def back(self, continues: bool = False) -> None:
+        """Pop one Drill-down, or announce the root no-op.
+
+        `continues` marks the revealed Surface's landing utterance as a Lane-1
+        continuation: it follows a confirmation already spoken instead of
+        cutting it (ADR-0007).
+        """
         if len(self._stack) == 1:
-            self._announcer.noop(f"{self._home} — already at the top")
+            self._announcer.already_home(self._home)
             return
         self._stack.pop()
         name = self._stack[-1]
-        self._land(name, self._get_surface(name), queued=queued)
+        self._land(name, self._get_surface(name), continues=continues)
 
     def install_back(self, registry: CommandRegistry) -> None:
         """Centrally install Escape and Backspace on an activated registry."""
@@ -132,7 +143,7 @@ class NavigationController:
         name: str,
         surface: ActiveSurface,
         *,
-        queued: bool = False,
+        continues: bool = False,
     ) -> None:
         # A single landing path makes route invariance structural (ADR-0010).
         self._stop_audio()
@@ -143,4 +154,4 @@ class NavigationController:
         )
         self._set_title(f"{display_name} — StoneReader")
         self._activate(surface)
-        surface.engine.on_landing(queued=queued)
+        surface.engine.on_landing(continues=continues)

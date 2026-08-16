@@ -7,7 +7,6 @@ from stonereader.ui.chords import Chord
 from stonereader.ui.engines import HorizontalListEngine, VerticalMenuEngine
 from stonereader.ui.navigation import ActiveSurface, NavigationController
 from stonereader.ui.registry import (
-    SLOT_DEFAULT_PHRASES,
     Command,
     CommandRegistry,
     Layer,
@@ -53,7 +52,7 @@ def build_active_surface(
 
         def activate_current() -> None:
             if not engine.activate_current():
-                announcer.noop(SLOT_DEFAULT_PHRASES[Slot.ENTER])
+                announcer.slot_noop(Slot.ENTER)
 
         registry.fill_slot(
             Slot.ENTER,

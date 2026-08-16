@@ -5,12 +5,11 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from stonereader.ui.announcer import Announcer
-from stonereader.ui.chords import Chord
+from stonereader.ui.chords import ACCEPT_OFFER_CHORD, Chord
 from stonereader.ui.registry import CommandRegistry
 from stonereader.ui.text_mode import TextSession
 
-
-_ACCEPT_OFFER = Chord("enter", ctrl=True)
+BARE_CTRL_HELP_PHRASE = "Ctrl: stop game audio"
 
 
 class _SinkCore:
@@ -107,10 +106,15 @@ class _SinkCore:
                 self._capture_chord(chord)
             return True
 
+        # ADR-0007: a Lane-1 keypress drops pending Lane-2 narration, whether
+        # or not the command it reaches goes on to speak. Text and Capture
+        # modes returned above: typing is not a Lane-1 keypress.
+        self._announcer.drop_narration()
+
         if self._offer is not None:
             offer = self._offer
             self._offer = None
-            if chord == _ACCEPT_OFFER:
+            if chord == ACCEPT_OFFER_CHORD:
                 offer()
                 return True
 
@@ -119,4 +123,6 @@ class _SinkCore:
         result = self._active_registry.dispatch(chord)
         if result.announce is not None:
             self._announcer.noop(result.announce)
+        elif result.noop_slot is not None:
+            self._announcer.slot_noop(result.noop_slot)
         return result.handled

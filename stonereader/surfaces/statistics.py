@@ -4,20 +4,15 @@ from __future__ import annotations
 
 import sqlite3
 
+from stonereader.models.card import CARD_CLASS_NAMES
 from stonereader.services._stats import StatsRow, compute_stats
 from stonereader.surfaces._deck_data import spoken_enum
 from stonereader.ui.announcer import Announcer
 from stonereader.ui.builder import build_active_surface
 from stonereader.ui.chords import Chord
 from stonereader.ui.navigation import ActiveSurface, NavigationController
-from stonereader.ui.registry import Command, Slot
+from stonereader.ui.registry import Command
 from stonereader.ui.surface import SurfaceSpec, WidgetType, ZoneSpec
-
-
-_CLASS_NAMES = {
-    "DEATHKNIGHT": "Death Knight",
-    "DEMONHUNTER": "Demon Hunter",
-}
 
 
 def build_statistics(
@@ -59,11 +54,10 @@ def build_statistics(
         "Statistics",
         WidgetType.HORIZONTAL_LIST,
         zones=[ZoneSpec("statistics", "Statistics", items, title, details)],
-        slot_noops={Slot.ENTER: "Nothing to do here"},
     )
     return build_active_surface(spec, announcer, universal_bindings, nav)
 
 
 def _spoken_class(value: str) -> str:
     key = value.upper() or "UNKNOWN"
-    return _CLASS_NAMES.get(key, spoken_enum(key))
+    return CARD_CLASS_NAMES.get(key, spoken_enum(key))

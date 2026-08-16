@@ -4,7 +4,7 @@ from stonereader.ui.announcer import Announcer
 from stonereader.ui.chords import Chord
 from stonereader.ui.text_mode import TextSession
 
-from .conftest import FakeSpeech
+from tests.support import FakeSpeech
 
 
 def make_session(
