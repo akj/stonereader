@@ -113,7 +113,7 @@ A **Game** in progress. Source: `Power.log` real-time tail. State updates as eve
 _Avoid_: "current game", "active game"
 
 **Replay**:
-A **Game** that has finished, loaded from a persisted source such as HSReplay XML or a StoneReader-saved game record. The **User** navigates turn-by-turn through a `ReplayState`, which wraps `Tuple[GameState, ...]`.
+A **Game** that has finished, loaded from a persisted source such as HSReplay XML or a StoneReader-saved game record. The **User** navigates a `ReplayState` (which wraps `Tuple[GameState, ...]`) on two axes: turn-by-turn (coarse), and event-by-event within the turn (fine) — the selected **Game event** sets the moment every UI **zone** reads (ADR-0015).
 _Avoid_: "recording", "log" (`Power.log` is a different thing)
 
 **Game event**:

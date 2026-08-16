@@ -916,7 +916,9 @@ invariance holds: the same turn in the same zone always sounds the same. The
 shipped bespoke turn utterance ("Turn 5, your turn, 3 events.") is replaced.
 
 Zone cursors persist across switches, across turn steps, and across back-reveal
-(ADR-0007, ADR-0010).
+(ADR-0007, ADR-0010) — with one amendment: the **events cursor is the replay
+position**, so a turn step repositions it to the new turn's last event
+(ADR-0015). Every other cursor keeps the unamended rule.
 
 **Zones.** The letters mirror HSA exactly, inconsistencies included: distinct
 letters for boards and heroes, a Shift modifier for hand/deck/weapon/secrets
@@ -975,6 +977,14 @@ when nonzero. Lines: hero power, weapon, secrets count.
 (ADR-0010 owns the phrasing seam). Lines: 1 `"Turn {t}"`; 2 the source card's
 title where the event has one.
 
+**Event scrubbing** (ADR-0015). The events zone is the Surface's **fine
+axis**: the selected event renders every other zone at the game just after
+that event — scrub with Left/Right, 1–9/0, or Home/End, then jump to any zone
+to inspect that moment. The turn's last event carries the turn's final state,
+and a turn step positions the events cursor there, so plain turn stepping
+sounds and reads exactly as it would without scrubbing, and End always
+returns the zones to the turn's final state.
+
 **Keys**
 
 | Key | Command | Spoken help phrase |
@@ -992,7 +1002,7 @@ title where the event has one.
 | D | Jump to your deck | "D: jump to Remaining Deck" (ADR-0009) |
 | P / Shift+P | Jump to your played / opponent played | "P: cards you played" / "Shift+P: cards your opponent played" |
 | N / Shift+N | Jump to your drawn / opponent drawn | "N: cards you drew" / "Shift+N: cards your opponent drew" |
-| Y | Jump to Events | "Y: the game's events" |
+| Y | Jump to Events | "Y: the game's events" — the fine axis: the selected event sets the moment every zone reads (ADR-0015) |
 | A | Speak your mana | "A: how much mana you have" — speak-only, never changes the zone (ADR-0003, ADR-0007) |
 | Shift+A | Speak opponent mana | "Shift+A: how much mana your opponent has" — speak-only |
 | Shift+D | Speak opponent deck count | "Shift+D: how many cards are in your opponent's deck" — speak-only |
@@ -1014,7 +1024,10 @@ silent.
 utterance above — turn, side, zone, title, position — so a turn step and a zone
 switch are the same announcement with a different part changed. There is no
 separate turn announcement and no event count in it; the events zone is where
-events are counted and browsed.
+events are counted, browsed, and scrubbed. Scrubbing adds no utterance of its
+own: an event landing speaks the event row as always, and the zones simply
+read as of that event when visited — no "after {event}" prefix anywhere
+(ADR-0015, ADR-0007's route invariance).
 
 **Audio:** The **events zone auto-plays**: landing on an event plays that
 event's sound — its card's Play/Attack/Death line, upgraded to card-specific
