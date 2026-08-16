@@ -144,6 +144,23 @@ def test_factory_is_not_called_until_first_visit() -> None:
     assert calls == ["made"]
 
 
+def test_peek_builds_singleton_without_landing_or_changing_current_name() -> None:
+    events: list[str] = []
+    counts: dict[str, int] = {}
+    navigation = controller(events, FakeSpeech())
+    register_factories(navigation, events, counts)
+
+    surface = navigation.peek("Cards")
+
+    assert surface.spec.name == "Cards"
+    assert navigation.current_name == "Home"
+    assert navigation.stack == ("Home",)
+    assert events == []
+    assert counts == {"Cards": 1}
+    assert navigation.peek("Cards") is surface
+    assert counts == {"Cards": 1}
+
+
 def test_jump_path_resets_to_exact_validated_home_rooted_path() -> None:
     events: list[str] = []
     navigation = controller(events, FakeSpeech())

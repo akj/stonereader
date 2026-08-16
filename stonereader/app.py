@@ -21,6 +21,13 @@ from stonereader.surfaces._deck_data import CurrentDeck, DeckData
 from stonereader.surfaces.cards import build_cards
 from stonereader.surfaces.deck_detail import build_deck_detail
 from stonereader.surfaces.decks import build_decks
+from stonereader.surfaces.help import HelpOrigin, build_help, open_help
+from stonereader.surfaces.help_all import build_help_all
+from stonereader.surfaces.help_reference import (
+    CommandReferenceHolder,
+    build_help_reference,
+)
+from stonereader.surfaces.help_universal import build_help_universal
 from stonereader.surfaces.home import build_home
 from stonereader.surfaces.import_deck import ImportDeckField, build_import_deck
 from stonereader.surfaces.import_replays import build_import_replays
@@ -61,6 +68,8 @@ class MainWindow(wx.Frame):
         self.SetSizer(self._sizer)
         self._panels: dict[str, SurfacePanel] = {}
         self._current_panel: SurfacePanel | None = None
+        self._current_surface: ActiveSurface | None = None
+        self._help_origin = HelpOrigin()
 
         self._sink = InputSink(self, self._announcer, stop_audio=lambda: None)
         self._nav = NavigationController(
@@ -75,7 +84,7 @@ class MainWindow(wx.Frame):
                 Command(
                     "app.help",
                     "F1: help for this screen",
-                    self._announce_help_placeholder,
+                    self._open_help,
                 ),
             ),
             (
@@ -116,6 +125,7 @@ class MainWindow(wx.Frame):
         return self._universal_bindings
 
     def _activate_surface(self, surface: ActiveSurface) -> None:
+        self._current_surface = surface
         self._sink.set_active(surface.registry)
         panel = self._panels.get(surface.spec.name)
         if panel is None:
@@ -133,8 +143,15 @@ class MainWindow(wx.Frame):
         self._current_panel = panel
         self._sizer.Layout()
 
-    def _announce_help_placeholder(self) -> None:
-        self._announcer.noop("Help is not yet migrated")
+    def _open_help(self) -> None:
+        if self._current_surface is None:
+            raise RuntimeError("Cannot open help before a Surface is active")
+        open_help(
+            self._announcer,
+            self._nav,
+            self._help_origin,
+            self._current_surface,
+        )
 
     def configure_clipboard_offer(
         self,
@@ -216,6 +233,7 @@ class StoneReaderApp(wx.App):
         deck_data = DeckData(db_conn, card_db)
         import_field = ImportDeckField()
         picker = PickerHolder()
+        help_reference = CommandReferenceHolder()
 
         # --- Game Tracker (Phase 2) ---
         # Logging is bootstrapped exactly once in __main__.py. This per-launch
@@ -396,6 +414,38 @@ class StoneReaderApp(wx.App):
                 hotkey_map,
             )
 
+        def help_factory() -> ActiveSurface:
+            return build_help(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                self._frame._help_origin,
+                self._frame._sink,
+            )
+
+        def help_universal_factory() -> ActiveSurface:
+            return build_help_universal(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+            )
+
+        def help_all_factory() -> ActiveSurface:
+            return build_help_all(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                help_reference,
+            )
+
+        def help_reference_factory() -> ActiveSurface:
+            return build_help_reference(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                help_reference,
+            )
+
         nav.register("Home", home_factory)
         nav.register("Live Game", live_game_factory)
         nav.register("Cards", cards_factory)
@@ -409,6 +459,10 @@ class StoneReaderApp(wx.App):
         nav.register("Settings", settings_factory)
         nav.register("Picker", picker_factory)
         nav.register("Global hotkeys", global_hotkeys_factory)
+        nav.register("Help menu", help_factory)
+        nav.register("Universal keys", help_universal_factory)
+        nav.register("All commands", help_all_factory)
+        nav.register("Command reference", help_reference_factory)
 
         def accept_clipboard_deck(text: str) -> None:
             import_field.set(text)

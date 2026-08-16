@@ -50,12 +50,21 @@ class NavigationController:
     def stack(self) -> tuple[str, ...]:
         return tuple(self._stack)
 
+    @property
+    def current_name(self) -> str:
+        """Return the registered name of the currently landed Surface."""
+        return self._stack[-1]
+
     def register(self, name: str, factory: Callable[[], ActiveSurface]) -> None:
         if not name:
             raise ValueError("Registered Surface name must not be empty")
         if name in self._factories:
             raise ValueError(f"Surface is already registered: {name}")
         self._factories[name] = factory
+
+    def peek(self, name: str) -> ActiveSurface:
+        """Get or create a registered Surface without landing on it."""
+        return self._get_surface(name)
 
     def jump(
         self,

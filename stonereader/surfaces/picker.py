@@ -42,6 +42,11 @@ class PickerHolder:
             raise RuntimeError("Picker request has not been set")
         return self._request
 
+    @property
+    def is_set(self) -> bool:
+        """Whether a caller has supplied a request for the cached Picker."""
+        return self._request is not None
+
     def subscribe(self, on_change: Callable[[], None]) -> None:
         self._subscribers.append(on_change)
 
@@ -78,6 +83,11 @@ def build_picker(
 
     def align_cursor() -> None:
         if engine is None:
+            return
+        # Command reference may peek this lazy singleton before the User has
+        # opened a setting. The later holder.set() notification performs the
+        # ordinary alignment before Picker can be landed on.
+        if not holder.is_set:
             return
         request = holder.get()
         index = next(
