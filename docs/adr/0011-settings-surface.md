@@ -59,6 +59,10 @@ detail line and in text mode. No Ctrl+F — seven rows; the announced no-op
   announced — an invalid path refuses commit and keeps the previous value),
   Escape abandons.
 - **Chord**: Enter enters capture mode (below).
+- **Files** (added by ADR-0014; first user is Import Replays' "Choose
+  files" row): Enter opens the OS-native file dialog, multi-select; the
+  row title carries the result ("{n} files chosen"). The editor is a
+  *delegated* OS dialog, not an invented one — ADR-0014 owns that ruling.
 
 Every idiom has a no-commit escape hatch; nothing on the surface has hidden
 staged state.

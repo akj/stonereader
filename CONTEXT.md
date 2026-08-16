@@ -48,6 +48,14 @@ _Avoid_: "recording", "listening mode"
 A **Drill-down** **Vertical menu** listing a setting's possible values with the cursor on the current one; Enter selects and pops back, back exits without change. See ADR-0011.
 _Avoid_: "dropdown", "combo box"
 
+**Offer**:
+An unsolicited proposition to the **User**: an ephemeral Lane-1 announcement
+that arms the dedicated accept chord (Ctrl+Enter, bound to nothing else).
+Any other keypress disarms it silently and does its own work — ignoring an
+Offer is free. A pending flag within navigation, not a fourth input state;
+arms only in navigation state, fires once per unique subject. See ADR-0014.
+_Avoid_: "prompt", "dialog", "notification" (an Offer proposes an action; it is not mere information)
+
 **Narration preset**:
 The single Settings value — Off, Key moments, or Everything — that selects which **Game events** the Narrator speaks on Lane 2. Key moments' membership test: things you'd miss by not watching that change your next decision; the **User**'s own plays are narrated by no preset. See ADR-0011.
 _Avoid_: "verbosity level" (suggests a continuous dial), per-event "toggles"
@@ -133,6 +141,7 @@ _Avoid_: "the mod", "HearthstoneAccess" (single word), generic "accessibility mo
 
 - A **Surface** presents exactly one **Widget type**; **Text mode** and **Capture mode** are temporary states on top of a Surface, not widget types. Navigation, **Text mode**, and **Capture mode** are the only three input states — each entered only by an explicit act, each with a no-commit exit.
 - A **Surface** is reached by a **Screen jump** (stack resets to Home → target) or a **Drill-down** (pushes one level); back pops one drill-down, goes Home from any jumped-to Surface, and is an announced no-op at Home.
+- StoneReader never invents a dialog and never asks unsolicited: OS-owned questions (file selection) delegate to OS-native dialogs, and its own questions are one of exactly four idioms — Confirm (press again), **Offer**, form field, **Picker** (ADR-0014).
 - UI **zones** live on horizontal-list **Surfaces** (Live Game, Replay Viewer); switching zones changes what the list shows, never the **Widget type**.
 - A UI **zone** either projects from a game **Zone** (e.g., the Remaining Deck zone is `Zone.DECK` minus draws) or is *synthesised* (Your drawn, Opponent played) and corresponds to no single game **Zone**.
 - Each UI **zone** owns one cursor; cursors persist across zone switches via `ZoneNavigationMixin`.

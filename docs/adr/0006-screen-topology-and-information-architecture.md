@@ -112,11 +112,15 @@ out lands the User in Decks, where the new deck is.
 ### Clipboard deckstring detection offers, never teleports
 
 On window activation with a deckstring on the clipboard, StoneReader
-announces an offer ("Deck code on clipboard — press Enter to import")
-instead of pushing the Import form pre-filled. Accepting drills into Import
-Deck with the code pre-filled. This preserves the invariant the rest of the
-topology can now state: **the User always chose to be here** — no surface
-change without a keypress.
+announces an offer ("Deck code on clipboard — press Control Enter to
+import") instead of pushing the Import form pre-filled. Accepting resets
+the stack to Home → Decks → Import Deck with the code pre-filled. This
+preserves the invariant the rest of the topology can now state: **the User
+always chose to be here** — no surface change without a keypress. (This
+clause originally read "press Enter" and "accepting drills into Import
+Deck"; ADR-0014 moved the accept to Ctrl+Enter — Enter is a surface-owned
+slot, and activation can race the User's own keypress — ruled accept's
+landing a stack reset, and owns the Offer's full mechanics.)
 
 ### Window title tracks the surface; no status bar
 
