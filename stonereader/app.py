@@ -25,8 +25,11 @@ from stonereader.surfaces.home import build_home
 from stonereader.surfaces.import_deck import ImportDeckField, build_import_deck
 from stonereader.surfaces.import_replays import build_import_replays
 from stonereader.surfaces.live_game import CurrentGame, build_live_game
+from stonereader.surfaces.global_hotkeys import build_global_hotkeys
+from stonereader.surfaces.picker import PickerHolder, build_picker
 from stonereader.surfaces.replays import build_replays
 from stonereader.surfaces.replay_viewer import CurrentReplay, build_replay_viewer
+from stonereader.surfaces.settings import build_settings
 from stonereader.surfaces.statistics import build_statistics
 from stonereader.ui import (
     ActiveSurface,
@@ -197,6 +200,11 @@ class StoneReaderApp(wx.App):
         announcer = self._frame.announcer
         db_conn = self._frame.db_conn
 
+        from stonereader.services._settings import SettingsStore
+
+        settings = SettingsStore()
+        self._settings = settings
+
         # Load card database even while its Surface is staged as a placeholder.
         from stonereader.models.card import CardDatabase
 
@@ -207,6 +215,7 @@ class StoneReaderApp(wx.App):
         current_replay = CurrentReplay()
         deck_data = DeckData(db_conn, card_db)
         import_field = ImportDeckField()
+        picker = PickerHolder()
 
         # --- Game Tracker (Phase 2) ---
         # Logging is bootstrapped exactly once in __main__.py. This per-launch
@@ -223,12 +232,15 @@ class StoneReaderApp(wx.App):
                 "ensure_log_config failed; continuing"
             )
 
-        self._tracker = GameTracker(card_db=card_db)
+        self._tracker = GameTracker(
+            card_db=card_db,
+            log_path_provider=lambda: settings.hs_log_path,
+        )
         self._frame._tracker = self._tracker  # type: ignore[attr-defined]
         self._current_game = current_game
         self._narrator = Narrator(
             announcer,
-            lambda: "key_moments",
+            lambda: settings.narration,
             card_db,
         )
         self._tracker.subscribe(current_game.on_state)
@@ -247,7 +259,7 @@ class StoneReaderApp(wx.App):
             replay_store,
             build_provider=current_build,
             deck_provider=self._deck_detector.detected,
-            limit_provider=lambda: None,
+            limit_provider=lambda: settings.replay_retention,
         )
         self._tracker.subscribe(self._recorder.on_state)
         self._tracker.add_raw_subscriber(
@@ -255,15 +267,14 @@ class StoneReaderApp(wx.App):
             self._recorder.on_reset,
         )
 
-        names = ("Live Game", "Replays", "Settings")
         targets: dict[str, Callable[[], None]] = {
-            name: lambda name=name: announcer.noop(f"{name}: not yet migrated")
-            for name in names
+            name: lambda name=name: nav.jump(name)
+            for name in ("Live Game", "Decks", "Cards", "Replays", "Settings")
         }
-        targets["Decks"] = lambda: nav.jump("Decks")
-        targets["Cards"] = lambda: nav.jump("Cards")
-        targets["Live Game"] = lambda: nav.jump("Live Game")
-        targets["Replays"] = lambda: nav.jump("Replays")
+
+        from stonereader.services._hotkeys import HotkeyMap
+
+        hotkey_map: HotkeyMap
 
         def home_factory() -> ActiveSurface:
             return build_home(
@@ -357,6 +368,34 @@ class StoneReaderApp(wx.App):
                 db_conn,
             )
 
+        def settings_factory() -> ActiveSurface:
+            return build_settings(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                settings,
+                self._frame._sink,
+                picker,
+                hotkey_map,
+            )
+
+        def picker_factory() -> ActiveSurface:
+            return build_picker(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                picker,
+            )
+
+        def global_hotkeys_factory() -> ActiveSurface:
+            return build_global_hotkeys(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                self._frame._sink,
+                hotkey_map,
+            )
+
         nav.register("Home", home_factory)
         nav.register("Live Game", live_game_factory)
         nav.register("Cards", cards_factory)
@@ -367,6 +406,9 @@ class StoneReaderApp(wx.App):
         nav.register("Replay Viewer", replay_viewer_factory)
         nav.register("Import Replays", import_replays_factory)
         nav.register("Statistics", statistics_factory)
+        nav.register("Settings", settings_factory)
+        nav.register("Picker", picker_factory)
+        nav.register("Global hotkeys", global_hotkeys_factory)
 
         def accept_clipboard_deck(text: str) -> None:
             import_field.set(text)
@@ -382,58 +424,39 @@ class StoneReaderApp(wx.App):
 
         self._hotkeys = GlobalHotkeyService(self._frame)
         self._frame._hotkeys = self._hotkeys  # type: ignore[attr-defined]
-        self._hotkeys.register(
-            wx.MOD_CONTROL | wx.MOD_SHIFT,
-            ord("C"),
-            lambda: nav.jump("Cards"),
-            "Jump to Cards",
+        hotkey_map = HotkeyMap(
+            self._hotkeys,
+            {
+                "jump_live_game": lambda: nav.jump(
+                    "Live Game",
+                    then=lambda surface: _switch_live_zone(
+                        surface, "remaining_deck"
+                    ),
+                ),
+                "jump_live_game_opponent_hand": lambda: nav.jump(
+                    "Live Game",
+                    then=lambda surface: _switch_live_zone(
+                        surface, "opponent_hand"
+                    ),
+                ),
+                "jump_cards": lambda: nav.jump("Cards"),
+                "jump_replays": lambda: nav.jump("Replays"),
+                "speak_deck_counts": lambda: _query_current_game(
+                    announcer,
+                    current_game,
+                    "Your deck",
+                    lambda state: f"{state.player_deck_count} cards",
+                ),
+                "speak_opponent_hand_count": lambda: _query_current_game(
+                    announcer,
+                    current_game,
+                    "Opponent hand",
+                    lambda state: f"{len(state.opponent_hand)} cards",
+                ),
+            },
         )
-        self._hotkeys.register(
-            wx.MOD_CONTROL | wx.MOD_SHIFT,
-            ord("R"),
-            lambda: nav.jump("Replays"),
-            "Jump to Replays",
-        )
-        self._hotkeys.register(
-            wx.MOD_CONTROL | wx.MOD_SHIFT,
-            ord("L"),
-            lambda: nav.jump(
-                "Live Game",
-                then=lambda surface: _switch_live_zone(surface, "remaining_deck"),
-            ),
-            "Jump to Live Game",
-        )
-        self._hotkeys.register(
-            wx.MOD_CONTROL | wx.MOD_SHIFT,
-            ord("O"),
-            lambda: nav.jump(
-                "Live Game",
-                then=lambda surface: _switch_live_zone(surface, "opponent_hand"),
-            ),
-            "Jump to Live Game (opponent hand)",
-        )
-        self._hotkeys.register(
-            wx.MOD_CONTROL | wx.MOD_SHIFT,
-            ord("D"),
-            lambda: _query_current_game(
-                announcer,
-                current_game,
-                "Your deck",
-                lambda state: f"{state.player_deck_count} cards",
-            ),
-            "Speak deck counts",
-        )
-        self._hotkeys.register(
-            wx.MOD_CONTROL | wx.MOD_SHIFT,
-            ord("H"),
-            lambda: _query_current_game(
-                announcer,
-                current_game,
-                "Opponent hand",
-                lambda state: f"{len(state.opponent_hand)} cards",
-            ),
-            "Speak opponent hand count",
-        )
+        self._hotkey_map = hotkey_map
+        hotkey_map.apply(settings)
         if self._hotkeys.failed:
             speech.speak(
                 "Could not register hotkeys: "

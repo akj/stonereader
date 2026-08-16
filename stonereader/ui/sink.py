@@ -8,7 +8,7 @@ import wx
 
 from stonereader.ui._sink_core import _SinkCore
 from stonereader.ui.announcer import Announcer
-from stonereader.ui.chords import chord_from_key
+from stonereader.ui.chords import Chord, chord_from_key
 from stonereader.ui.registry import CommandRegistry
 from stonereader.ui.text_mode import TextSession
 
@@ -38,13 +38,21 @@ class InputSink:
     def exit_text_mode(self) -> None:
         self._core.exit_text_mode()
 
+    def enter_capture_mode(
+        self,
+        on_chord: Callable[[Chord], None],
+        prompt_escape: Callable[[], None],
+    ) -> None:
+        self._core.enter_capture_mode(on_chord, prompt_escape)
+
+    def exit_capture_mode(self) -> None:
+        self._core.exit_capture_mode()
+
     def arm_offer(self, subject: str, on_accept: Callable[[], None]) -> bool:
         return self._core.arm_offer(subject, on_accept)
 
     def mark_offer_subject_seen(self, subject: str) -> None:
         self._core.mark_offer_subject_seen(subject)
-
-    # Capture mode lands with the Settings chunk (ADR-0011).
 
     def _on_char_hook(self, event: wx.KeyEvent) -> None:
         keycode = event.GetKeyCode()

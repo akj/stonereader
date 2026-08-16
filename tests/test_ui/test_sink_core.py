@@ -129,3 +129,37 @@ def test_text_mode_owns_routing_and_drops_offers() -> None:
     assert accepted == []
     sink.exit_text_mode()
     assert sink.text_mode_active is False
+
+
+def test_capture_routes_every_chord_except_escape_and_drops_offers() -> None:
+    captured: list[Chord] = []
+    escaped: list[str] = []
+    sink = core(FakeSpeech(), [])
+    sink.set_active(CommandRegistry())
+    sink.arm_offer("before", lambda: captured.append(Chord("z")))
+    sink.enter_capture_mode(captured.append, lambda: escaped.append("escape"))
+
+    assert sink.capture_mode_active is True
+    assert sink.arm_offer("during", lambda: None) is False
+    assert sink.handle_chord(Chord("a")) is True
+    assert sink.handle_chord(Chord("c", ctrl=True, shift=True)) is True
+    assert sink.handle_chord(Chord("escape")) is True
+    assert captured == [Chord("a"), Chord("c", ctrl=True, shift=True)]
+    assert escaped == ["escape"]
+
+    sink.exit_capture_mode()
+    assert sink.capture_mode_active is False
+    assert sink.handle_chord(Chord("enter", ctrl=True)) is False
+
+
+def test_text_and_capture_modes_are_mutually_exclusive() -> None:
+    speech = FakeSpeech()
+    sink = core(speech, [])
+    session = TextSession("Field", "", Announcer(speech), lambda _text: None, lambda: None)
+    sink.enter_text_mode(session)
+    with __import__("pytest").raises(AssertionError):
+        sink.enter_capture_mode(lambda _chord: None, lambda: None)
+    sink.exit_text_mode()
+    sink.enter_capture_mode(lambda _chord: None, lambda: None)
+    with __import__("pytest").raises(AssertionError):
+        sink.enter_text_mode(session)

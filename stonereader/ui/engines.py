@@ -30,6 +30,24 @@ class VerticalMenuEngine:
         options = self._options()
         return [option.title() for option in options], self._cursor
 
+    @property
+    def cursor(self) -> int:
+        return self._cursor
+
+    def set_cursor(self, index: int) -> None:
+        """Set the cursor without speech, for holder-driven reusable menus."""
+        options = self._options()
+        target = min(max(index, 0), max(0, len(options) - 1))
+        changed = target != self._cursor
+        self._cursor = target
+        if changed:
+            self._notify()
+
+    def refresh(self) -> None:
+        """Refresh render subscribers after dynamic titles change."""
+        self._options()
+        self._notify()
+
     def widget_type_bindings(self) -> list[tuple[Chord, Command]]:
         return [
             (
@@ -63,8 +81,13 @@ class VerticalMenuEngine:
         if not options:
             self._announcer.context_empty(self._spec.name, queued=queued)
             return
+        label = (
+            self._spec.context_label()
+            if self._spec.context_label is not None
+            else self._spec.name
+        )
         self._announcer.context_entry_menu(
-            self._spec.name,
+            label,
             options[self._cursor].title(),
             queued=queued,
         )

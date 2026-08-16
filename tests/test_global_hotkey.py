@@ -279,3 +279,36 @@ def test_repeated_register_after_failure(monkeypatch) -> None:
             frame.Destroy()
     finally:
         app.Destroy()
+
+
+def test_unregister_reports_each_call_and_keeps_binding_on_failure(monkeypatch) -> None:
+    wx = pytest.importorskip("wx")
+    from stonereader.services._global_hotkey import GlobalHotkeyService
+
+    app = wx.App()
+    try:
+        frame = wx.Frame(None)
+        try:
+            monkeypatch.setattr(frame, "RegisterHotKey", lambda *args: True)
+            results = [False, True]
+            monkeypatch.setattr(
+                frame,
+                "UnregisterHotKey",
+                lambda _hotkey_id: results.pop(0),
+            )
+            service = GlobalHotkeyService(frame)
+            service.register(
+                wx.MOD_CONTROL | wx.MOD_SHIFT,
+                ord("L"),
+                lambda: None,
+                "Live Game",
+            )
+
+            assert service.unregister(1000) is False
+            assert service.failed == ["Live Game"]
+            assert service.unregister(1000) is True
+            assert service.unregister(1000) is True
+        finally:
+            frame.Destroy()
+    finally:
+        app.Destroy()
