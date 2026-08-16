@@ -6,14 +6,21 @@ point that wires long-lived services into it.
 
 from __future__ import annotations
 
+import binascii
 import logging
 import sqlite3
+from collections.abc import Callable
 
 import wx
+from hearthstone.deckstrings import parse_deckstring
 
 from stonereader.db import get_connection, init_db
 from stonereader.speech_service import SpeechService
+from stonereader.surfaces._deck_data import CurrentDeck, DeckData
+from stonereader.surfaces.deck_detail import build_deck_detail
+from stonereader.surfaces.decks import build_decks
 from stonereader.surfaces.home import build_home
+from stonereader.surfaces.import_deck import ImportDeckField, build_import_deck
 from stonereader.ui import (
     ActiveSurface,
     Announcer,
@@ -74,6 +81,8 @@ class MainWindow(wx.Frame):
         self._db_conn = get_connection()
         init_db(self._db_conn)
 
+        self._clipboard_offer_accept: Callable[[str], None] | None = None
+        self.Bind(wx.EVT_ACTIVATE, self._on_activate)
         self.Bind(wx.EVT_CLOSE, self._on_close)
 
     @property
@@ -116,6 +125,31 @@ class MainWindow(wx.Frame):
 
     def _announce_help_placeholder(self) -> None:
         self._announcer.noop("Help is not yet migrated")
+
+    def configure_clipboard_offer(
+        self,
+        on_accept: Callable[[str], None],
+    ) -> None:
+        """Install the Offer route and suppress the startup clipboard value."""
+        self._clipboard_offer_accept = on_accept
+        initial = _read_clipboard_text()
+        if initial is not None:
+            self._sink.mark_offer_subject_seen(initial)
+
+    def _on_activate(self, event: wx.ActivateEvent) -> None:
+        accept = self._clipboard_offer_accept
+        if event.GetActive() and accept is not None:
+            text = _read_clipboard_text()
+            if text is not None and _is_deckstring(text):
+                armed = self._sink.arm_offer(
+                    text,
+                    lambda text=text: accept(text),
+                )
+                if armed:
+                    self._announcer.offer(
+                        "Deck code on clipboard — press Control Enter to import"
+                    )
+        event.Skip()
 
     def _quit(self) -> None:
         self.Close()
@@ -168,6 +202,10 @@ class StoneReaderApp(wx.App):
 
         card_db = CardDatabase.load()
 
+        current_deck = CurrentDeck()
+        deck_data = DeckData(db_conn, card_db)
+        import_field = ImportDeckField()
+
         # --- Game Tracker (Phase 2) ---
         # Logging is bootstrapped exactly once in __main__.py. This per-launch
         # log.config bootstrap remains separate and silent unless it changed.
@@ -199,11 +237,12 @@ class StoneReaderApp(wx.App):
             self._recorder.on_reset,
         )
 
-        names = ("Live Game", "Decks", "Cards", "Replays", "Settings")
-        targets = {
+        names = ("Live Game", "Cards", "Replays", "Settings")
+        targets: dict[str, Callable[[], None]] = {
             name: lambda name=name: announcer.noop(f"{name}: not yet migrated")
             for name in names
         }
+        targets["Decks"] = lambda: nav.jump("Decks")
 
         def home_factory() -> ActiveSurface:
             return build_home(
@@ -213,7 +252,48 @@ class StoneReaderApp(wx.App):
                 targets,
             )
 
+        def decks_factory() -> ActiveSurface:
+            return build_decks(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                db_conn,
+                deck_data,
+                current_deck,
+                self._frame._sink,
+                _copy_to_clipboard,
+            )
+
+        def deck_detail_factory() -> ActiveSurface:
+            return build_deck_detail(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                deck_data,
+                current_deck,
+            )
+
+        def import_deck_factory() -> ActiveSurface:
+            return build_import_deck(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                db_conn,
+                card_db,
+                self._frame._sink,
+                import_field,
+            )
+
         nav.register("Home", home_factory)
+        nav.register("Decks", decks_factory)
+        nav.register("Deck detail", deck_detail_factory)
+        nav.register("Import Deck", import_deck_factory)
+
+        def accept_clipboard_deck(text: str) -> None:
+            import_field.set(text)
+            nav.jump_path(["Home", "Decks", "Import Deck"])
+
+        self._frame.configure_clipboard_offer(accept_clipboard_deck)
         nav.jump("Home")
 
         self._frame.Show()
@@ -228,3 +308,36 @@ class StoneReaderApp(wx.App):
             )
 
         return True
+
+
+def _read_clipboard_text() -> str | None:
+    if not wx.TheClipboard.Open():
+        return None
+    try:
+        data = wx.TextDataObject()
+        if not wx.TheClipboard.GetData(data):
+            return None
+        # Deck codes are copied with stray whitespace often enough that the
+        # subject and the parse must both see the trimmed string.
+        return data.GetText().strip()
+    finally:
+        wx.TheClipboard.Close()
+
+
+def _copy_to_clipboard(text: str) -> None:
+    if not wx.TheClipboard.Open():
+        raise RuntimeError("Could not open the clipboard")
+    try:
+        if not wx.TheClipboard.SetData(wx.TextDataObject(text)):
+            raise RuntimeError("Could not write to the clipboard")
+        wx.TheClipboard.Flush()
+    finally:
+        wx.TheClipboard.Close()
+
+
+def _is_deckstring(text: str) -> bool:
+    try:
+        parse_deckstring(text)
+    except (binascii.Error, EOFError, TypeError, UnicodeError, ValueError):
+        return False
+    return True

@@ -39,12 +39,17 @@ class _SinkCore:
     def exit_text_mode(self) -> None:
         self._text_session = None
 
-    def arm_offer(self, subject: str, on_accept: Callable[[], None]) -> None:
+    def arm_offer(self, subject: str, on_accept: Callable[[], None]) -> bool:
         """Arm once per subject, and only in navigation state."""
         if self._text_session is not None or subject in self._seen_offer_subjects:
-            return
+            return False
         self._seen_offer_subjects.add(subject)
         self._offer = on_accept
+        return True
+
+    def mark_offer_subject_seen(self, subject: str) -> None:
+        """Record an Offer subject without arming it."""
+        self._seen_offer_subjects.add(subject)
 
     def control_down(self) -> None:
         self._ctrl_tap_candidate = True

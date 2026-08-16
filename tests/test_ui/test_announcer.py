@@ -15,6 +15,7 @@ def test_every_template_and_lane() -> None:
     announcer.moved("Fireball")
     announcer.boundary("Fireball")
     announcer.confirmation("Fireball copied")
+    announcer.offer("Deck code on clipboard — press Control Enter to import")
     announcer.query("Your deck", "23 cards")
     announcer.noop("No search on this screen")
     announcer.narrate("Opponent played Fireball")
@@ -29,6 +30,7 @@ def test_every_template_and_lane() -> None:
         ("Fireball", True),
         ("Fireball", True),
         ("Fireball copied", True),
+        ("Deck code on clipboard — press Control Enter to import", True),
         ("Your deck, 23 cards", True),
         ("No search on this screen", True),
         ("Opponent played Fireball", False),

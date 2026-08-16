@@ -77,11 +77,22 @@ def test_offer_accepts_once_per_subject() -> None:
     accepted: list[str] = []
     sink = core(FakeSpeech(), [])
     sink.set_active(CommandRegistry())
-    sink.arm_offer("code", lambda: accepted.append("accepted"))
+    assert sink.arm_offer("code", lambda: accepted.append("accepted")) is True
     assert sink.handle_chord(Chord("enter", ctrl=True)) is True
-    sink.arm_offer("code", lambda: accepted.append("again"))
+    assert sink.arm_offer("code", lambda: accepted.append("again")) is False
     assert sink.handle_chord(Chord("enter", ctrl=True)) is False
     assert accepted == ["accepted"]
+
+
+def test_mark_offer_subject_seen_prevents_arming_without_accepting() -> None:
+    accepted: list[str] = []
+    sink = core(FakeSpeech(), [])
+    sink.set_active(CommandRegistry())
+    sink.mark_offer_subject_seen("own-copy")
+
+    assert sink.arm_offer("own-copy", lambda: accepted.append("accepted")) is False
+    assert sink.handle_chord(Chord("enter", ctrl=True)) is False
+    assert accepted == []
 
 
 def test_nonaccept_key_disarms_offer_silently_and_processes_normally() -> None:
@@ -109,7 +120,7 @@ def test_text_mode_owns_routing_and_drops_offers() -> None:
     sink.set_active(CommandRegistry())
     session = TextSession("Code", "", Announcer(speech), commits.append, lambda: None)
     sink.enter_text_mode(session)
-    sink.arm_offer("code", lambda: accepted.append("accepted"))
+    assert sink.arm_offer("code", lambda: accepted.append("accepted")) is False
 
     assert sink.handle_chord(Chord("a")) is True
     assert session.text == "a"

@@ -15,8 +15,10 @@ class FakeEngine:
         self.name = name
         self.events = events
         self.cursor = 0
+        self.queued_landings: list[bool] = []
 
     def on_landing(self, queued: bool = False) -> None:
+        self.queued_landings.append(queued)
         self.events.append(f"landing:{self.name}:{self.cursor}")
 
 
@@ -140,3 +142,60 @@ def test_factory_is_not_called_until_first_visit() -> None:
     assert calls == []
     navigation.jump("Cards")
     assert calls == ["made"]
+
+
+def test_jump_path_resets_to_exact_validated_home_rooted_path() -> None:
+    events: list[str] = []
+    navigation = controller(events, FakeSpeech())
+    register_factories(navigation, events)
+
+    navigation.jump_path(["Home", "Cards", "Detail"])
+
+    assert navigation.stack == ("Home", "Cards", "Detail")
+    assert events[-4:] == [
+        "stop",
+        "title:Detail — StoneReader",
+        "activate:Detail",
+        "landing:Detail:0",
+    ]
+    with pytest.raises(ValueError):
+        navigation.jump_path(["Cards", "Detail"])
+    with pytest.raises(ValueError):
+        navigation.jump_path(["Home", "Cards", "Cards"])
+    with pytest.raises(KeyError):
+        navigation.jump_path(["Home", "Missing"])
+
+
+def test_display_name_controls_window_title() -> None:
+    events: list[str] = []
+    navigation = controller(events, FakeSpeech())
+    navigation.register(
+        "Deck detail",
+        lambda: ActiveSurface(
+            SurfaceSpec(
+                "Deck detail",
+                WidgetType.VERTICAL_MENU,
+                options=lambda: [],
+                display_name=lambda: "Aggro Shaman",
+            ),
+            FakeEngine("Deck detail", events),
+            CommandRegistry(),
+        ),
+    )
+
+    navigation.jump("Deck detail")
+
+    assert "title:Aggro Shaman — StoneReader" in events
+
+
+def test_back_can_queue_the_revealed_surface_landing() -> None:
+    navigation = controller([], FakeSpeech())
+    register_factories(navigation, [])
+    navigation.jump("Cards")
+    navigation.drill_down("Detail")
+
+    navigation.back(queued=True)
+
+    cards = navigation._surfaces["Cards"]
+    assert isinstance(cards.engine, FakeEngine)
+    assert cards.engine.queued_landings == [False, True]

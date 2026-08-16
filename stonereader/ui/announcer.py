@@ -68,6 +68,10 @@ class Announcer:
         # with a re-fired context entry passing queued=True.
         self._speak(Lane.USER, text)
 
+    def offer(self, text: str) -> None:
+        """Speak an ephemeral Offer on Lane 1 exactly as supplied."""
+        self._speak(Lane.USER, text)
+
     def query(self, subject: str, value: str) -> None:
         self._speak(Lane.USER, f"{subject}, {value}")
 

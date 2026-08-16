@@ -78,14 +78,30 @@ class NavigationController:
         self._stack.append(name)
         self._land(name, surface)
 
-    def back(self) -> None:
+    def jump_path(self, names: list[str]) -> None:
+        """Reset to an exact Home-rooted path and land on its final Surface."""
+        if not names or names[0] != self._home:
+            raise ValueError(f"Navigation path must start with {self._home}")
+        if len(set(names)) != len(names):
+            raise ValueError("Navigation path cannot contain duplicate Surfaces")
+        # Home is the controller's structural root and need not be instantiated
+        # merely to reset a path; every reachable non-root Surface must exist.
+        unknown = [name for name in names[1:] if name not in self._factories]
+        if unknown:
+            raise KeyError(f"Unknown Surface: {unknown[0]}")
+        name = names[-1]
+        surface = self._get_surface(name)
+        self._stack = list(names)
+        self._land(name, surface)
+
+    def back(self, queued: bool = False) -> None:
         """Pop one Drill-down, or announce the root no-op."""
         if len(self._stack) == 1:
             self._announcer.noop(f"{self._home} — already at the top")
             return
         self._stack.pop()
         name = self._stack[-1]
-        self._land(name, self._get_surface(name))
+        self._land(name, self._get_surface(name), queued=queued)
 
     def install_back(self, registry: CommandRegistry) -> None:
         """Centrally install Escape and Backspace on an activated registry."""
@@ -102,9 +118,20 @@ class NavigationController:
         self._surfaces[name] = surface
         return surface
 
-    def _land(self, name: str, surface: ActiveSurface) -> None:
+    def _land(
+        self,
+        name: str,
+        surface: ActiveSurface,
+        *,
+        queued: bool = False,
+    ) -> None:
         # A single landing path makes route invariance structural (ADR-0010).
         self._stop_audio()
-        self._set_title(f"{name} — StoneReader")
+        display_name = (
+            surface.spec.display_name()
+            if surface.spec.display_name is not None
+            else name
+        )
+        self._set_title(f"{display_name} — StoneReader")
         self._activate(surface)
-        surface.engine.on_landing()
+        surface.engine.on_landing(queued=queued)

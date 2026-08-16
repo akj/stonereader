@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from stonereader.ui.announcer import Announcer
+from stonereader.ui.arming import ArmedAction
 from stonereader.ui.builder import build_active_surface
 from stonereader.ui.chords import Chord, chord_from_key
 from stonereader.ui.engines import HorizontalListEngine, VerticalMenuEngine
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
 __all__ = [
     "ActiveSurface",
     "Announcer",
+    "ArmedAction",
     "Binding",
     "Chord",
     "Command",

@@ -87,3 +87,16 @@ def test_zone_jump_requires_help_phrase() -> None:
             WidgetType.HORIZONTAL_LIST,
             zones=[zone(jump_chord=Chord("c"))],
         )
+
+
+def test_display_name_is_optional_and_callable() -> None:
+    plain = SurfaceSpec("Home", WidgetType.VERTICAL_MENU, options=lambda: [])
+    detail = SurfaceSpec(
+        "Deck detail",
+        WidgetType.VERTICAL_MENU,
+        options=lambda: [],
+        display_name=lambda: "Mage deck",
+    )
+    assert plain.display_name is None
+    assert detail.display_name is not None
+    assert detail.display_name() == "Mage deck"

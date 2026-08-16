@@ -52,6 +52,7 @@ class SurfaceSpec:
     bindings: list[Binding] = field(default_factory=list)
     slot_fills: dict[Slot, Command] = field(default_factory=dict)
     slot_noops: dict[Slot, str] = field(default_factory=dict)
+    display_name: Callable[[], str] | None = None
 
     def __post_init__(self) -> None:
         if not self.name:
