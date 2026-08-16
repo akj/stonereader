@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import sqlite3
 import logging
+import threading
+import time
 from pathlib import Path
 
 from stonereader.models.deck import DeckSummary
@@ -95,6 +97,10 @@ CREATE TABLE IF NOT EXISTS replays (
 REPLAY_SOURCES = ("live_auto", "manual_import")
 REPLAY_RESULTS = ("WON", "LOST", "TIED", "UNKNOWN")
 
+_backfill_lock = threading.Lock()
+_backfill_workers: dict[str, threading.Thread] = {}
+_BACKFILL_STARTUP_GRACE_SECONDS = 0.05
+
 
 def get_connection(db_path: str | None = None) -> sqlite3.Connection:
     """Open a SQLite connection. Defaults to ~/.stonereader/stonereader.db."""
@@ -120,29 +126,30 @@ def init_db(conn: sqlite3.Connection) -> None:
     """Create/migrate tables to the latest schema version. Idempotent.
 
     Fresh databases receive the current schema. Upgrades preserve decks and
-    replays, add stats membership, backfill replay deck attribution once, and
+    replays, add stats membership, backfill replay deck attribution, and
     remove the obsolete v1 ``games`` table.
     """
     version = get_schema_version(conn)
-    if version >= 3:
-        return
     if version == 0:
         conn.executescript(_SCHEMA_V3_FRESH)
         _set_schema_version(conn, 3)
         conn.commit()
-        return
-    if version < 2:
-        conn.executescript(_SCHEMA_V2)
-    conn.execute(
-        "ALTER TABLE replays ADD COLUMN in_stats INTEGER NOT NULL DEFAULT 0"
-    )
-    conn.execute(
-        "UPDATE replays SET in_stats = CASE WHEN source = 'live_auto' THEN 1 ELSE 0 END"
-    )
-    _backfill_replay_decks(conn)
-    conn.execute("DROP TABLE IF EXISTS games")
-    _set_schema_version(conn, 3)
-    conn.commit()
+    elif version < 3:
+        if version < 2:
+            conn.executescript(_SCHEMA_V2)
+        conn.execute(
+            "ALTER TABLE replays ADD COLUMN in_stats INTEGER NOT NULL DEFAULT 0"
+        )
+        conn.execute(
+            "UPDATE replays SET in_stats = "
+            "CASE WHEN source = 'live_auto' THEN 1 ELSE 0 END"
+        )
+        conn.execute("DROP TABLE IF EXISTS games")
+        _set_schema_version(conn, 3)
+        conn.commit()
+
+    if _replay_deck_backfill_needed(conn):
+        _start_replay_deck_backfill(conn)
 
 
 def _set_schema_version(conn: sqlite3.Connection, version: int) -> None:
@@ -151,13 +158,85 @@ def _set_schema_version(conn: sqlite3.Connection, version: int) -> None:
     conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
 
 
+def _replay_deck_backfill_needed(conn: sqlite3.Connection) -> bool:
+    """Return whether any replay still needs deck attribution."""
+    return (
+        conn.execute(
+            "SELECT 1 FROM replays WHERE deck_id IS NULL LIMIT 1"
+        ).fetchone()
+        is not None
+    )
+
+
+def _start_replay_deck_backfill(conn: sqlite3.Connection) -> None:
+    """Start legacy replay attribution on a connection-local worker."""
+    row = next(
+        (row for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
+        None,
+    )
+    db_path = str(row[2]) if row is not None and row[2] else None
+    if db_path is None:
+        logger.warning("replay deck backfill skipped for an in-memory database")
+        return
+    with _backfill_lock:
+        worker = _backfill_workers.get(db_path)
+        if worker is not None and worker.is_alive():
+            return
+        worker = threading.Thread(
+            target=_run_replay_deck_backfill,
+            args=(db_path,),
+            name="stonereader-replay-deck-backfill",
+            daemon=True,
+        )
+        _backfill_workers[db_path] = worker
+        worker.start()
+    worker.join(_BACKFILL_STARTUP_GRACE_SECONDS)
+
+
+def _run_replay_deck_backfill(db_path: str) -> None:
+    """Run replay attribution on a fresh SQLite connection."""
+    try:
+        conn = get_connection(db_path)
+        try:
+            _backfill_replay_decks(conn)
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        logger.exception("replay deck backfill failed")
+    finally:
+        current = threading.current_thread()
+        with _backfill_lock:
+            if _backfill_workers.get(db_path) is current:
+                del _backfill_workers[db_path]
+
+
+def _wait_for_replay_deck_backfills(timeout: float | None = None) -> bool:
+    """Wait for current backfills; primarily useful at test/smoke seams."""
+    deadline = None if timeout is None else time.monotonic() + timeout
+    while True:
+        with _backfill_lock:
+            workers = tuple(_backfill_workers.values())
+        if not workers:
+            return True
+        for worker in workers:
+            remaining = (
+                None if deadline is None else max(0.0, deadline - time.monotonic())
+            )
+            worker.join(remaining)
+        if deadline is not None and time.monotonic() >= deadline:
+            with _backfill_lock:
+                return not any(
+                    worker.is_alive() for worker in _backfill_workers.values()
+                )
+
+
 def _backfill_replay_decks(conn: sqlite3.Connection) -> None:
     """Attribute legacy replays from stored XML without blocking upgrades."""
     rows = conn.execute(
         "SELECT id, file_path FROM replays WHERE deck_id IS NULL"
     ).fetchall()
-    skipped = len(rows)
-    attributed = 0
+    updates: list[tuple[int, str, int]] = []
     decks = get_all_decks(conn)
     if rows and decks:
         try:
@@ -184,19 +263,21 @@ def _backfill_replay_decks(conn: sqlite3.Connection) -> None:
                     if match is None:
                         continue
                     deck_id, deck_name = match
-                    conn.execute(
-                        "UPDATE replays SET deck_id = ?, deck_name = ? WHERE id = ?",
-                        (deck_id, deck_name, row["id"]),
-                    )
-                    attributed += 1
-                    skipped -= 1
+                    updates.append((deck_id, deck_name, row["id"]))
                 except Exception:
                     logger.exception(
                         "replay deck backfill skipped replay %s", row["id"]
                     )
-    logger.info(
-        "replay deck backfill: attributed %d / skipped %d", attributed, skipped
-    )
+    attributed = 0
+    if updates:
+        cursor = conn.executemany(
+            "UPDATE replays SET deck_id = ?, deck_name = ? "
+            "WHERE id = ? AND deck_id IS NULL",
+            updates,
+        )
+        attributed = max(cursor.rowcount, 0)
+    skipped = len(rows) - attributed
+    logger.info("replay deck backfill: attributed %d / skipped %d", attributed, skipped)
 
 
 def save_deck(
