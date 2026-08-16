@@ -5,6 +5,8 @@ from dataclasses import replace
 from stonereader.models.card import Card
 from stonereader.models.game_state import GameEntity, GameState, Hero, PlayedCard
 from stonereader.models.replay import ReplayState
+from stonereader.services._audio_index import CardClip
+from stonereader.surfaces.sounds_menu import SoundsMenuHolder
 from stonereader.surfaces.replay_viewer import CurrentReplay, build_replay_viewer
 from stonereader.ui._sink_core import _SinkCore
 from stonereader.ui.announcer import Announcer
@@ -199,7 +201,45 @@ def _replay() -> ReplayState:
     )
 
 
-def _harness(replay: ReplayState | None = None):
+class FakeAudioIndex:
+    def __init__(
+        self,
+        status: str = "ready",
+        reason: str = "",
+        clips: list[CardClip] | None = None,
+    ) -> None:
+        self.status = status
+        self.reason = reason
+        self.clips = clips or []
+        self.event_requests: list[tuple[str | None, str]] = []
+
+    def clips_for_card(self, _card_id: str) -> list[CardClip]:
+        return list(self.clips)
+
+    def event_clip(self, card_id: str | None, kind: str) -> str | None:
+        self.event_requests.append((card_id, kind))
+        return f"{kind}-key"
+
+    def decode(self, clip_key: str) -> bytes:
+        return f"wav:{clip_key}".encode()
+
+
+class FakePlayer:
+    def __init__(self) -> None:
+        self.played: list[bytes] = []
+
+    def play(self, wav_bytes: bytes) -> None:
+        self.played.append(wav_bytes)
+
+
+def _harness(
+    replay: ReplayState | None = None,
+    *,
+    audio_index: FakeAudioIndex | None = None,
+    player: FakePlayer | None = None,
+    autoplay: bool = True,
+    sounds: SoundsMenuHolder | None = None,
+):
     speech = FakeSpeech()
     announcer = Announcer(speech)
     sink = _SinkCore(announcer, lambda: None)
@@ -214,9 +254,19 @@ def _harness(replay: ReplayState | None = None):
     nav.register("Replays", lambda: _placeholder("Replays"))
     nav.register(
         "Replay Viewer",
-        lambda: build_replay_viewer(announcer, [], nav, current),
+        lambda: build_replay_viewer(
+            announcer,
+            [],
+            nav,
+            current,
+            audio_index=audio_index,
+            player=player,
+            replay_autoplay=lambda: autoplay,
+            sounds=sounds,
+        ),
     )
     nav.register("Child", lambda: _placeholder("Child"))
+    nav.register("Sounds menu", lambda: _placeholder("Sounds menu"))
     nav.jump("Replays")
     speech.calls.clear()
     nav.drill_down("Replay Viewer")
@@ -405,3 +455,96 @@ def test_slots_and_unbound_keys_match_replay_viewer_contract() -> None:
     assert sink.handle_chord(Chord("delete")) is False
     assert sink.handle_chord(Chord("space")) is False
     assert speech.calls == before
+
+
+def test_listen_handles_card_event_source_and_all_no_push_cases() -> None:
+    sounds = SoundsMenuHolder()
+    ready_index = FakeAudioIndex(clips=[CardClip("Play", "key")])
+    surface, sink, _speech, nav, _current = _harness(
+        audio_index=ready_index,
+        player=FakePlayer(),
+        sounds=sounds,
+    )
+    sink.handle_chord(Chord("l"))
+    assert nav.stack[-1] == "Sounds menu"
+    assert sounds.get().card_name == "Boar"
+
+    warming = FakeAudioIndex("indexing", "Game audio is not ready yet")
+    _surface, sink, speech, nav, _current = _harness(
+        audio_index=warming,
+        player=FakePlayer(),
+        sounds=SoundsMenuHolder(),
+    )
+    sink.handle_chord(Chord("l"))
+    assert nav.stack[-1] == "Replay Viewer"
+    assert speech.calls[-1] == ("Game audio is not ready yet", True)
+
+    silent = FakeAudioIndex(clips=[])
+    _surface, sink, speech, nav, _current = _harness(
+        audio_index=silent,
+        player=FakePlayer(),
+        sounds=SoundsMenuHolder(),
+    )
+    sink.handle_chord(Chord("l"))
+    assert nav.stack[-1] == "Replay Viewer"
+    assert speech.calls[-1] == ("Boar: no sounds", True)
+
+    event_sounds = SoundsMenuHolder()
+    event_index = FakeAudioIndex(clips=[CardClip("Play", "key")])
+    surface, sink, _speech, nav, _current = _harness(
+        audio_index=event_index,
+        player=FakePlayer(),
+        sounds=event_sounds,
+    )
+    sink.handle_chord(Chord("y"))
+    sink.handle_chord(Chord("l"))
+    assert nav.stack[-1] == "Replay Viewer"
+    titles = surface.engine.items_snapshot()[0]
+    surface.engine.jump_to_position(titles.index("You played Boar") + 1)
+    sink.handle_chord(Chord("l"))
+    assert nav.stack[-1] == "Sounds menu"
+    assert event_sounds.get().card_name == "Boar"
+
+
+def test_events_zone_autoplay_gates_and_turn_step_is_silent() -> None:
+    disabled_index = FakeAudioIndex()
+    disabled_player = FakePlayer()
+    surface, sink, _speech, _nav, _current = _harness(
+        audio_index=disabled_index,
+        player=disabled_player,
+        autoplay=False,
+        sounds=SoundsMenuHolder(),
+    )
+    sink.handle_chord(Chord("y"))
+    titles = surface.engine.items_snapshot()[0]
+    surface.engine.jump_to_position(titles.index("You played Boar") + 1)
+    assert disabled_player.played == []
+
+    warming_index = FakeAudioIndex("indexing", "Game audio is not ready yet")
+    warming_player = FakePlayer()
+    surface, sink, _speech, _nav, _current = _harness(
+        audio_index=warming_index,
+        player=warming_player,
+        sounds=SoundsMenuHolder(),
+    )
+    sink.handle_chord(Chord("y"))
+    titles = surface.engine.items_snapshot()[0]
+    surface.engine.jump_to_position(titles.index("You played Boar") + 1)
+    assert warming_player.played == []
+
+    ready_index = FakeAudioIndex()
+    ready_player = FakePlayer()
+    surface, sink, _speech, _nav, _current = _harness(
+        audio_index=ready_index,
+        player=ready_player,
+        sounds=SoundsMenuHolder(),
+    )
+    sink.handle_chord(Chord("y"))
+    titles = surface.engine.items_snapshot()[0]
+    surface.engine.jump_to_position(titles.index("You played Boar") + 1)
+    assert ready_index.event_requests[-1] == ("BOAR", "play")
+    assert ready_player.played[-1] == b"wav:play-key"
+
+    ready_player.played.clear()
+    sink.handle_chord(Chord("pagedown"))
+    assert ready_player.played == []

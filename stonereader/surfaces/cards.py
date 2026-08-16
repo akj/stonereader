@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from stonereader.models.card import Card, CardDatabase
+from stonereader.surfaces._game_audio import CardAudioIndex, open_sounds_for_card
+from stonereader.surfaces.sounds_menu import SoundsMenuHolder
 from stonereader.ui.announcer import Announcer
 from stonereader.ui.builder import build_active_surface
 from stonereader.ui.chords import Chord
@@ -92,6 +94,9 @@ def build_cards(
     nav: NavigationController,
     card_db: CardDatabase,
     sink: TextModeSink,
+    *,
+    audio_index: CardAudioIndex | None = None,
+    sounds: SoundsMenuHolder | None = None,
 ) -> ActiveSurface:
     """Build the lazy-singleton Cards Surface and its persistent filters."""
     state = _CardsState()
@@ -142,6 +147,23 @@ def build_cards(
         if engine is None:
             raise RuntimeError("Cards engine is not active")
         engine.page(delta)
+
+    def listen() -> None:
+        if engine is None or audio_index is None or sounds is None:
+            raise RuntimeError("Cards game-audio dependencies are not active")
+        current = engine.current_item()
+        if not isinstance(current, Card):
+            announcer.noop("No card focused")
+            return
+        open_sounds_for_card(
+            announcer,
+            nav,
+            audio_index,
+            sounds,
+            card_id=current.id,
+            card_name=current.name,
+            title=current.name,
+        )
 
     mana_bindings = [
         Binding(
@@ -200,6 +222,17 @@ def build_cards(
                 open_search,
             ),
             Slot.COARSE_AXIS: forward_page,
+            **(
+                {
+                    Slot.LISTEN: Command(
+                        "cards.listen",
+                        "L: listen to this card's sounds",
+                        listen,
+                    )
+                }
+                if audio_index is not None and sounds is not None
+                else {}
+            ),
         },
         slot_reverse_fills={
             Slot.GROUP_JUMP: reverse_class,
@@ -207,7 +240,11 @@ def build_cards(
         },
         slot_noops={
             Slot.ENTER: "Nothing to do here",
-            Slot.LISTEN: "Game audio is not available",
+            **(
+                {}
+                if audio_index is not None and sounds is not None
+                else {Slot.LISTEN: "Game audio is not available"}
+            ),
         },
     )
     surface = build_active_surface(spec, announcer, universal_bindings, nav)

@@ -5,7 +5,9 @@ from dataclasses import dataclass
 import pytest
 
 from stonereader.models.card import Card, CardDatabase
+from stonereader.services._audio_index import CardClip
 from stonereader.surfaces.cards import build_cards
+from stonereader.surfaces.sounds_menu import SoundsMenuHolder
 from stonereader.ui._sink_core import _SinkCore
 from stonereader.ui.announcer import Announcer
 from stonereader.ui.builder import build_active_surface
@@ -78,7 +80,26 @@ def database(*cards: Card) -> CardDatabase:
     return card_db
 
 
-def make_harness(card_db: CardDatabase) -> Harness:
+class FakeAudioIndex:
+    def __init__(
+        self,
+        status: str,
+        reason: str,
+        clips: list[CardClip] | None = None,
+    ) -> None:
+        self.status = status
+        self.reason = reason
+        self._clips = clips or []
+
+    def clips_for_card(self, _card_id: str) -> list[CardClip]:
+        return list(self._clips)
+
+
+def make_harness(
+    card_db: CardDatabase,
+    audio_index: FakeAudioIndex | None = None,
+    sounds: SoundsMenuHolder | None = None,
+) -> Harness:
     speech = FakeSpeech()
     announcer = Announcer(speech)
     sink = _SinkCore(announcer, lambda: None)
@@ -88,9 +109,70 @@ def make_harness(card_db: CardDatabase) -> Harness:
         lambda: None,
         lambda surface: sink.set_active(surface.registry),
     )
-    surface = build_cards(announcer, [], nav, card_db, sink)
+    if audio_index is not None and sounds is not None:
+        nav.register(
+            "Sounds menu",
+            lambda: build_active_surface(
+                SurfaceSpec(
+                    "Sounds menu",
+                    WidgetType.VERTICAL_MENU,
+                    options=lambda: [],
+                ),
+                announcer,
+                [],
+                nav,
+            ),
+        )
+    surface = build_cards(
+        announcer,
+        [],
+        nav,
+        card_db,
+        sink,
+        audio_index=audio_index,
+        sounds=sounds,
+    )
     sink.set_active(surface.registry)
     return Harness(surface, sink, speech, nav)
+
+
+def test_listen_handles_empty_warming_no_clips_and_pushes_ready_card() -> None:
+    sounds = SoundsMenuHolder()
+    empty = make_harness(
+        database(),
+        FakeAudioIndex("ready", "", [CardClip("Play", "key")]),
+        sounds,
+    )
+    empty.press(Chord("l"))
+    assert empty.speech.calls[-1] == ("No card focused", True)
+
+    warming = make_harness(
+        database(card(1, "Fireball")),
+        FakeAudioIndex("indexing", "Game audio is not ready yet"),
+        SoundsMenuHolder(),
+    )
+    warming.press(Chord("l"))
+    assert warming.nav.stack == ("Home",)
+    assert warming.speech.calls[-1] == ("Game audio is not ready yet", True)
+
+    silent = make_harness(
+        database(card(1, "Fireball")),
+        FakeAudioIndex("ready", ""),
+        SoundsMenuHolder(),
+    )
+    silent.press(Chord("l"))
+    assert silent.nav.stack == ("Home",)
+    assert silent.speech.calls[-1] == ("Fireball: no sounds", True)
+
+    ready_sounds = SoundsMenuHolder()
+    ready = make_harness(
+        database(card(1, "Fireball")),
+        FakeAudioIndex("ready", "", [CardClip("Play", "key")]),
+        ready_sounds,
+    )
+    ready.press(Chord("l"))
+    assert ready.nav.stack == ("Home", "Sounds menu")
+    assert ready_sounds.get().card_name == "Fireball"
 
 
 def current_names(harness: Harness) -> list[str]:

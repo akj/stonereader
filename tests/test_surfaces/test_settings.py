@@ -25,7 +25,16 @@ class Backend:
         return True
 
 
-def make_settings(tmp_path: Path, install: Path | None):
+class FakeAudioStatus:
+    def __init__(self, status: str) -> None:
+        self.status = status
+
+
+def make_settings(
+    tmp_path: Path,
+    install: Path | None,
+    audio_status: FakeAudioStatus | None = None,
+):
     speech = FakeSpeech()
     announcer = Announcer(speech)
     sink = _SinkCore(announcer, lambda: None)
@@ -51,6 +60,7 @@ def make_settings(tmp_path: Path, install: Path | None):
             sink,
             holder,
             hotkeys,
+            audio_index=audio_status,
             install_detector=lambda _custom: install,
             log_detector=lambda _install: None,
         ),
@@ -62,6 +72,30 @@ def make_settings(tmp_path: Path, install: Path | None):
     )
     nav.jump("Settings")
     return nav, sink, speech, store, hotkeys, nav._surfaces["Settings"]
+
+
+def test_volume_availability_follows_channel_status_not_path_detection(
+    tmp_path: Path,
+) -> None:
+    install = tmp_path / "Hearthstone"
+    install.mkdir()
+    _nav, _sink, _speech, _store, _hotkeys, surface = make_settings(
+        tmp_path,
+        install,
+        FakeAudioStatus("absent"),
+    )
+    assert surface.engine.options_snapshot()[0][1] == (
+        "Game audio volume, unavailable — no Hearthstone install found"
+    )
+
+    nav, sink, _speech, _store, _hotkeys, surface = make_settings(
+        tmp_path / "ready",
+        None,
+        FakeAudioStatus("ready"),
+    )
+    select(surface, sink, 1)
+    sink.handle_chord(Chord("enter"))
+    assert nav.stack[-1] == "Picker"
 
 
 def select(surface, sink: _SinkCore, index: int) -> None:

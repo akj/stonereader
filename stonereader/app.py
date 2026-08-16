@@ -16,6 +16,7 @@ from hearthstone.deckstrings import parse_deckstring
 
 from stonereader.db import get_connection, init_db
 from stonereader.models.game_state import GameState
+from stonereader.services._audio_player import AudioPlayer
 from stonereader.speech_service import SpeechService
 from stonereader.surfaces._deck_data import CurrentDeck, DeckData
 from stonereader.surfaces.cards import build_cards
@@ -37,6 +38,7 @@ from stonereader.surfaces.picker import PickerHolder, build_picker
 from stonereader.surfaces.replays import build_replays
 from stonereader.surfaces.replay_viewer import CurrentReplay, build_replay_viewer
 from stonereader.surfaces.settings import build_settings
+from stonereader.surfaces.sounds_menu import SoundsMenuHolder, build_sounds_menu
 from stonereader.surfaces.statistics import build_statistics
 from stonereader.ui import (
     ActiveSurface,
@@ -54,7 +56,7 @@ from stonereader.views.surface_panel import SurfacePanel
 class MainWindow(wx.Frame):
     """Top-level frame hosting the single input sink and active Surface."""
 
-    def __init__(self) -> None:
+    def __init__(self, audio_player: AudioPlayer) -> None:
         super().__init__(
             None,
             title="Home — StoneReader",
@@ -71,11 +73,12 @@ class MainWindow(wx.Frame):
         self._current_surface: ActiveSurface | None = None
         self._help_origin = HelpOrigin()
 
-        self._sink = InputSink(self, self._announcer, stop_audio=lambda: None)
+        self._audio_player = audio_player
+        self._sink = InputSink(self, self._announcer, stop_audio=audio_player.stop)
         self._nav = NavigationController(
             set_title=self.SetTitle,
             announcer=self._announcer,
-            stop_audio=lambda: None,
+            stop_audio=audio_player.stop,
             activate=self._activate_surface,
         )
         self._universal_bindings = [
@@ -211,16 +214,26 @@ class StoneReaderApp(wx.App):
     """Application entry point."""
 
     def OnInit(self) -> bool:  # noqa: N802 -- wx override
-        self._frame = MainWindow()
-        nav = self._frame.nav
-        speech = self._frame.speech
-        announcer = self._frame.announcer
-        db_conn = self._frame.db_conn
-
+        from stonereader.services._audio_index import AudioIndex
+        from stonereader.services._audio_player import WindowsMemoryBackend
         from stonereader.services._settings import SettingsStore
 
         settings = SettingsStore()
         self._settings = settings
+        audio_player = AudioPlayer(
+            WindowsMemoryBackend(),
+            lambda: settings.game_audio_volume,
+        )
+        audio_index = AudioIndex(settings)
+        self._audio_index = audio_index
+        self._audio_player = audio_player
+        audio_index.start()
+
+        self._frame = MainWindow(audio_player)
+        nav = self._frame.nav
+        speech = self._frame.speech
+        announcer = self._frame.announcer
+        db_conn = self._frame.db_conn
 
         # Load card database even while its Surface is staged as a placeholder.
         from stonereader.models.card import CardDatabase
@@ -234,6 +247,7 @@ class StoneReaderApp(wx.App):
         import_field = ImportDeckField()
         picker = PickerHolder()
         help_reference = CommandReferenceHolder()
+        sounds = SoundsMenuHolder()
 
         # --- Game Tracker (Phase 2) ---
         # Logging is bootstrapped exactly once in __main__.py. This per-launch
@@ -321,6 +335,8 @@ class StoneReaderApp(wx.App):
                 nav,
                 card_db,
                 self._frame._sink,
+                audio_index=audio_index,
+                sounds=sounds,
             )
 
         def live_game_factory() -> ActiveSurface:
@@ -338,6 +354,8 @@ class StoneReaderApp(wx.App):
                 nav,
                 deck_data,
                 current_deck,
+                audio_index=audio_index,
+                sounds=sounds,
             )
 
         def import_deck_factory() -> ActiveSurface:
@@ -367,6 +385,10 @@ class StoneReaderApp(wx.App):
                 self._frame.universal_bindings,
                 nav,
                 current_replay,
+                audio_index=audio_index,
+                player=audio_player,
+                replay_autoplay=lambda: settings.replay_autoplay,
+                sounds=sounds,
             )
 
         def import_replays_factory() -> ActiveSurface:
@@ -395,6 +417,17 @@ class StoneReaderApp(wx.App):
                 self._frame._sink,
                 picker,
                 hotkey_map,
+                audio_index=audio_index,
+            )
+
+        def sounds_menu_factory() -> ActiveSurface:
+            return build_sounds_menu(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                sounds,
+                audio_index,
+                audio_player,
             )
 
         def picker_factory() -> ActiveSurface:
@@ -457,6 +490,7 @@ class StoneReaderApp(wx.App):
         nav.register("Import Replays", import_replays_factory)
         nav.register("Statistics", statistics_factory)
         nav.register("Settings", settings_factory)
+        nav.register("Sounds menu", sounds_menu_factory)
         nav.register("Picker", picker_factory)
         nav.register("Global hotkeys", global_hotkeys_factory)
         nav.register("Help menu", help_factory)

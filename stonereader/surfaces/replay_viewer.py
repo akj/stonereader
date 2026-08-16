@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from typing import Protocol
+
 from stonereader.models.game_state import GameEntity, GameState, Hero, PlayedCard
 from stonereader.models.replay import ReplayState
 from stonereader.services._event_phrases import phrase
@@ -13,9 +15,14 @@ from stonereader.services._events import (
     CardPlayed,
     CardRemoved,
     CardRevealed,
+    GameEnded,
     GameEvent,
     MinionDied,
+    SecretPlayed,
+    SecretRevealed,
+    TurnChanged,
 )
+from stonereader.surfaces._game_audio import CardAudioIndex, open_sounds_for_card
 from stonereader.surfaces._replay_turns import TurnView, turns
 from stonereader.surfaces._zone_format import (
     CardItem,
@@ -25,6 +32,7 @@ from stonereader.surfaces._zone_format import (
     hero_detail_lines,
     hero_title,
 )
+from stonereader.surfaces.sounds_menu import SoundsMenuHolder
 from stonereader.ui.announcer import Announcer
 from stonereader.ui.builder import build_active_surface
 from stonereader.ui.chords import Chord
@@ -60,7 +68,18 @@ class CurrentReplay:
 class _EventItem:
     event: GameEvent
     title: str
+    source_card_id: str | None
     source_title: str | None
+
+
+class ReplayAudioIndex(CardAudioIndex, Protocol):
+    def event_clip(self, card_id: str | None, kind: str) -> str | None: ...
+
+    def decode(self, clip_key: str) -> bytes: ...
+
+
+class ReplayAudioPlayer(Protocol):
+    def play(self, wav_bytes: bytes) -> None: ...
 
 
 def build_replay_viewer(
@@ -68,6 +87,11 @@ def build_replay_viewer(
     universal_bindings: list[tuple[Chord, Command]],
     nav: NavigationController,
     current_replay: CurrentReplay,
+    *,
+    audio_index: ReplayAudioIndex | None = None,
+    player: ReplayAudioPlayer | None = None,
+    replay_autoplay: Callable[[], bool] = lambda: True,
+    sounds: SoundsMenuHolder | None = None,
 ) -> ActiveSurface:
     """Build the lazy singleton Replay Viewer for the selected replay."""
     turn_index = 0
@@ -139,11 +163,13 @@ def build_replay_viewer(
         for event in current.events:
             title = phrase(event, current.state)
             if title is not None:
+                source_card_id, source_title = _event_source(event, current.state)
                 values.append(
                     _EventItem(
                         event,
                         title,
-                        _event_source_title(event, current.state),
+                        source_card_id,
+                        source_title,
                     )
                 )
         return values
@@ -168,6 +194,52 @@ def build_replay_viewer(
 
     def query(subject: str, value: str) -> None:
         announcer.query(subject, value)
+
+    def listen() -> None:
+        if engine is None or audio_index is None or sounds is None:
+            raise RuntimeError("Replay Viewer game-audio dependencies are not active")
+        zone_id = engine.current_zone().zone_id
+        current = engine.current_item()
+        if zone_id == "events" and isinstance(current, _EventItem):
+            open_sounds_for_card(
+                announcer,
+                nav,
+                audio_index,
+                sounds,
+                card_id=current.source_card_id,
+                card_name=current.source_title or "",
+                title=current.source_title or "No card focused",
+            )
+            return
+        card_zone_ids = {
+            "your_board",
+            "opponent_board",
+            "your_hand",
+            "opponent_hand",
+            "your_secrets",
+            "opponent_secrets",
+            "your_weapon",
+            "opponent_weapon",
+            "your_deck",
+            "your_played",
+            "opponent_played",
+            "your_drawn",
+            "opponent_drawn",
+        }
+        if zone_id not in card_zone_ids or current is None:
+            announcer.noop("No card focused")
+            return
+        card_id = getattr(current, "card_id", "")
+        name = card_name(current)
+        open_sounds_for_card(
+            announcer,
+            nav,
+            audio_index,
+            sounds,
+            card_id=card_id or None,
+            card_name=name,
+            title=engine.current_zone().title(current),
+        )
 
     zones = [
         _card_zone("your_board", "Your board", "b", "B: your minions", card_items("player_board")),
@@ -246,14 +318,64 @@ def build_replay_viewer(
         context_label=context_label,
         zones=zones,
         bindings=bindings,
-        slot_fills={Slot.COARSE_AXIS: forward_turn},
         slot_reverse_fills={Slot.COARSE_AXIS: reverse_turn},
-        slot_noops={Slot.LISTEN: "Game audio is not available"},
+        slot_fills={
+            Slot.COARSE_AXIS: forward_turn,
+            **(
+                {
+                    Slot.LISTEN: Command(
+                        "replay.listen",
+                        "L: listen to this card's sounds",
+                        listen,
+                    )
+                }
+                if audio_index is not None and sounds is not None
+                else {}
+            ),
+        },
+        slot_noops=(
+            {}
+            if audio_index is not None and sounds is not None
+            else {Slot.LISTEN: "Game audio is not available"}
+        ),
     )
     surface = build_active_surface(spec, announcer, universal_bindings, nav)
     if not isinstance(surface.engine, HorizontalListEngine):
         raise TypeError("Replay Viewer requires a horizontal-list engine")
     engine = surface.engine
+
+    last_transition = (engine.current_zone().zone_id, engine.items_snapshot()[1])
+
+    def autoplay_on_cursor_transition() -> None:
+        nonlocal last_transition
+        if engine is None:
+            return
+        transition = (engine.current_zone().zone_id, engine.items_snapshot()[1])
+        if transition == last_transition:
+            return
+        last_transition = transition
+        if (
+            transition[0] != "events"
+            or audio_index is None
+            or player is None
+            or not replay_autoplay()
+            or audio_index.status != "ready"
+        ):
+            return
+        current = engine.current_item()
+        if not isinstance(current, _EventItem):
+            return
+        kind = _event_audio_kind(current.event)
+        if kind is None:
+            return
+        clip_key = audio_index.event_clip(current.source_card_id, kind)
+        if clip_key is None:
+            return
+        wav_bytes = audio_index.decode(clip_key)
+        if wav_bytes:
+            player.play(wav_bytes)
+
+    engine.subscribe(autoplay_on_cursor_transition)
     current_replay.bind_viewer_reset(reset_for_new_replay)
     return surface
 
@@ -278,7 +400,10 @@ def _card_zone(
         help_phrase,
     )
 
-def _event_source_title(event: GameEvent, state: GameState) -> str | None:
+def _event_source(
+    event: GameEvent,
+    state: GameState,
+) -> tuple[str | None, str | None]:
     entity_id: int | None = None
     if isinstance(event, AttackStarted):
         entity_id = event.attacker_entity_id
@@ -287,13 +412,37 @@ def _event_source_title(event: GameEvent, state: GameState) -> str | None:
         (CardDrawn, CardPlayed, CardRevealed, CardRemoved, MinionDied),
     ):
         entity_id = event.entity_id
-    if entity_id is None:
-        return None
-    for item in _state_cards(state):
-        if item is not None and item.entity_id == entity_id:
-            return card_name(item) or None
-    name = getattr(event, "name", "")
-    return name or None
+    direct_card_id = getattr(event, "card_id", "") or None
+    direct_name = getattr(event, "name", "") or None
+    if entity_id is not None:
+        for item in _state_cards(state):
+            if item is not None and item.entity_id == entity_id:
+                return item.card_id or direct_card_id, card_name(item) or direct_name
+    base_card = getattr(event, "base_card", None)
+    if base_card is not None:
+        direct_name = direct_name or base_card.name
+    return direct_card_id, direct_name
+
+
+def _event_audio_kind(event: GameEvent) -> str | None:
+    if isinstance(event, CardPlayed):
+        return "play"
+    if isinstance(event, AttackStarted):
+        return "attack"
+    if isinstance(event, MinionDied):
+        return "minion_death"
+    if isinstance(event, CardDrawn):
+        return "draw"
+    if isinstance(event, TurnChanged):
+        return "turn"
+    if isinstance(event, (SecretPlayed, SecretRevealed)):
+        return "secret"
+    if isinstance(event, GameEnded):
+        if event.player_playstate == "WON":
+            return "victory"
+        if event.player_playstate == "LOST":
+            return "defeat"
+    return None
 
 
 def _state_cards(state: GameState) -> Iterable[GameEntity | PlayedCard | None]:

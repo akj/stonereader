@@ -34,6 +34,11 @@ class SettingsSink(Protocol):
     def exit_text_mode(self) -> None: ...
 
 
+class AudioChannelStatus(Protocol):
+    @property
+    def status(self) -> str: ...
+
+
 _NO_INSTALL = "unavailable — no Hearthstone install found"
 _ROW_IDS = (
     "narration",
@@ -56,6 +61,7 @@ def build_settings(
     picker: PickerHolder,
     hotkeys: HotkeyMap,
     *,
+    audio_index: AudioChannelStatus | None = None,
     install_detector: Callable[[Path | None], Path | None] = detect_install,
     log_detector: Callable[[Path | None], Path | None] = discover_power_log_path,
 ) -> ActiveSurface:
@@ -72,12 +78,16 @@ def build_settings(
             return store.hs_log_path
         return log_detector(effective_install())
 
+    def audio_available() -> bool:
+        if audio_index is not None:
+            return audio_index.status != "absent"
+        return effective_install() is not None
+
     def narration_title() -> str:
         return f"Narration, {store.narration.replace('_', ' ')}"
 
     def volume_title() -> str:
-        install = effective_install()
-        value = str(store.game_audio_volume) if install is not None else _NO_INSTALL
+        value = str(store.game_audio_volume) if audio_available() else _NO_INSTALL
         return f"Game audio volume, {value}"
 
     def autoplay_title() -> str:
@@ -120,7 +130,7 @@ def build_settings(
         )
 
     def edit_volume() -> None:
-        if effective_install() is None:
+        if not audio_available():
             announcer.noop(volume_title())
             return
         open_picker(
