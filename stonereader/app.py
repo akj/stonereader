@@ -17,6 +17,7 @@ from hearthstone.deckstrings import parse_deckstring
 from stonereader.db import get_connection, init_db
 from stonereader.speech_service import SpeechService
 from stonereader.surfaces._deck_data import CurrentDeck, DeckData
+from stonereader.surfaces.cards import build_cards
 from stonereader.surfaces.deck_detail import build_deck_detail
 from stonereader.surfaces.decks import build_decks
 from stonereader.surfaces.home import build_home
@@ -237,12 +238,13 @@ class StoneReaderApp(wx.App):
             self._recorder.on_reset,
         )
 
-        names = ("Live Game", "Cards", "Replays", "Settings")
+        names = ("Live Game", "Replays", "Settings")
         targets: dict[str, Callable[[], None]] = {
             name: lambda name=name: announcer.noop(f"{name}: not yet migrated")
             for name in names
         }
         targets["Decks"] = lambda: nav.jump("Decks")
+        targets["Cards"] = lambda: nav.jump("Cards")
 
         def home_factory() -> ActiveSurface:
             return build_home(
@@ -262,6 +264,15 @@ class StoneReaderApp(wx.App):
                 current_deck,
                 self._frame._sink,
                 _copy_to_clipboard,
+            )
+
+        def cards_factory() -> ActiveSurface:
+            return build_cards(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                card_db,
+                self._frame._sink,
             )
 
         def deck_detail_factory() -> ActiveSurface:
@@ -285,6 +296,7 @@ class StoneReaderApp(wx.App):
             )
 
         nav.register("Home", home_factory)
+        nav.register("Cards", cards_factory)
         nav.register("Decks", decks_factory)
         nav.register("Deck detail", deck_detail_factory)
         nav.register("Import Deck", import_deck_factory)
@@ -297,6 +309,24 @@ class StoneReaderApp(wx.App):
         nav.jump("Home")
 
         self._frame.Show()
+
+        # Register only this chunk's hotkey after Show() so Win32 has a handle.
+        from stonereader.services._global_hotkey import GlobalHotkeyService
+
+        self._hotkeys = GlobalHotkeyService(self._frame)
+        self._frame._hotkeys = self._hotkeys  # type: ignore[attr-defined]
+        self._hotkeys.register(
+            wx.MOD_CONTROL | wx.MOD_SHIFT,
+            ord("C"),
+            lambda: nav.jump("Cards"),
+            "Cards",
+        )
+        if self._hotkeys.failed:
+            speech.speak(
+                "Could not register hotkeys: "
+                + ", ".join(self._hotkeys.failed)
+                + "."
+            )
 
         # Start after Show() so wx.Timer cannot fire before the visible frame's
         # message loop is ready.

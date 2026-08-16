@@ -93,7 +93,7 @@ class CommandRegistry:
             layer: [] for layer in Layer
         }
         self._surface_order: list[tuple[Chord, Command]] = []
-        self._slot_fills: dict[Slot, Command] = {}
+        self._slot_fills: dict[Slot, dict[Chord, Command]] = {}
         self._slot_noops: dict[Slot, str] = {}
         items: Iterable[tuple[Chord, Command]]
         if isinstance(universal_bindings, Mapping):
@@ -138,11 +138,23 @@ class CommandRegistry:
         for chord in _RESERVED_BACK:
             self._store(Layer.UNIVERSAL, chord, command)
 
-    def fill_slot(self, slot: Slot, command: Command) -> None:
-        """Fill one universal slot with real Surface behavior."""
+    def fill_slot(
+        self,
+        slot: Slot,
+        command: Command,
+        reverse_command: Command | None = None,
+    ) -> None:
+        """Fill one universal slot, optionally distinguishing its reverse chord.
+
+        Group jump orders Tab forward then Shift+Tab reverse. Coarse axis is
+        declared PageUp then PageDown, so PageUp is reverse and PageDown forward.
+        All other slots have one chord and ignore directional ordering.
+        """
         self._ensure_slot_unfilled(slot)
-        self._slot_fills[slot] = command
-        self._surface_order.extend((chord, command) for chord in SLOT_CHORDS[slot])
+        reverse = command if reverse_command is None else reverse_command
+        commands = _slot_commands(slot, command, reverse)
+        self._slot_fills[slot] = dict(zip(SLOT_CHORDS[slot], commands, strict=True))
+        self._surface_order.extend(zip(SLOT_CHORDS[slot], commands, strict=True))
 
     def fill_slot_noop(self, slot: Slot, phrase: str) -> None:
         """Override a slot default with a Surface-specific announced no-op."""
@@ -157,7 +169,7 @@ class CommandRegistry:
         """Resolve and execute one normalized chord."""
         slot = _SLOT_BY_CHORD.get(chord)
         if slot is not None:
-            command = self._slot_fills.get(slot)
+            command = self._slot_fills.get(slot, {}).get(chord)
             if command is not None:
                 command.handler()
                 return DispatchResult(handled=True)
@@ -198,6 +210,18 @@ class CommandRegistry:
 
 def _precedence(layer: Layer) -> int:
     return tuple(Layer).index(layer)
+
+
+def _slot_commands(
+    slot: Slot,
+    command: Command,
+    reverse_command: Command,
+) -> tuple[Command, ...]:
+    if slot is Slot.GROUP_JUMP:
+        return (command, reverse_command)
+    if slot is Slot.COARSE_AXIS:
+        return (reverse_command, command)
+    return (command,)
 
 
 def _do_nothing() -> None:

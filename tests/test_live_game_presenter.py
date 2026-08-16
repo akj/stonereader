@@ -61,7 +61,7 @@ def _make_card(
 
 
 def _make_card_db(cards: List[Card]) -> CardDatabase:
-    """Mirrors tests/test_card_browser.py:42-54 — bare ctor + index-mutate."""
+    """Build the indexed card database needed by these presenter tests."""
     db = CardDatabase()
     for card in cards:
         db.cards_by_id[card.id] = card

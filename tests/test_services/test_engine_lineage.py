@@ -27,9 +27,9 @@ from stonereader.services._packets import (
 from stonereader.services._parser import Parser
 
 
-# ----- Helpers (mirror tests/test_card_browser.py:13-54) -----
+# ----- Card fixture helpers -----
 
-_next_dbf_id = 1000  # avoid collision with test_card_browser's counter
+_next_dbf_id = 1000
 
 
 def _make_card(
@@ -59,7 +59,7 @@ def _make_card(
 
 
 def _make_card_db(cards: list[Card]) -> CardDatabase:
-    """Mirrors tests/test_card_browser.py:42-54 — bare ctor + mutate indexes."""
+    """Build the indexed card database needed by these lineage tests."""
     db = CardDatabase()
     for card in cards:
         db.cards_by_id[card.id] = card

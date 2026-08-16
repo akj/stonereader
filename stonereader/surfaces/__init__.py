@@ -1,6 +1,7 @@
 """Declarative application Surface definitions (ADR-0010)."""
 
 from stonereader.surfaces._deck_data import CurrentDeck, DeckData
+from stonereader.surfaces.cards import build_cards
 from stonereader.surfaces.deck_detail import build_deck_detail
 from stonereader.surfaces.decks import build_decks
 from stonereader.surfaces.home import build_home
@@ -11,6 +12,7 @@ __all__ = [
     "DeckData",
     "ImportDeckField",
     "build_deck_detail",
+    "build_cards",
     "build_decks",
     "build_home",
     "build_import_deck",

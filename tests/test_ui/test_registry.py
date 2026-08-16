@@ -66,6 +66,32 @@ def test_every_slot_can_be_filled(slot: Slot) -> None:
     assert calls == [slot.name] * len(SLOT_CHORDS[slot])
 
 
+@pytest.mark.parametrize(
+    ("slot", "forward_chord", "reverse_chord"),
+    [
+        (Slot.GROUP_JUMP, Chord("tab"), Chord("tab", shift=True)),
+        (Slot.COARSE_AXIS, Chord("pagedown"), Chord("pageup")),
+    ],
+)
+def test_directional_slots_dispatch_forward_and_reverse_commands(
+    slot: Slot,
+    forward_chord: Chord,
+    reverse_chord: Chord,
+) -> None:
+    calls: list[str] = []
+    registry = CommandRegistry()
+    registry.fill_slot(
+        slot,
+        command("forward", calls),
+        command("reverse", calls),
+    )
+
+    registry.dispatch(forward_chord)
+    registry.dispatch(reverse_chord)
+
+    assert calls == ["forward", "reverse"]
+
+
 def test_surface_specific_slot_noop_overrides_default() -> None:
     registry = CommandRegistry()
     registry.fill_slot_noop(Slot.LISTEN, "No game audio during a live game")

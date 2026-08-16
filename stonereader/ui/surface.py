@@ -51,6 +51,7 @@ class SurfaceSpec:
     zones: list[ZoneSpec] = field(default_factory=list)
     bindings: list[Binding] = field(default_factory=list)
     slot_fills: dict[Slot, Command] = field(default_factory=dict)
+    slot_reverse_fills: dict[Slot, Command] = field(default_factory=dict)
     slot_noops: dict[Slot, str] = field(default_factory=dict)
     display_name: Callable[[], str] | None = None
 
@@ -81,3 +82,6 @@ class SurfaceSpec:
         overlapping_slots = self.slot_fills.keys() & self.slot_noops.keys()
         if overlapping_slots:
             raise ValueError("A slot cannot be both filled and an announced no-op")
+        orphaned_reverse_slots = self.slot_reverse_fills.keys() - self.slot_fills.keys()
+        if orphaned_reverse_slots:
+            raise ValueError("A reverse slot command requires a forward slot command")

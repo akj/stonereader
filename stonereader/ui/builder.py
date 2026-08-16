@@ -41,7 +41,7 @@ def build_active_surface(
     for binding in spec.bindings:
         registry.register(Layer.SURFACE, binding.chord, binding.command)
     for slot, command in spec.slot_fills.items():
-        registry.fill_slot(slot, command)
+        registry.fill_slot(slot, command, spec.slot_reverse_fills.get(slot))
     for slot, phrase in spec.slot_noops.items():
         registry.fill_slot_noop(slot, phrase)
 
