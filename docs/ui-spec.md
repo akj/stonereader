@@ -3,7 +3,7 @@
 ## Purpose
 
 This is the per-surface specification implementation PRDs open against. It folds
-every decision locked in ADR-0003 through ADR-0012 into one document: the
+every decision locked in ADR-0003 through ADR-0014 into one document: the
 cross-cutting contracts every **Surface** obeys, and then, for each Surface, its
 **Widget type**, its stack behavior, its window title and **Context-entry
 utterance**, its rows or **zones** and their detail lines, its complete key
@@ -12,12 +12,12 @@ audio**, and Settings behavior. Nothing here is argued — every normative
 statement cites the ADR that decided it. A PRD written against a section of this
 document should have nothing left to decide except code.
 
-**Status:** Draft, assembled 2026-08-15 against ADR-0003…0012, amended
-2026-08-16 for ADR-0013 (wayfinder map
-[#17](https://github.com/akj/stonereader/issues/17), tickets #28 and #34).
-Final except the one [Open question](#open-questions) — the prompt construct
-([#35](https://github.com/akj/stonereader/issues/35)). Every other section is
-normative and PRD-ready. Nothing here ships code by itself.
+**Status:** Final, assembled 2026-08-15 against ADR-0003…0012, amended
+2026-08-16 for ADR-0013 and ADR-0014 (wayfinder map
+[#17](https://github.com/akj/stonereader/issues/17), tickets #28, #34, and
+[#35](https://github.com/akj/stonereader/issues/35)). No open questions
+remain: every section is normative and PRD-ready. Nothing here ships code by
+itself.
 
 Where an ADR left a detail to the per-surface spec, or where two ADRs could be
 read against each other, this document rules and says so inline ("this spec's
@@ -38,6 +38,7 @@ ruling"). A ruling is as binding as an ADR citation.
 | [0011](adr/0011-settings-surface.md) | Settings surface, **Narration preset**, **Picker** idiom, **Capture mode**, global-hotkey rebinding, persistence and defaults |
 | [0012](adr/0012-deck-replay-statistics-surface.md) | **Stats corpus** membership, deck attribution, win-rate formula, the Statistics surface |
 | [0013](adr/0013-live-game-current-state-full-dialect.md) | Live Game: full replay dialect current-state only, no **Live game timeline**, draw-chance line, bare labels |
+| [0014](adr/0014-how-stonereader-asks.md) | Asking: the closed idiom inventory, the **Offer** and Ctrl+Enter, OS-dialog delegation, replay import |
 
 ADR-0001 (Power.log over memory reading) and ADR-0002 (state-only prev/curr
 dispatch) govern the data pipeline below this spec and are not restated here.
@@ -152,7 +153,9 @@ and unbuilt.
 
 Navigation, **Text mode**, and **Capture mode** are the only three input states;
 there is no fourth. Each is entered only by an explicit act and each has a
-no-commit exit (ADR-0011).
+no-commit exit (ADR-0011). An armed **Offer** is a pending flag inside
+navigation state — exactly as armed delete is — not a fourth input state
+(ADR-0014).
 
 | State | Entered by | Commit | Abandon |
 |---|---|---|---|
@@ -166,6 +169,50 @@ ends of the field (ADR-0004 as refined by ADR-0011). F1 works in Text mode and
 speaks the rescue without leaving the field: "Typing in {field}. Enter commits,
 Escape cancels." (ADR-0009). Text mode is owned by the input layer, not by any
 Surface (ADR-0010).
+
+## Asking
+
+**StoneReader never invents a dialog and never asks unsolicited** (ADR-0014).
+OS-owned questions are delegated to OS-native dialogs; StoneReader's own
+questions are expressed in the existing grammar. The inventory of asking
+idioms is closed — there is no fifth (ADR-0014):
+
+| Idiom | Question shape | Where it lives |
+|---|---|---|
+| **Confirm** | "Are you sure?" — press the same key again | Armed delete (ADR-0004); single-modifier chord warning (ADR-0011) |
+| **Offer** | Unsolicited proposition — accept by dedicated chord, ignore for free | ADR-0014; below |
+| **Form field** | A parameter with a default — the question dissolves | [Import Replays](#import-replays)' stats toggle (ADR-0014) |
+| **Picker** | Solicited choice among values | ADR-0011 |
+
+**The Offer.** An **Offer** is an ephemeral Lane-1 announcement that arms a
+single dedicated accept chord: **Ctrl+Enter**, bound to nothing else anywhere
+in the app, so acceptance is always deliberate and no surface key is ever
+shadowed (ADR-0014). Lifetime rules (ADR-0014):
+
+1. An Offer arms **only in navigation state**. If its trigger fires during
+   Text or Capture mode, the Offer is dropped, not queued.
+2. **Any keypress other than Ctrl+Enter disarms it silently** and does its own
+   normal work — declining costs zero keypresses and no speech.
+3. With no Offer armed, Ctrl+Enter is an ordinary unbound non-universal chord:
+   silent (ADR-0004).
+4. An Offer fires **once per unique subject** — re-triggering on the same
+   subject does not re-offer.
+5. The announcement names the chord as a spoken word sequence (ADR-0011):
+   "… — press Control Enter to …".
+
+Ctrl+Enter is therefore a reserved app-wide chord no Surface may bind; Capture
+mode's already-bound refusal covers it — "Control Enter is taken by Accept
+offer" (ADR-0014). The one v1 Offer is the
+[clipboard deckstring offer](#navigation-stack-window-title-topology).
+
+**OS delegation.** The dialog ban is on *invention*, not on modality: for a
+question the OS already owns, StoneReader delegates to the OS-native dialog —
+standard Windows UI the audience drives fluently every day (ADR-0014). This is
+the third delegation of its kind: speech exits via the User's screen reader
+(ADR-0008), game history stays in the client (ADR-0013), files belong to the
+OS. The one v1 user is [Import Replays](#import-replays)' multi-select file
+dialog; a delegated OS dialog is accepted as OS-owned UI, the same way the
+screen reader owns speech (ADR-0014).
 
 ## Announcement grammar
 
@@ -276,12 +323,19 @@ the jump says so, the active zone changes because the command says so, and every
 zone's own cursor still persists (ADR-0006, ADR-0007).
 
 **Clipboard deckstring offer.** On window activation with a deckstring on the
-clipboard — on whichever Surface the User is standing — StoneReader announces an
-offer ("Deck code on clipboard — press Enter to import") and never pushes a
-Surface; accepting drills into Import Deck with the code pre-filled (ADR-0006).
-This preserves the invariant that the User always chose to be here. How the
-offer holds Enter, which every Surface already binds, is an
-[open question (#35)](#prompt-construct-how-stonereader-asks-the-user-a-question).
+clipboard — on whichever Surface the User is standing — StoneReader arms an
+**Offer**: "Deck code on clipboard — press Control Enter to import"
+(ADR-0014, amending ADR-0006's "press Enter" wording). It never pushes a
+Surface; **accepting resets the stack to `[Home, Decks, Import Deck]`** with
+the code pre-filled — neither a pure jump nor a pure drill-down, ruled as a
+reset because route invariance is the design's spine: accepting always lands
+the same place, and back pops to Decks, where the imported deck will be
+(ADR-0014, ADR-0006). This preserves the invariant that the User always chose
+to be here. The Offer's unique subject is the clipboard content (the shipped
+same-content guard is kept), and **StoneReader's own copies write that
+guard** — C on Decks never leads to an offer to import the code the app just
+handed you (ADR-0014). The shipped `wx.MessageDialog` clipboard modal is
+retired, along with the `restore_focus` hack's motivating case (ADR-0014).
 
 ## Game audio channel
 
@@ -624,8 +678,9 @@ exists; decks enter the app by import and leave it by delete.
 fields and actions (ADR-0004).
 
 **Reached and left:** Drill-down from Decks ("Import deck…"), or by accepting
-the Home clipboard offer with the code pre-filled. Back pops one level to Decks;
-so does a completed import, where the new deck is (ADR-0006).
+the clipboard **Offer**, which resets the stack to `[Home, Decks, Import
+Deck]` with the code pre-filled (ADR-0014). Either way back pops one level to
+Decks; so does a completed import, where the new deck is (ADR-0006).
 
 **Window title:** `Import Deck — StoneReader` (ADR-0006).
 **Entry utterance:** `"Import Deck, {current option}"` (ADR-0007). The Surface
@@ -748,13 +803,19 @@ system-wide hotkey Ctrl+Shift+R. Back goes Home (ADR-0006).
 
 **Rows:** finished games, **most recent first** — *this spec's decision*; row
 order is per-surface spec territory, and ADR-0012's most-recently-played
-ordering on Statistics is the precedent. Title
+ordering on Statistics is the precedent — then the action row **"Import
+replays…"** last, the Decks action-row idiom: the flow ends where its results
+appear (ADR-0014).
+
+*Replay rows* — title
 `"{Result} versus {Opponent class}, {n} turns"` — ADR-0007 names this Surface as
 the case where "a replay row needs opponent/result/turn because bare names would
 all sound alike". Lines: 1 `"{Date}, {time}"`; 2 `"Played {Deck name}"` or
 `"Deck not detected"` (ADR-0012's attribution); 3 `"{Game type}, {Format}"`;
 4 `"Counted in stats"` / `"Not counted"` — membership shows as a detail line,
 never in the title (ADR-0012); 5 `"Live recorded"` / `"Imported"`.
+
+*Action row* — title is the row label; no detail lines. Enter drills down.
 
 **Keys**
 
@@ -763,7 +824,7 @@ never in the title (ADR-0012); 5 `"Live recorded"` / `"Imported"`.
 | Left / Right | Previous / next replay | Widget-type layer (ADR-0004) |
 | Up / Down | Previous / next detail line | Widget-type layer (ADR-0004) |
 | Home / End | First / last replay | Universal layer (ADR-0004) |
-| Enter | Open this replay in the Replay Viewer | "Enter: open this replay" (ADR-0006's drill-down) |
+| Enter | Open this replay in the Replay Viewer; on the action row, drill into Import Replays | "Enter: open this replay" (ADR-0006's drill-down, ADR-0014) |
 | Space | Count this game in your stats, or stop counting it | "Space: count this game in your stats" (ADR-0012) |
 | Delete | Arm delete, then delete on the second press | "Delete: delete this replay, press twice" (ADR-0004) |
 | Shift+Delete | Delete without confirmation | "Shift+Delete: delete this replay without asking" (ADR-0004) |
@@ -781,10 +842,50 @@ events zone and on the listen key).
 **Settings that affect it:** Replay retention (Unlimited or the last 100 / 500 /
 1000 games, pruned oldest-first on write) (ADR-0011).
 
-**Replay import** — the flow ADR-0012 assumes exists, including its
-once-per-batch stats question — has no door, no widget, and no shipped UI at
-all: an
-[open question (#35)](#prompt-construct-how-stonereader-asks-the-user-a-question).
+### Import Replays
+
+**Widget type:** Vertical menu — a form is a vertical menu whose options are
+fields and actions (ADR-0004, ADR-0014).
+
+**Reached and left:** Drill-down from Replays ("Import replays…"); back pops
+one level to Replays. So does a completed import, where the imported replays
+are (ADR-0014).
+
+**Window title:** `Import Replays — StoneReader` (ADR-0006's template).
+**Entry utterance:** `"Import Replays, {current option}"` (ADR-0007). The
+Surface never lands the User in Text mode on entry (ADR-0004).
+
+**Options,** in order (ADR-0014):
+
+1. `"Choose files, none chosen"`, becoming `"Choose files, {n} files chosen"`
+   — Enter opens the OS-native file dialog, multi-select, filtered to
+   `.hsreplay`/`.xml`; the dialog's Cancel is the idiom's no-commit exit. The
+   file field is ADR-0011's fifth value type: its editor is a delegated OS
+   dialog (ADR-0014).
+2. `"Count in stats, off"` — an ADR-0011 toggle, default off (ADR-0012's
+   imported-out default), applied to this batch. ADR-0012's once-per-batch
+   stats question is never asked: it dissolved into a visible, revisitable
+   field with the right default (ADR-0014).
+3. `"Import"` — the action. With nothing chosen it refuses with an
+   announcement ("No files chosen") — ADR-0011's refused-commit shape.
+
+**Keys**
+
+| Key | Command | Spoken help phrase |
+|---|---|---|
+| Up / Down | Previous / next option | Widget-type layer (ADR-0004) |
+| Enter | On Choose files, open the file dialog; on the toggle, flip it; on Import, import the chosen files | "Enter: edit this field, or run this action" |
+| Escape / Backspace | Back | Universal layer (ADR-0004); the OS dialog's own Escape belongs to the OS dialog |
+| Home / End | First / last option | Universal layer (ADR-0004) |
+| PageUp / PageDown, Tab / Shift+Tab, Ctrl+F, L | Announced no-op | Slot defaults (ADR-0010) |
+
+**Speech:** Completion pops back to Replays: a verb-past confirmation followed
+by the re-entry utterance (ADR-0007), speaking only nonzero parts —
+`"{n} imported"`, appending `", {d} already in Replays"` (the store dedupes by
+content hash) and `", {f} failed"` only when nonzero (ADR-0014, ADR-0012's
+only-when-nonzero economy).
+
+**Audio:** None.
 
 ---
 
@@ -1043,6 +1144,7 @@ hatch; nothing on this Surface has hidden staged state.
 | Choice, Volume | Drills into a **Picker** — a vertical menu of the values with the cursor on the current one; Enter selects and pops back, re-announcing the parent row; back exits without change |
 | Path | Enters **Text mode** on the field; Enter commits with validation announced (an invalid path refuses commit and keeps the previous value); Escape abandons |
 | Chord | Enters **Capture mode** |
+| File | Opens the delegated OS-native file dialog; the dialog's Cancel is the no-commit exit (ADR-0014's fifth value type) — no Settings row uses it in v1; its one user is [Import Replays](#import-replays)' Choose files |
 
 **Keys**
 
@@ -1125,6 +1227,9 @@ Acceptance policy (ADR-0011):
 | Two or more modifiers | Binds directly |
 | Already bound inside StoneReader | Refused with its owner named: "Ctrl Shift C is taken by Jump to Cards" |
 | OS registration fails | Failure announced; the previous binding is kept |
+
+The reserved **Offer** chord refuses the same way: "Control Enter is taken by
+Accept offer" (ADR-0014).
 
 **Keys**
 
@@ -1261,24 +1366,9 @@ arrowing inside the menu does not (ADR-0008).
 
 # Open questions
 
-One question remains open. Everything else in this document is normative and
-PRD-ready; a PRD touching the area below waits on its ticket.
-
-## Prompt construct: how StoneReader asks the User a question
-
-**Ticket: [akj/stonereader#35](https://github.com/akj/stonereader/issues/35)**
-
-Three decided behaviors need a way to ask the User a question that is neither a
-Surface nor an input state, and the model has no such construct. The
-**clipboard deckstring offer** (ADR-0006) fires on window activation on any
-Surface and asks the User to press Enter — but Enter is a surface-owned slot
-(ADR-0004, ADR-0010) already bound everywhere, and ADR-0011 closes the input
-model at exactly three states with no "offer pending" among them. The
-**replay-import flow** (ADR-0012) is assumed to exist and to ask once per batch
-("Count these N games in your stats?"), but it has no door, no widget type, and
-no shipped UI at all — `ReplayStore.import_file()` has no caller outside tests
-and the package contains no file dialog. And the general case: the two-widget
-model (ADR-0004) plus the three-input-state model (ADR-0011) leave nowhere for a
-question to live, while ADR-0004 rejected modal dialogs outright. Either these
-behaviors are re-expressed in the existing grammar or the model gains a
-construct — an ADR-level decision, not a PRD one.
+None. The last one — the prompt construct, how StoneReader asks the User a
+question ([#35](https://github.com/akj/stonereader/issues/35)) — was resolved
+by ADR-0014 and is folded in above: the closed
+[asking-idiom inventory](#asking), the restated
+[clipboard offer](#navigation-stack-window-title-topology), and
+[Import Replays](#import-replays).
