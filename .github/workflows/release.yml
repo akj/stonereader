@@ -1,0 +1,40 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: |
+          $ErrorActionPreference = 'Stop'
+          $tagVersion = $env:GITHUB_REF_NAME -replace '^v', ''
+          $pyprojectVersion = & uv run python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])'
+          if ($LASTEXITCODE -ne 0) {
+              throw "Failed to read the version from pyproject.toml (uv exited with code $LASTEXITCODE)."
+          }
+          $pyprojectVersion = $pyprojectVersion.Trim()
+          if ($tagVersion -ne $pyprojectVersion) {
+              throw "Tag v$tagVersion does not match pyproject version $pyprojectVersion"
+          }
+        shell: pwsh
+      - id: build
+        run: pwsh packaging/build.ps1 -Installer
+        shell: pwsh
+      - run: pwsh packaging/smoke.ps1 -ExePath dist/StoneReader/StoneReader.exe
+        shell: pwsh
+      - run: |
+          $version = '${{ steps.build.outputs.version }}'
+          gh release create "$env:GITHUB_REF_NAME" "dist/StoneReader-$version-Setup.exe" --title "StoneReader $version" --generate-notes
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}

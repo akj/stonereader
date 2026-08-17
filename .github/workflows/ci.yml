@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  checks:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run pyright
+      - run: uv run pytest -q
+
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+      - id: build
+        run: pwsh packaging/build.ps1 -Installer
+        shell: pwsh
+      - run: pwsh packaging/smoke.ps1 -ExePath dist/StoneReader/StoneReader.exe
+        shell: pwsh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: StoneReader-${{ steps.build.outputs.version }}-windows
+          path: dist/StoneReader/
+          retention-days: 7
+      - uses: actions/upload-artifact@v7
+        with:
+          name: StoneReader-${{ steps.build.outputs.version }}-Setup
+          path: dist/StoneReader-*-Setup.exe
+          retention-days: 7
