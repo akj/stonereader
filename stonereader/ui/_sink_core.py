@@ -60,8 +60,21 @@ class _SinkCore:
         self._capture_chord = None
         self._capture_escape = None
 
-    def arm_offer(self, subject: str, on_accept: Callable[[], None]) -> bool:
-        """Arm once per subject, and only in navigation state."""
+    def arm_offer(
+        self,
+        subject: str,
+        on_accept: Callable[[], None],
+        *,
+        resolicit: bool = False,
+    ) -> bool:
+        """Arm once per subject, and only in navigation state.
+
+        A solicited trigger (the User explicitly asked for the check that
+        produced this proposition) passes resolicit=True: ADR-0014's
+        once-per-subject rule governs unsolicited re-triggering only.
+        """
+        if resolicit:
+            self._seen_offer_subjects.discard(subject)
         if (
             self._text_session is not None
             or self._capture_chord is not None

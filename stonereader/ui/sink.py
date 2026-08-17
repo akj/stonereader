@@ -51,14 +51,24 @@ class InputSink:
     def exit_capture_mode(self) -> None:
         self._core.exit_capture_mode()
 
-    def arm_offer(self, subject: str, on_accept: Callable[[], None]) -> bool:
+    def arm_offer(
+        self,
+        subject: str,
+        on_accept: Callable[[], None],
+        *,
+        resolicit: bool = False,
+    ) -> bool:
         def accept_if_still_armed() -> None:
             if not self._offer_armed:
                 return
             self._offer_armed = False
             on_accept()
 
-        armed = self._core.arm_offer(subject, accept_if_still_armed)
+        armed = self._core.arm_offer(
+            subject,
+            accept_if_still_armed,
+            resolicit=resolicit,
+        )
         if armed:
             self._offer_armed = True
         return armed

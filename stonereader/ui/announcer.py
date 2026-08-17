@@ -144,8 +144,13 @@ class Announcer:
     def update_checking(self) -> None:
         self._utter(Lane.USER, "Checking for updates")
 
-    def update_available(self, version: str) -> None:
-        self._utter(Lane.USER, f"StoneReader {version} is available")
+    def update_offer(self, version: str) -> None:
+        """Speak the ephemeral update Offer (ADR-0014, ADR-0016)."""
+        self._utter(
+            Lane.USER,
+            f"StoneReader {version} is available — "
+            "press Control Enter to update",
+        )
 
     def update_up_to_date(self, version: str) -> None:
         self._utter(

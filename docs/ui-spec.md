@@ -1138,9 +1138,11 @@ system-wide hotkey (ADR-0006). Back goes Home.
 **Window title:** `Settings — StoneReader` (ADR-0006).
 **Entry utterance:** `"Settings, {current option}"` (ADR-0007).
 
-**Rows** — eight (seven plus the Global-hotkeys drill-down), in order. Row titles
-are `"{Label}, {current value}"`, so a single Down-arrow sweep reads the whole
-configuration (ADR-0011).
+**Rows** — nine (seven value rows plus the Global-hotkeys drill-down and two
+actions), in order. Value-row titles are `"{Label}, {current value}"`, so a
+single Down-arrow sweep reads the whole configuration (ADR-0011); action rows
+have no value and speak their label alone, like Restore all defaults always
+has.
 
 | Row | Type | Default | Row title example |
 |---|---|---|---|
@@ -1151,7 +1153,16 @@ configuration (ADR-0011).
 | Hearthstone log path | Path | Auto-detected | "Hearthstone log path, auto-detected" |
 | Replay retention | Choice — Unlimited / last 100 / last 500 / last 1000 | Unlimited | "Replay retention, unlimited" |
 | Global hotkeys | Drill-down — six chord rows | The ADR-0006 table | "Global hotkeys" |
+| Check for updates | Action | — | "Check for updates" |
 | Restore all defaults | Action, press-twice | — | "Restore all defaults" |
+
+**Check for updates** (ADR-0016, *this spec's addition*): Enter announces
+"Checking for updates", then the result — up to date, unavailable, or failed —
+as its own announcement. A newer release arms the update **Offer** (ADR-0014):
+"StoneReader {version} is available — press Control Enter to update". The same
+Offer arms unsolicited, once per version, when a frozen build finds an update
+at startup; a solicited re-check re-offers. Delete on this row is the announced
+no-op "Nothing to reset here" — an action row has no default to restore.
 
 Paths are the one unspeakable value: their titles say "auto-detected" or
 "custom", with the full path on the detail line and in Text mode (ADR-0011).
@@ -1176,7 +1187,7 @@ hatch; nothing on this Surface has hidden staged state.
 | Delete | Arm reset, then reset on the second press — "Press Delete again to reset {label} to {default}" | "Delete: reset this setting, press twice" (ADR-0011 on ADR-0004's idiom) |
 | Shift+Delete | Reset this setting to its default without arming; on Restore all defaults, restore everything without arming | "Shift+Delete: reset this setting without asking" — *this spec's ruling*, ADR-0004's Shift-skips-confirmation composed with ADR-0011's Delete-as-reset |
 | Home / End | First / last setting | Universal layer (ADR-0004) |
-| Ctrl+F | Announced no-op — "No search on this screen" | Eight rows need no search; the announced no-op is the spec (ADR-0011) |
+| Ctrl+F | Announced no-op — "No search on this screen" | Nine rows need no search; the announced no-op is the spec (ADR-0011) |
 | Left / Right | Unbound and silent | Deliberately dead in vertical menus (ADR-0004, ADR-0011) |
 | PageUp / PageDown, Tab / Shift+Tab, L | Announced no-op | Slot defaults (ADR-0010) |
 

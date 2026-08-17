@@ -341,14 +341,15 @@ def build_settings(
 
     def reset_current() -> None:
         row = current_row()
-        if row.reset is None:
+        reset = row.reset
+        if reset is None:
             announcer.noop("Nothing to reset here")
             return
+        # Rows with a reset action always carry both spoken fragments.
+        assert row.reset_label is not None and row.spoken_default is not None
 
         def finish() -> None:
-            if row.reset is None:
-                raise RuntimeError("Settings row lost its reset action")
-            row.reset()
+            reset()
             if row.option_id != "restore_all":
                 changed(row.title)
 
@@ -360,8 +361,8 @@ def build_settings(
                 "Press Delete again to restore all defaults"
                 if row.option_id == "restore_all"
                 else (
-                    f"Press Delete again to reset {row.reset_label or row.title()} "
-                    f"to {row.spoken_default or 'its default'}"
+                    f"Press Delete again to reset {row.reset_label} "
+                    f"to {row.spoken_default}"
                 )
             ),
             finish,
@@ -369,7 +370,8 @@ def build_settings(
 
     def reset_current_now() -> None:
         row = current_row()
-        if row.reset is None:
+        reset = row.reset
+        if reset is None:
             announcer.noop("Nothing to reset here")
             return
         if row.option_id == "restore_all":
@@ -379,7 +381,7 @@ def build_settings(
         if delete_armed is None:
             raise RuntimeError("Settings delete action is not active")
         delete_armed.disarm()
-        row.reset()
+        reset()
         changed(row.title)
 
     spec = SurfaceSpec(

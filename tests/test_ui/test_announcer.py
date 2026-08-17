@@ -167,7 +167,7 @@ def test_update_templates_use_the_user_lane() -> None:
     announcer = Announcer(speech)
 
     announcer.update_checking()
-    announcer.update_available("1.2.3")
+    announcer.update_offer("1.2.3")
     announcer.update_up_to_date("1.2.3")
     announcer.update_check_failed()
     announcer.update_check_unavailable()
@@ -177,7 +177,10 @@ def test_update_templates_use_the_user_lane() -> None:
 
     assert speech.calls == [
         ("Checking for updates", True),
-        ("StoneReader 1.2.3 is available", True),
+        (
+            "StoneReader 1.2.3 is available — press Control Enter to update",
+            True,
+        ),
         ("You're up to date. StoneReader 1.2.3 is the latest release", True),
         (
             "Couldn't check for updates. Check your internet connection and try again",

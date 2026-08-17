@@ -2,8 +2,9 @@
 
 ## Status
 
-Accepted (design contract, 2026-08-16). Builds on nothing — this is the first
-ADR about shipping StoneReader rather than building it.
+Accepted (design contract, 2026-08-16). Builds on ADR-0014 — update consent
+is an Offer in the asking grammar. Otherwise this is the first ADR about
+shipping StoneReader rather than building it.
 
 ## Context
 
@@ -39,11 +40,13 @@ clients in the field will query this shape forever.
 ### Updates prompt; they never happen silently
 
 An async check on startup (never blocking launch) plus a manual "Check for
-updates" item. If a release is newer, the app says so and waits. Only after
-the User consents does it download the installer, run it `/SILENT`, and exit;
-the installer relaunches the app. Consent once at the prompt — the wizard
-ceremony is reserved for the first manual install. Stable releases only; no
-prerelease channel.
+updates" item. If a release is newer, the app says so and waits — as an
+**Offer** in the asking grammar (ADR-0014): "StoneReader {version} is
+available — press Control Enter to update", ignorable for free, never a
+dialog. Only after the User accepts does the app download the installer, run
+it `/SILENT`, and exit; the installer relaunches the app. Consent once at the
+Offer — the wizard ceremony is reserved for the first manual install. Stable
+releases only; no prerelease channel.
 
 ### The build is unsigned, deliberately
 

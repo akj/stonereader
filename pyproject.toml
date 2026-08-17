@@ -3,7 +3,7 @@ name = "stonereader"
 version = "0.1.0"
 description = "An accessible interface to view Hearthstone cards, decks, and replays."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = [
     "accessible-output2>=0.17",
     "fsb5>=1.0",

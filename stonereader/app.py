@@ -170,6 +170,20 @@ class MainWindow(wx.Frame):
         """Install the clipboard-deckstring Offer route."""
         self._clipboard_offer_accept = on_accept
 
+    def arm_update_offer(
+        self,
+        version: str,
+        on_accept: Callable[[], None],
+        *,
+        resolicit: bool,
+    ) -> bool:
+        """Arm the update Offer (ADR-0014); True if it armed."""
+        return self._sink.arm_offer(
+            f"update:{version}",
+            on_accept,
+            resolicit=resolicit,
+        )
+
     def _on_activate(self, event: wx.ActivateEvent) -> None:
         accept = self._clipboard_offer_accept
         if event.GetActive() and accept is not None:
@@ -254,56 +268,34 @@ class StoneReaderApp(wx.App):
                     announcer.update_download_failed()
                     return
                 announcer.update_installing()
-                self._frame.Close()
+                # The installer relaunches the app; force so nothing can
+                # veto the exit out from under a silent install.
+                self._frame.Close(True)
 
             updater.download_and_install(info, on_done)
 
-        def offer_update(info: UpdateInfo) -> None:
-            current_version = stonereader.__version__
-            if current_version is None:
-                announcer.update_check_unavailable()
-                return
-            dialog = wx.MessageDialog(
-                self._frame,
-                (
-                    f"StoneReader {info.version} is available. "
-                    f"You have {current_version}. Update now?"
-                ),
-                "Update available",
-                wx.YES_NO | wx.ICON_INFORMATION,
+        def offer_update(info: UpdateInfo, *, resolicit: bool) -> None:
+            armed = self._frame.arm_update_offer(
+                info.version,
+                lambda: download_update(info),
+                resolicit=resolicit,
             )
-            try:
-                accepted = dialog.ShowModal() == wx.ID_YES
-            finally:
-                dialog.Destroy()
-            if accepted:
-                download_update(info)
+            if armed:
+                announcer.update_offer(info.version)
 
-        def handle_update_result(
-            result: CheckResult,
-            *,
-            announce_non_update: bool,
-        ) -> None:
-            if result.status == "update":
-                info = result.info
-                if info is None:
-                    logging.getLogger(__name__).error(
-                        "Update result did not include installer information"
-                    )
-                    if announce_non_update:
-                        announcer.update_check_failed()
-                    return
-                announcer.update_available(info.version)
-                offer_update(info)
-                return
-            if not announce_non_update:
-                return
-            if result.status == "up_to_date":
-                current_version = stonereader.__version__
-                if current_version is None:
-                    announcer.update_check_unavailable()
-                else:
-                    announcer.update_up_to_date(current_version)
+        def handle_startup_result(result: CheckResult) -> None:
+            # Unsolicited: an update arms the Offer; everything else is
+            # silent (ADR-0014 — the app never asks unsolicited, and a
+            # failed background check is nobody's business).
+            if result.status == "update" and result.info is not None:
+                offer_update(result.info, resolicit=False)
+
+        def handle_manual_result(result: CheckResult) -> None:
+            current_version = stonereader.__version__
+            if result.status == "update" and result.info is not None:
+                offer_update(result.info, resolicit=True)
+            elif result.status == "up_to_date" and current_version is not None:
+                announcer.update_up_to_date(current_version)
             elif result.status == "unavailable":
                 announcer.update_check_unavailable()
             else:
@@ -311,12 +303,7 @@ class StoneReaderApp(wx.App):
 
         def check_for_updates() -> None:
             announcer.update_checking()
-            updater.check(
-                lambda result: handle_update_result(
-                    result,
-                    announce_non_update=True,
-                )
-            )
+            updater.check(handle_manual_result)
 
         # Load card database even while its Surface is staged as a placeholder.
         from stonereader.models.card import CardDatabase
@@ -635,12 +622,7 @@ class StoneReaderApp(wx.App):
             )
 
         if getattr(sys, "frozen", False):
-            updater.check(
-                lambda result: handle_update_result(
-                    result,
-                    announce_non_update=False,
-                )
-            )
+            updater.check(handle_startup_result)
 
         return True
 

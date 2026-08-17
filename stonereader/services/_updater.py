@@ -38,10 +38,14 @@ class CheckResult:
     info: UpdateInfo | None
 
 
+def bare_version(tag: str) -> str:
+    """Strip the tag's optional v prefix: 'v1.2.3' -> '1.2.3'."""
+    return tag[1:] if tag.startswith("v") else tag
+
+
 def parse_version(tag: str) -> tuple[int, int, int] | None:
     """Parse an exact stable X.Y.Z release tag, with an optional v prefix."""
-    candidate = tag[1:] if tag.startswith("v") else tag
-    parts = candidate.split(".")
+    parts = bare_version(tag).split(".")
     if len(parts) != 3 or any(
         not part or any(character not in "0123456789" for character in part)
         for part in parts
@@ -51,24 +55,16 @@ def parse_version(tag: str) -> tuple[int, int, int] | None:
 
 
 def select_installer_asset(assets: object) -> dict[str, object] | None:
-    """Return the preferred installer asset from a release assets list."""
+    """Return the release's installer asset: the one named *-Setup.exe."""
     if not isinstance(assets, list):
         return None
-    executables: list[dict[str, object]] = []
     for asset in assets:
         if not isinstance(asset, dict):
             continue
         name = asset.get("name")
-        if isinstance(name, str) and name.endswith(".exe"):
-            executables.append(asset)
-    return next(
-        (
-            asset
-            for asset in executables
-            if str(asset["name"]).endswith("-Setup.exe")
-        ),
-        executables[0] if executables else None,
-    )
+        if isinstance(name, str) and name.endswith("-Setup.exe"):
+            return asset
+    return None
 
 
 def _fetch_latest_release() -> dict[str, object]:
@@ -181,6 +177,10 @@ class UpdateChecker:
         remote = parse_version(tag)
         if remote is None:
             raise ValueError(f"Invalid release tag: {tag}")
+        # Decide staleness before validating the asset: a malformed latest
+        # release must not read as an error to a User who is already current.
+        if remote <= current:
+            return CheckResult("up_to_date", None)
         asset = select_installer_asset(release.get("assets"))
         if asset is None:
             raise ValueError("GitHub release has no installer asset")
@@ -188,12 +188,9 @@ class UpdateChecker:
         url = asset.get("browser_download_url")
         if not isinstance(name, str) or not isinstance(url, str):
             raise ValueError("GitHub installer asset is incomplete")
-        if remote <= current:
-            return CheckResult("up_to_date", None)
-        version = tag[1:] if tag.startswith("v") else tag
         return CheckResult(
             "update",
-            UpdateInfo(version, url, name),
+            UpdateInfo(bare_version(tag), url, name),
         )
 
     def _download_and_install(

@@ -35,8 +35,8 @@ def test_parse_version_accepts_only_complete_stable_versions(
     assert parse_version(tag) == expected
 
 
-def test_installer_asset_prefers_setup_executable_then_any_executable() -> None:
-    fallback = {
+def test_installer_asset_matches_only_the_setup_executable() -> None:
+    other_exe = {
         "name": "StoneReader-portable.exe",
         "browser_download_url": "https://example.test/portable.exe",
     }
@@ -45,8 +45,8 @@ def test_installer_asset_prefers_setup_executable_then_any_executable() -> None:
         "browser_download_url": "https://example.test/setup.exe",
     }
 
-    assert select_installer_asset([fallback, setup]) == setup
-    assert select_installer_asset([fallback]) == fallback
+    assert select_installer_asset([other_exe, setup]) == setup
+    assert select_installer_asset([other_exe]) is None
     assert select_installer_asset([{"name": "checksums.txt"}]) is None
 
 
@@ -102,6 +102,27 @@ def test_check_reports_up_to_date_for_older_or_equal_release(
     checker = UpdateChecker(current, fetch_release=_release)
 
     assert _check(checker) == CheckResult("up_to_date", None)
+
+
+def test_check_reports_up_to_date_even_when_the_release_has_no_installer(
+) -> None:
+    # Staleness is decided before asset validation: a malformed latest
+    # release must not read as an error to a current install.
+    checker = UpdateChecker(
+        "1.2.3",
+        fetch_release=lambda: _release(assets=[]),
+    )
+
+    assert _check(checker) == CheckResult("up_to_date", None)
+
+
+def test_check_reports_error_when_a_newer_release_has_no_installer() -> None:
+    checker = UpdateChecker(
+        "1.2.2",
+        fetch_release=lambda: _release(assets=[]),
+    )
+
+    assert _check(checker) == CheckResult("error", None)
 
 
 def test_check_reports_error_for_an_invalid_release_tag() -> None:

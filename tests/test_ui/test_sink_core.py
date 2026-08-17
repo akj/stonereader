@@ -118,6 +118,28 @@ def test_offer_accepts_once_per_subject() -> None:
     assert accepted == ["accepted"]
 
 
+def test_resolicit_rearms_a_seen_subject() -> None:
+    # A solicited trigger (e.g. a manual update check) re-offers a subject
+    # the once-per-subject rule already spent (ADR-0014 governs unsolicited
+    # re-triggering only).
+    accepted: list[str] = []
+    sink = core(FakeSpeech(), [])
+    sink.set_active(CommandRegistry())
+    sink.mark_offer_subject_seen("update:1.2.3")
+
+    assert sink.arm_offer("update:1.2.3", lambda: accepted.append("no")) is False
+    assert (
+        sink.arm_offer(
+            "update:1.2.3",
+            lambda: accepted.append("accepted"),
+            resolicit=True,
+        )
+        is True
+    )
+    assert sink.handle_chord(Chord("enter", ctrl=True)) is True
+    assert accepted == ["accepted"]
+
+
 def test_mark_offer_subject_seen_prevents_arming_without_accepting() -> None:
     accepted: list[str] = []
     sink = core(FakeSpeech(), [])
