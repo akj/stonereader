@@ -30,3 +30,6 @@ addopts = "-m 'not slow_audio'"
 markers = [
     "slow_audio: scans/decodes the real local Hearthstone audio install",
 ]
+
+[tool.pyright]
+exclude = [".venv"]

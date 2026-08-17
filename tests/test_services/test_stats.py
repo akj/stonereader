@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Generator
 
 import pytest
 
@@ -15,7 +16,7 @@ from stonereader.services._stats import compute_stats
 
 
 @pytest.fixture
-def conn() -> sqlite3.Connection:
+def conn() -> Generator[sqlite3.Connection, None, None]:
     connection = get_connection(":memory:")
     init_db(connection)
     yield connection

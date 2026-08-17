@@ -92,6 +92,7 @@ def test_module_imports_without_wx_or_filesystem() -> None:
     mod = importlib.import_module("stonereader.services._hslog_translator")
     assert hasattr(mod, "translate_packet_tree")
     # Pure: no wx, no real speech, no clock imported by the module.
+    assert mod.__file__ is not None
     src = Path(mod.__file__).read_text(encoding="utf-8")
     assert "import wx" not in src
     assert "accessible_output" not in src

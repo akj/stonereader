@@ -41,9 +41,10 @@ def test_all_events_inherit_from_game_event():
 
 def test_all_events_are_frozen_dataclasses():
     for cls in ALL_EVENTS + [GameEvent]:
-        assert dataclasses.is_dataclass(cls), f"{cls.__name__} must be a dataclass"
-        params = cls.__dataclass_params__
-        assert params.frozen, f"{cls.__name__} must be frozen"
+        name = cls.__name__
+        assert dataclasses.is_dataclass(cls), f"{name} must be a dataclass"
+        params = getattr(cls, "__dataclass_params__")
+        assert params.frozen, f"{name} must be frozen"
 
 
 def test_game_started_payload_shape():

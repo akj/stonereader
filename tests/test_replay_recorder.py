@@ -20,6 +20,7 @@ from xml.etree import ElementTree
 from zipfile import ZipFile
 
 import hslog
+from hslog.exceptions import MissingPlayerData
 
 from stonereader.db import get_connection, init_db
 from stonereader.models.game_state import GameState, Hero
@@ -402,7 +403,7 @@ def test_player_state_parse_failure_drops_game_without_escaping(
         nonlocal calls
         calls += 1
         if calls == 300:
-            raise hslog.exceptions.MissingPlayerData("boom")
+            raise MissingPlayerData("boom")
         return original(parser, line)
 
     monkeypatch.setattr(hslog.LogParser, "read_line", read_line)
@@ -431,7 +432,7 @@ def test_later_segment_parse_failure_does_not_suppress_completed_game(
         if "GameState.DebugPrintPower() - CREATE_GAME" in line:
             create_games_seen += 1
             if create_games_seen == 2:
-                raise hslog.exceptions.MissingPlayerData("next game is broken")
+                raise MissingPlayerData("next game is broken")
         return original(parser, line)
 
     monkeypatch.setattr(hslog.LogParser, "read_line", read_line)

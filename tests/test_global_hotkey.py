@@ -12,8 +12,12 @@ after-failure per 03-VALIDATION.md + 03-REVIEWS.md MEDIUM 03-04.
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING, cast
 
 import pytest
+
+if TYPE_CHECKING:
+    import wx
 
 
 def test_register_returns_status(monkeypatch, caplog) -> None:
@@ -89,7 +93,7 @@ def test_browse_open_dispatch(monkeypatch) -> None:
                 def GetId(self) -> int:
                     return 1000
 
-            service._on_hotkey(FakeEvent())  # type: ignore[arg-type]
+            service._on_hotkey(cast("wx.Event", FakeEvent()))
             assert fired == ["R"]
 
             # Unknown id → no-op, no exception.
@@ -97,7 +101,7 @@ def test_browse_open_dispatch(monkeypatch) -> None:
                 def GetId(self) -> int:
                     return 9999
 
-            service._on_hotkey(UnknownEvent())  # type: ignore[arg-type]
+            service._on_hotkey(cast("wx.Event", UnknownEvent()))
             assert fired == ["R"]
         finally:
             frame.Destroy()
@@ -197,11 +201,11 @@ def test_callback_exception_isolation(monkeypatch, caplog) -> None:
 
             # Bad callback raises — service must catch and log.
             with caplog.at_level(logging.ERROR):
-                service._on_hotkey(FakeEvent(1000))  # bad
+                service._on_hotkey(cast("wx.Event", FakeEvent(1000)))  # bad
             # Good callback still works after the bad one raised.
-            service._on_hotkey(FakeEvent(1001))  # good
+            service._on_hotkey(cast("wx.Event", FakeEvent(1001)))  # good
             # Bad callback can be invoked again (state not poisoned).
-            service._on_hotkey(FakeEvent(1000))  # bad again
+            service._on_hotkey(cast("wx.Event", FakeEvent(1000)))  # bad again
 
             assert fired_good == ["good"]
             assert any(
@@ -273,7 +277,7 @@ def test_repeated_register_after_failure(monkeypatch) -> None:
                 def GetId(self) -> int:
                     return 1002  # third registration's id
 
-            service._on_hotkey(FakeEvent())  # type: ignore[arg-type]
+            service._on_hotkey(cast("wx.Event", FakeEvent()))
             assert fired == ["D"]
         finally:
             frame.Destroy()

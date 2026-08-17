@@ -1,0 +1,23 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "dependencyDashboard": true,
+  "lockFileMaintenance": { "enabled": true },
+  "schedule": ["before 9am on monday"],
+  "packageRules": [
+    {
+      "description": "Batch routine updates weekly and automerge patch/minor once CI is green",
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "weekly minor and patch updates",
+      "automerge": true
+    },
+    {
+      "description": "Card data freshness: hearthstone-data ships new card definitions; take it immediately and automerge",
+      "matchPackageNames": ["hearthstone-data"],
+      "groupName": null,
+      "schedule": ["at any time"],
+      "automerge": true,
+      "prPriority": 10
+    }
+  ]
+}

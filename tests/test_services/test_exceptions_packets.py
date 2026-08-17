@@ -33,10 +33,10 @@ def test_engine_error_is_services_error():
 
 def test_no_hslog_import_in_exceptions():
     """D-10: _exceptions.py must not import hslog."""
-    import importlib
+    from importlib.util import find_spec
     import pathlib
 
-    spec = importlib.util.find_spec("stonereader.services._exceptions")
+    spec = find_spec("stonereader.services._exceptions")
     assert spec is not None and spec.origin is not None
     src = pathlib.Path(spec.origin).read_text()
     assert "import hslog" not in src
@@ -71,8 +71,9 @@ def test_all_packet_classes_are_frozen_dataclasses():
         ChangeEntityPacket,
     ]
     for cls in classes:
-        assert dataclasses.is_dataclass(cls), f"{cls.__name__} should be a dataclass"
-        assert cls.__dataclass_params__.frozen, f"{cls.__name__} should be frozen"
+        name = cls.__name__
+        assert dataclasses.is_dataclass(cls), f"{name} should be a dataclass"
+        assert getattr(cls, "__dataclass_params__").frozen, f"{name} should be frozen"
 
 
 def test_create_game_packet_is_packet():
@@ -159,10 +160,10 @@ def test_change_entity_packet_fields():
 
 def test_no_list_type_hints_in_packets():
     """Per plan constraint: no List[ in _packets.py — use Tuple instead."""
-    import importlib
+    from importlib.util import find_spec
     import pathlib
 
-    spec = importlib.util.find_spec("stonereader.services._packets")
+    spec = find_spec("stonereader.services._packets")
     assert spec is not None and spec.origin is not None
     src = pathlib.Path(spec.origin).read_text()
     assert "List[" not in src, "_packets.py must not use List[ type hints"
@@ -170,10 +171,10 @@ def test_no_list_type_hints_in_packets():
 
 def test_no_hslog_import_in_packets():
     """D-10: _packets.py must not import hslog — check actual import lines only."""
-    import importlib
+    from importlib.util import find_spec
     import pathlib
 
-    spec = importlib.util.find_spec("stonereader.services._packets")
+    spec = find_spec("stonereader.services._packets")
     assert spec is not None and spec.origin is not None
     src = pathlib.Path(spec.origin).read_text()
     # Check only non-comment, non-docstring lines for hslog imports

@@ -76,7 +76,7 @@ def test_new_play_replaces_and_stop_is_safe_to_repeat() -> None:
 def test_windows_backend_keeps_memory_async_and_stops_with_null_pointer() -> None:
     calls: list[tuple[bytes | None, int]] = []
 
-    def play_sound(sound, _module, flags: int) -> bool:
+    def play_sound(sound, module, flags: int) -> bool:
         calls.append(
             (
                 None if sound is None else ctypes.string_at(sound, 4),
