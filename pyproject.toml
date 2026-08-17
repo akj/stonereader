@@ -18,12 +18,22 @@ dependencies = [
     "wxpython>=4.2.5",
 ]
 
+[build-system]
+requires = ["setuptools>=80.9.0,<81"]
+build-backend = "setuptools.build_meta"
+
 [dependency-groups]
+build = [
+    "pyinstaller>=6.22.1",
+]
 dev = [
     "pytest>=8.0",
     "pyright>=1.1.402",
     "ruff>=0.11.10",
 ]
+
+[tool.setuptools.packages.find]
+include = ["stonereader*"]
 
 [tool.pytest.ini_options]
 addopts = "-m 'not slow_audio'"
@@ -32,4 +42,4 @@ markers = [
 ]
 
 [tool.pyright]
-exclude = [".venv"]
+exclude = [".venv", "build", "dist"]
