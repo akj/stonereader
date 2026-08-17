@@ -48,9 +48,9 @@ class _SettingsRow:
     option_id: str
     title: Callable[[], str]
     on_enter: Callable[[], None] | None
-    reset_label: str
-    spoken_default: str
-    reset: Callable[[], None]
+    reset_label: str | None
+    spoken_default: str | None
+    reset: Callable[[], None] | None
 
 
 def _narration_label(value: str) -> str:
@@ -74,11 +74,12 @@ def build_settings(
     picker: PickerHolder,
     hotkeys: HotkeyMap,
     *,
+    check_for_updates: Callable[[], None],
     audio_index: AudioChannelStatus | None = None,
     install_detector: Callable[[Path | None], Path | None] = detect_install,
     log_detector: Callable[[Path | None], Path | None] = discover_power_log_path,
 ) -> ActiveSurface:
-    """Build the eight-row, autosaving settings menu."""
+    """Build the nine-row settings menu."""
     engine: VerticalMenuEngine | None = None
     delete_armed: ArmedAction | None = None
     enter_armed: ArmedAction | None = None
@@ -292,6 +293,14 @@ def build_settings(
             restore_hotkeys,
         ),
         _SettingsRow(
+            "check_for_updates",
+            lambda: "Check for updates",
+            check_for_updates,
+            None,
+            None,
+            None,
+        ),
+        _SettingsRow(
             "restore_all",
             lambda: "Restore all defaults",
             None,
@@ -332,8 +341,13 @@ def build_settings(
 
     def reset_current() -> None:
         row = current_row()
+        if row.reset is None:
+            announcer.noop("Nothing to reset here")
+            return
 
         def finish() -> None:
+            if row.reset is None:
+                raise RuntimeError("Settings row lost its reset action")
             row.reset()
             if row.option_id != "restore_all":
                 changed(row.title)
@@ -346,8 +360,8 @@ def build_settings(
                 "Press Delete again to restore all defaults"
                 if row.option_id == "restore_all"
                 else (
-                    f"Press Delete again to reset {row.reset_label} "
-                    f"to {row.spoken_default}"
+                    f"Press Delete again to reset {row.reset_label or row.title()} "
+                    f"to {row.spoken_default or 'its default'}"
                 )
             ),
             finish,
@@ -355,6 +369,9 @@ def build_settings(
 
     def reset_current_now() -> None:
         row = current_row()
+        if row.reset is None:
+            announcer.noop("Nothing to reset here")
+            return
         if row.option_id == "restore_all":
             restore_all()
             return

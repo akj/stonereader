@@ -33,6 +33,7 @@ class FakeAudioStatus:
 class SettingsContext:
     store: SettingsStore
     hotkeys: HotkeyMap
+    update_checks: list[str]
 
 
 def make_settings(
@@ -45,7 +46,8 @@ def make_settings(
         Backend(), {command.command_id: lambda: None for command in HOTKEY_COMMANDS}
     )
     hotkeys.apply(store)
-    harness = make_harness(SettingsContext(store, hotkeys))
+    update_checks: list[str] = []
+    harness = make_harness(SettingsContext(store, hotkeys, update_checks))
     holder = PickerHolder()
     harness.nav.register(
         "Settings",
@@ -58,6 +60,7 @@ def make_settings(
             holder,
             hotkeys,
             audio_index=audio_status,
+            check_for_updates=lambda: update_checks.append("checked"),
             install_detector=lambda _custom: install,
             log_detector=lambda _install: None,
         ),
@@ -109,7 +112,7 @@ def select(harness: Harness[SettingsContext], index: int) -> None:
     harness.sink.set_active(harness.active_surface.registry)
 
 
-def test_all_eight_dynamic_row_titles_including_unavailable_volume(
+def test_all_nine_dynamic_row_titles_including_unavailable_volume(
     tmp_path: Path,
 ) -> None:
     harness = make_settings(tmp_path, None)
@@ -125,6 +128,7 @@ def test_all_eight_dynamic_row_titles_including_unavailable_volume(
         "Hearthstone log path, auto-detected",
         "Replay retention, last 500",
         "Global hotkeys",
+        "Check for updates",
         "Restore all defaults",
     ]
 
@@ -158,6 +162,11 @@ def test_choice_volume_toggle_retention_and_drilldown_enter_idioms(
     select(harness, 6)
     harness.press(Chord("enter"))
     assert harness.nav.stack[-1] == "Global hotkeys"
+
+    harness.press(Chord("escape"))
+    select(harness, 7)
+    harness.press(Chord("enter"))
+    assert harness.context.update_checks == ["checked"]
 
 
 def test_unavailable_volume_explains_and_does_not_open_picker(tmp_path: Path) -> None:
@@ -225,7 +234,7 @@ def test_delete_armed_shift_delete_and_restore_all_enter(tmp_path: Path) -> None
 
     harness.context.store.set_narration("off")
     harness.context.hotkeys.rebind("jump_cards", Chord.parse("ctrl+alt+c"))
-    select(harness, 7)
+    select(harness, 8)
     harness.press(Chord("enter"))
     assert harness.context.store.narration == "off"
     harness.press(Chord("enter"))

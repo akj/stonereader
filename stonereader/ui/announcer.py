@@ -141,6 +141,40 @@ class Announcer:
             "Could not register hotkeys: " + ", ".join(names) + ".",
         )
 
+    def update_checking(self) -> None:
+        self._utter(Lane.USER, "Checking for updates")
+
+    def update_available(self, version: str) -> None:
+        self._utter(Lane.USER, f"StoneReader {version} is available")
+
+    def update_up_to_date(self, version: str) -> None:
+        self._utter(
+            Lane.USER,
+            f"You're up to date. StoneReader {version} is the latest release",
+        )
+
+    def update_check_failed(self) -> None:
+        self._utter(
+            Lane.USER,
+            "Couldn't check for updates. "
+            "Check your internet connection and try again",
+        )
+
+    def update_check_unavailable(self) -> None:
+        self._utter(Lane.USER, "Update checking isn't available in this build")
+
+    def update_downloading(self, version: str) -> None:
+        self._utter(Lane.USER, f"Downloading StoneReader {version}")
+
+    def update_installing(self) -> None:
+        self._utter(Lane.USER, "Installing update. StoneReader will restart")
+
+    def update_download_failed(self) -> None:
+        self._utter(
+            Lane.USER,
+            "The update couldn't be downloaded. Try again later",
+        )
+
     def narrate(self, text: str) -> None:
         self._utter(Lane.NARRATION, text)
 

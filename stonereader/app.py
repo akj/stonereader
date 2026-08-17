@@ -9,12 +9,14 @@ from __future__ import annotations
 import binascii
 import logging
 import sqlite3
+import sys
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import wx
 from hearthstone.deckstrings import parse_deckstring
 
+import stonereader
 from stonereader.db import get_connection, init_db
 from stonereader.models.game_state import GameState
 from stonereader.services._audio_player import AudioPlayer
@@ -217,6 +219,11 @@ class StoneReaderApp(wx.App):
         from stonereader.services._audio_index import AudioIndex
         from stonereader.services._audio_player import WindowsMemoryBackend
         from stonereader.services._settings import SettingsStore
+        from stonereader.services._updater import (
+            CheckResult,
+            UpdateChecker,
+            UpdateInfo,
+        )
 
         settings = SettingsStore()
         self._settings = settings
@@ -233,6 +240,83 @@ class StoneReaderApp(wx.App):
         nav = self._frame.nav
         announcer = self._frame.announcer
         db_conn = self._frame.db_conn
+        updater = UpdateChecker(
+            current_version=stonereader.__version__,
+            marshal=wx.CallAfter,
+        )
+        self._updater = updater
+
+        def download_update(info: UpdateInfo) -> None:
+            announcer.update_downloading(info.version)
+
+            def on_done(success: bool) -> None:
+                if not success:
+                    announcer.update_download_failed()
+                    return
+                announcer.update_installing()
+                self._frame.Close()
+
+            updater.download_and_install(info, on_done)
+
+        def offer_update(info: UpdateInfo) -> None:
+            current_version = stonereader.__version__
+            if current_version is None:
+                announcer.update_check_unavailable()
+                return
+            dialog = wx.MessageDialog(
+                self._frame,
+                (
+                    f"StoneReader {info.version} is available. "
+                    f"You have {current_version}. Update now?"
+                ),
+                "Update available",
+                wx.YES_NO | wx.ICON_INFORMATION,
+            )
+            try:
+                accepted = dialog.ShowModal() == wx.ID_YES
+            finally:
+                dialog.Destroy()
+            if accepted:
+                download_update(info)
+
+        def handle_update_result(
+            result: CheckResult,
+            *,
+            announce_non_update: bool,
+        ) -> None:
+            if result.status == "update":
+                info = result.info
+                if info is None:
+                    logging.getLogger(__name__).error(
+                        "Update result did not include installer information"
+                    )
+                    if announce_non_update:
+                        announcer.update_check_failed()
+                    return
+                announcer.update_available(info.version)
+                offer_update(info)
+                return
+            if not announce_non_update:
+                return
+            if result.status == "up_to_date":
+                current_version = stonereader.__version__
+                if current_version is None:
+                    announcer.update_check_unavailable()
+                else:
+                    announcer.update_up_to_date(current_version)
+            elif result.status == "unavailable":
+                announcer.update_check_unavailable()
+            else:
+                announcer.update_check_failed()
+
+        def check_for_updates() -> None:
+            announcer.update_checking()
+            updater.check(
+                lambda result: handle_update_result(
+                    result,
+                    announce_non_update=True,
+                )
+            )
 
         # Load card database even while its Surface is staged as a placeholder.
         from stonereader.models.card import CardDatabase
@@ -421,6 +505,7 @@ class StoneReaderApp(wx.App):
                 self._frame._sink,
                 picker,
                 hotkey_map,
+                check_for_updates=check_for_updates,
                 audio_index=audio_index,
             )
 
@@ -547,6 +632,14 @@ class StoneReaderApp(wx.App):
         except Exception:
             logging.getLogger(__name__).exception(
                 "tracker.start() failed; tracker disabled"
+            )
+
+        if getattr(sys, "frozen", False):
+            updater.check(
+                lambda result: handle_update_result(
+                    result,
+                    announce_non_update=False,
+                )
             )
 
         return True

@@ -160,3 +160,31 @@ def test_import_replays_result_speaks_only_nonzero_parts(counts, expected) -> No
     announcer.import_replays_result(*counts)
 
     assert speech.calls == [(expected, True)]
+
+
+def test_update_templates_use_the_user_lane() -> None:
+    speech = FakeSpeech()
+    announcer = Announcer(speech)
+
+    announcer.update_checking()
+    announcer.update_available("1.2.3")
+    announcer.update_up_to_date("1.2.3")
+    announcer.update_check_failed()
+    announcer.update_check_unavailable()
+    announcer.update_downloading("1.2.3")
+    announcer.update_installing()
+    announcer.update_download_failed()
+
+    assert speech.calls == [
+        ("Checking for updates", True),
+        ("StoneReader 1.2.3 is available", True),
+        ("You're up to date. StoneReader 1.2.3 is the latest release", True),
+        (
+            "Couldn't check for updates. Check your internet connection and try again",
+            True,
+        ),
+        ("Update checking isn't available in this build", True),
+        ("Downloading StoneReader 1.2.3", True),
+        ("Installing update. StoneReader will restart", True),
+        ("The update couldn't be downloaded. Try again later", True),
+    ]
