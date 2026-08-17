@@ -108,8 +108,7 @@ def build_replay_viewer(
         cached_replay = None
         cached_turns = []
         if engine is not None:
-            shown = event_items()
-            engine.set_zone_cursor("events", len(shown) - 1)
+            engine.set_zone_cursor("events", 0)
 
     def turn_views() -> list[TurnView]:
         nonlocal cached_replay, cached_turns
@@ -182,10 +181,25 @@ def build_replay_viewer(
             sync_autoplay_location()
             return
         turn_index = target
-        shown = event_items()
-        engine.set_zone_cursor("events", len(shown) - 1)
+        engine.set_zone_cursor("events", 0)
         engine.on_landing()
         sync_autoplay_location()
+
+    def step_event(delta: int) -> None:
+        shown = event_items()
+        if engine is None or not shown:
+            announcer.empty_zone(events_zone.label)
+            return
+        cursor = engine.zone_cursor("events")
+        target = min(max(cursor + delta, 0), len(shown) - 1)
+        if target == cursor:
+            announcer.boundary(shown[cursor].title)
+            return
+        engine.set_zone_cursor("events", target)
+        announcer.moved(shown[target].title)
+        autoplay_event(shown[target])
+        sync_autoplay_location()
+        engine.refresh()
 
     def query(subject: str, value: str) -> None:
         announcer.query(subject, value)
@@ -221,6 +235,18 @@ def build_replay_viewer(
             title=engine.current_zone().title(current),
         )
 
+    events_zone = ZoneSpec(
+        "events",
+        "Events",
+        event_items,
+        lambda item: item.title,
+        lambda item: [
+            f"Turn {item.event.turn}",
+            *([item.source_title] if item.source_title is not None else []),
+        ],
+        Chord("y"),
+        "Y: the game's events",
+    )
     zones = [
         card_zone("your_board", "Your board", "b", "B: your minions", card_items(state, "player_board")),
         card_zone("opponent_board", "Opponent board", "g", "G: opponent minions", card_items(state, "opponent_board")),
@@ -239,18 +265,7 @@ def build_replay_viewer(
         card_zone("opponent_played", "Opponent played", "p", "Shift+P: cards your opponent played", card_items(state, "opponent_played"), shift=True, with_turn=True),
         card_zone("your_drawn", "Your drawn", "n", "N: cards you drew", card_items(state, "player_drawn"), with_turn=True),
         card_zone("opponent_drawn", "Opponent drawn", "n", "Shift+N: cards your opponent drew", card_items(state, "opponent_drawn"), shift=True, with_turn=True),
-        ZoneSpec(
-            "events",
-            "Events",
-            event_items,
-            lambda item: item.title,
-            lambda item: [
-                f"Turn {item.event.turn}",
-                *([item.source_title] if item.source_title is not None else []),
-            ],
-            Chord("y"),
-            "Y: the game's events",
-        ),
+        events_zone,
     ]
     card_zone_ids = {
         zone.zone_id for zone in zones if zone.detail_lines is card_detail_lines
@@ -262,6 +277,8 @@ def build_replay_viewer(
         Binding(Chord("d", shift=True), Command("replay.query_opponent_deck", "Shift+D: how many cards are in your opponent's deck", lambda: query("Opponent deck", f"{state().opponent_deck_count} cards"))),
         Binding(Chord("r"), Command("replay.query_hero_power", "R: your hero power", lambda: query("Your hero power", state().player_hero.hero_power or "No hero power"))),
         Binding(Chord("r", shift=True), Command("replay.query_opponent_hero_power", "Shift+R: your opponent's hero power", lambda: query("Opponent hero power", state().opponent_hero.hero_power or "No hero power"))),
+        Binding(Chord("f5"), Command("replay.previous_event", "F5: go to the previous event", lambda: step_event(-1))),
+        Binding(Chord("f6"), Command("replay.next_event", "F6: go to the next event", lambda: step_event(1))),
     ]
     bindings.extend(
         Binding(
@@ -330,10 +347,9 @@ def build_replay_viewer(
     if not isinstance(surface.engine, HorizontalListEngine):
         raise TypeError("Replay Viewer requires a horizontal-list engine")
     engine = surface.engine
-    shown = event_items()
-    engine.set_zone_cursor("events", len(shown) - 1)
+    engine.set_zone_cursor("events", 0)
 
-    def autoplay_current_event() -> None:
+    def autoplay_event(item: _EventItem) -> None:
         if (
             audio_index is None
             or player is None
@@ -341,18 +357,20 @@ def build_replay_viewer(
             or audio_index.status != "ready"
         ):
             return
-        current = engine.current_item()
-        if not isinstance(current, _EventItem):
-            return
-        kind = _event_audio_kind(current.event)
+        kind = _event_audio_kind(item.event)
         if kind is None:
             return
-        clip_key = audio_index.event_clip(current.source_card_id, kind)
+        clip_key = audio_index.event_clip(item.source_card_id, kind)
         if clip_key is None:
             return
         wav_bytes = audio_index.decode(clip_key)
         if wav_bytes:
             player.play(wav_bytes)
+
+    def autoplay_current_event() -> None:
+        current = engine.current_item()
+        if isinstance(current, _EventItem):
+            autoplay_event(current)
 
     autoplay_location = (
         engine.current_zone().zone_id,

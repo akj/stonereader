@@ -545,6 +545,7 @@ percent, copies remaining over cards remaining (ADR-0013); 2 `"{cost} mana"`;
 | 1–9 | Jump to position 1–9 in the current zone | "1 to 9: jump to that position in the list" (ADR-0003, ADR-0004) |
 | 0 | Jump to position 10 | "0: jump to the tenth item" (ADR-0004) |
 | Y | Announced no-op — "No events in a live game" | ADR-0013: play history is the client's feature; HSA's in-game `y` speaks it there |
+| F5 / F6 | Announced no-op — "No events in a live game" | ADR-0015: event stepping is replay-only; the phrase is Y's |
 | PageUp / PageDown | Announced no-op — "No turns to step in a live game" | ADR-0013: there is no **Live game timeline** |
 | Enter | Announced no-op | *This spec's ruling* under ADR-0004's requirement that every Surface assign Enter an action or an announced no-op; matches ADR-0012's Statistics precedent |
 | L | Announced no-op — "No game audio during a live game" | *This spec's ruling*: ADR-0008's listen-key surface enumeration (Cards, deck contents, replay zones) deliberately excludes Live Game, where the real client is already producing its own audio; the phrase satisfies ADR-0004's no-silent-universal-key rule |
@@ -917,7 +918,7 @@ shipped bespoke turn utterance ("Turn 5, your turn, 3 events.") is replaced.
 
 Zone cursors persist across switches, across turn steps, and across back-reveal
 (ADR-0007, ADR-0010) — with one amendment: the **events cursor is the replay
-position**, so a turn step repositions it to the new turn's last event
+position**, so a turn step repositions it to the new turn's first event
 (ADR-0015). Every other cursor keeps the unamended rule.
 
 **Zones.** The letters mirror HSA exactly, inconsistencies included: distinct
@@ -979,11 +980,13 @@ title where the event has one.
 
 **Event scrubbing** (ADR-0015). The events zone is the Surface's **fine
 axis**: the selected event renders every other zone at the game just after
-that event — scrub with Left/Right, 1–9/0, or Home/End, then jump to any zone
-to inspect that moment. The turn's last event carries the turn's final state,
-and a turn step positions the events cursor there, so plain turn stepping
-sounds and reads exactly as it would without scrubbing, and End always
-returns the zones to the turn's final state.
+that event. Scrub from inside the zone with Left/Right, 1–9/0, or Home/End,
+or from **any** zone with `F5`/`F6` (previous / next event) — stay on the
+board and watch it change event by event. A turn step lands the events
+cursor on the turn's **first** event, so a turn reads forward; the turn's
+last event carries the turn's final state, so stepping to it (or End in the
+events zone) reads the turn as it ended. At the turn's edges F5/F6 clamp
+and repeat the current title — turn boundaries are PageUp/PageDown's job.
 
 **Keys**
 
@@ -994,6 +997,7 @@ returns the zones to the turn's final state.
 | Shift+Up / Shift+Down | Repeat line / read to last line | Widget-type layer (ADR-0004, ADR-0007) |
 | Home / End | First / last item in the zone | Universal layer (ADR-0004) |
 | PageUp / PageDown | Previous / next turn | "Page Down: go to the next turn" — turn stepping is this Surface's coarse axis (ADR-0004) |
+| F5 / F6 | Previous / next event, from any zone | "F5: go to the previous event" / "F6: go to the next event" — the fine axis without leaving the zone; speaks the event's title and fires its auto-play; clamps at the turn's edges (ADR-0015) |
 | B / G | Jump to your board / opponent board | "B: your minions" / "G: opponent minions" (ADR-0003) |
 | C / Shift+C | Jump to your hand / opponent hand | "C: your hand" / "Shift+C: opponent hand" (ADR-0003) |
 | S / Shift+S | Jump to your secrets / opponent secrets | "S: your secrets" / "Shift+S: opponent secrets" |
@@ -1025,9 +1029,10 @@ utterance above — turn, side, zone, title, position — so a turn step and a z
 switch are the same announcement with a different part changed. There is no
 separate turn announcement and no event count in it; the events zone is where
 events are counted, browsed, and scrubbed. Scrubbing adds no utterance of its
-own: an event landing speaks the event row as always, and the zones simply
-read as of that event when visited — no "after {event}" prefix anywhere
-(ADR-0015, ADR-0007's route invariance).
+own: an event landing — Left/Right in the zone or F5/F6 from anywhere —
+speaks the event's title as always, and the zones simply read as of that
+event when visited — no "after {event}" prefix anywhere (ADR-0015, ADR-0007's
+route invariance).
 
 **Audio:** The **events zone auto-plays**: landing on an event plays that
 event's sound — its card's Play/Attack/Death line, upgraded to card-specific

@@ -105,6 +105,9 @@ def build_live_game(
             return
         announcer.query(subject, value(current))
 
+    def no_events() -> None:
+        announcer.noop("No events in a live game")
+
     # Remaining Deck is intentionally first: Home -> L starts there, while the
     # lazy singleton still preserves the found-as-left zone after first visit.
     zones = [
@@ -287,7 +290,23 @@ def build_live_game(
             Command(
                 "live.no_events",
                 "Y: no events in a live game",
-                lambda: announcer.noop("No events in a live game"),
+                no_events,
+            ),
+        ),
+        Binding(
+            Chord("f5"),
+            Command(
+                "live.no_previous_event",
+                "F5: no events in a live game",
+                no_events,
+            ),
+        ),
+        Binding(
+            Chord("f6"),
+            Command(
+                "live.no_next_event",
+                "F6: no events in a live game",
+                no_events,
             ),
         ),
         Binding(

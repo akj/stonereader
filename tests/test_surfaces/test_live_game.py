@@ -260,6 +260,21 @@ def test_queries_digits_y_slots_and_unbound_keys_match_live_contract() -> None:
     assert harness.speech.calls == before
 
 
+def test_event_step_keys_announce_no_events_in_a_live_game() -> None:
+    harness = _harness(_rich_state())
+    help_by_chord = {
+        str(chord): command.help_phrase
+        for chord, command in harness.active_surface.registry.surface_bindings()
+    }
+
+    for chord in (Chord("f5"), Chord("f6")):
+        harness.press(chord)
+        assert harness.speech.calls[-1] == ("No events in a live game", True)
+
+    assert help_by_chord["f5"] == "F5: no events in a live game"
+    assert help_by_chord["f6"] == "F6: no events in a live game"
+
+
 def test_compound_hotkey_lands_then_switches_to_the_requested_zone() -> None:
     harness = _harness(_rich_state())
     harness.horizontal.switch_zone("your_board")
