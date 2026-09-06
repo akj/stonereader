@@ -333,6 +333,7 @@ def test_all_commands_reference_peeks_without_landing_and_is_read_only() -> None
         "Import Deck",
         "Statistics",
         "Cards",
+        "Card Browser",
         "Sounds menu",
         "Replays",
         "Replay Viewer",

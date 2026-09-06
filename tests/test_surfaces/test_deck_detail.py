@@ -157,3 +157,30 @@ def test_read_only_slots_and_unbound_delete_space(db_conn: sqlite3.Connection) -
         ("Nothing to do here", True),
         ("Game audio is not available", True),
     ]
+
+
+def test_imported_deck_browses_by_mana_then_name_preserving_counts_and_code(
+    db_conn: sqlite3.Connection,
+) -> None:
+    cards = make_card_db(
+        make_card(274, "Jaina", card_class="MAGE", card_type="HERO"),
+        make_card(1000, "Expensive", cost=10),
+        make_card(2000, "Zebra", cost=0),
+        make_card(3000, "Beta", cost=2),
+        make_card(4000, "alpha", cost=2),
+    )
+    code = make_deckstring([(1000, 1), (2000, 2), (3000, 2), (4000, 1)])
+    save_deck(db_conn, "Mage", "Mage", "Standard", code)
+    current = CurrentDeck()
+    current.set(get_all_decks(db_conn)[0])
+    data = DeckData(db_conn, cards)
+    original = data.resolve(current.get()).cards
+    harness = make_harness(None)
+    harness.set_surface(build_deck_detail(
+        harness.announcer, [], harness.nav, data, current,
+    ))
+    assert harness.horizontal.items_snapshot()[0] == [
+        "Zebra x2", "alpha", "Beta x2", "Expensive",
+    ]
+    assert data.resolve(current.get()).cards == original
+    assert get_all_decks(db_conn)[0].deckstring == code

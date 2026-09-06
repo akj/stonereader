@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from stonereader.models.card import Card
+from stonereader.models.card import Card, card_sort_key
 from stonereader.surfaces._deck_data import CurrentDeck, DeckData, spoken_enum
 from stonereader.surfaces._game_audio import CardAudioIndex, open_sounds_for_card
 from stonereader.surfaces.sounds_menu import SoundsMenuHolder
@@ -29,7 +29,12 @@ def build_deck_detail(
     engine: HorizontalListEngine | None = None
 
     def items() -> tuple[tuple[Card, int], ...]:
-        return data.resolve(current_deck.get()).cards
+        return tuple(
+            sorted(
+                data.resolve(current_deck.get()).cards,
+                key=lambda item: card_sort_key(item[0]),
+            )
+        )
 
     def title(item: tuple[Card, int]) -> str:
         card, count = item

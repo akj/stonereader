@@ -21,6 +21,7 @@ COMMAND_SURFACE_NAMES = (
     "Import Deck",
     "Statistics",
     "Cards",
+    "Card Browser",
     "Sounds menu",
     "Replays",
     "Replay Viewer",

@@ -139,7 +139,7 @@ focus; views are render-only subscribers (ADR-0010).
 ### Enter in v1
 
 ADR-0004 requires every Surface to assign Enter an action or an announced no-op.
-*This spec's ruling:* on **Cards**, **Deck detail**, **Live Game**, and the
+*This spec's ruling:* on **Card Browser**, **Deck detail**, **Live Game**, and the
 **Replay Viewer**'s zones, Enter is an announced no-op in v1 — the same call
 ADR-0012 made explicitly for Statistics. Nothing on those Surfaces is acted on;
 they are places to read.
@@ -257,7 +257,7 @@ reset the stack, not the target's innards (ADR-0007). Surfaces are lazy
 singletons, created on first visit and alive for the app's lifetime, so
 persistence is structural (ADR-0010). **This spec takes none of ADR-0007's
 permitted transient opt-outs**: nothing is reset on leaving a Surface, and in
-particular Cards' class filter, mana filter, and committed search survive
+particular Card Browser's mana filter and committed search survive
 leaving and re-entering. Fresh state is what app restart is for (ADR-0007).
 
 **Two speech lanes.** Lane 1 (movement, entry, drive-by queries, confirmations)
@@ -277,14 +277,9 @@ alone (ADR-0007). Filter and search state ride in the context label — "Mage
 cards, 3 mana, Fireball, 1 of 12" (ADR-0007); the composition rule for a label
 carrying several constraints is specced on [Cards](#cards).
 
-**Naming.** *This spec's ruling:* ADR-0006's names are canonical — the Surfaces
-are **Cards** and **Decks**. "Card Browser" (ADR-0009's widget-type sentence)
-and "Deck Manager" (ADR-0007's confirmation example) are stale shipped-name
-example strings inside worked examples, not naming decisions; ADR-0006 names
-these Surfaces where it decides the topology, and the window title and context
-label are one user-facing string per Surface. Generated help therefore reads
-"Cards is a horizontal list: Left and Right move between cards, Up and Down read
-details."
+**Naming.** Cards is the class menu. Card Browser is its collection
+Drill-down. Decks holds saved decks, and Deck detail opens one deck's contents.
+Generated help uses each Surface's registered name and widget type.
 
 ## Navigation stack, window title, topology
 
@@ -651,7 +646,13 @@ level to Decks (ADR-0006).
 **Entry utterance:** `"{Deck name}, {title}, {position} of {count}"`, or
 `"{Deck name}: empty"` (ADR-0007).
 
-**Rows:** the deck's cards. Title `"{Card name} x{n}"` when the deck holds more
+**Rows:** the deck's cards, sorted by printed mana cost ascending, then name
+without case distinctions. Copy counts stay together on one row. Sorting is a
+presentation choice and does not change the saved deck code. Live Remaining
+Deck and replay deck browsing use the same ordering; hands, boards, and
+played/drawn history keep their game order.
+
+Title `"{Card name} x{n}"` when the deck holds more
 than one copy, `"{Card name}"` otherwise — ADR-0007 names this exact case
 ("a Deck Contents duplicate needs its count"). Lines: 1 `"{cost} mana"`;
 2 `"{Type}"`; 3 `"{Attack} attack, {Health} health"` where applicable; 4 card
@@ -718,17 +719,29 @@ specced for an invalid path.
 
 ## Cards
 
-**Widget type:** Horizontal list, single zone. Card Library is deleted; Home →
-Cards opens the browser directly on All Cards, with class selection, search, and
-the mana filter inside the list — one Surface, one keymap (ADR-0006). Generated
-help reads "Cards is a horizontal list: Left and Right move between cards, Up
-and Down read details" (ADR-0009's sentence, under this spec's
-[Naming](#announcement-grammar) ruling).
+**Widget type:** Vertical menu. Classes appear in alphabetical order, followed
+by Neutral and All cards. Enter opens the selected collection in Card Browser.
+Up and Down move between choices. Home and End reach the first and last choice.
 
-**Reached and left:** Screen jump from Home (`C`, or Enter on option 3) or the
-system-wide hotkey Ctrl+Shift+C. Back goes Home (ADR-0006).
+**Reached and left:** Screen jump from Home with C or Enter on option 3, or
+Ctrl+Shift+C. Back goes Home. The menu keeps its cursor when revealed again.
 
-**Window title:** `Cards — StoneReader` (ADR-0006).
+**Window title:** `Cards — StoneReader`.
+**Entry utterance:** `"Cards, {current option}"`.
+
+### Card browser
+
+**Widget type:** Horizontal list, single zone. Cards are ordered by printed
+mana cost ascending, then name without case distinctions. Equal-cost copies
+with identical names use DBF ID as a stable final ordering.
+
+**Reached and left:** Enter on a class, Neutral, or All cards in Cards. Back
+returns to Cards at the previous menu position. Tab and Shift+Tab cycle the
+same order as the class menu. Mana and search filters persist across classes.
+Choosing a menu option or changing a filter resets the card and detail cursors.
+Abandoning search or returning from help or Sounds menu keeps the current card.
+
+**Window title:** `Card Browser — StoneReader`.
 **Entry utterance:** `"{Context label}, {title}, {position} of {count}"`, where
 the context label carries the active filter and search state (ADR-0007). Empty
 results degrade to `"{Context label}: empty"`, which dissolves a separate "No
@@ -1296,7 +1309,7 @@ ADR-0009).
 **Options,** in order (ADR-0009):
 
 1. **The widget-type sentence**, generated from the Surface's declared type —
-   "Cards is a horizontal list: Left and Right move between cards, Up and Down
+   "Card Browser is a horizontal list: Left and Right move between cards, Up and Down
    read details."
 2. **Screen-specific bindings**, one option per binding, **key-first**:
    `"{Key}: {action phrase}"` — "D: jump to Remaining Deck". Title-line rules

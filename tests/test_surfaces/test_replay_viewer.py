@@ -109,6 +109,25 @@ def _empty_state(turn: int, active: int) -> GameState:
     )
 
 
+def test_deck_browses_by_printed_mana_then_name_without_reordering_hand() -> None:
+    entities = (
+        _entity(1, _card("EXPENSIVE", "Expensive", cost=10)),
+        _entity(2, _card("BETA", "Beta", cost=2)),
+        _entity(3, _card("ALPHA", "alpha", cost=2)),
+        _entity(4, _card("ZERO", "Zero", cost=0)),
+    )
+    state = replace(_empty_state(1, 1), player_deck=(None, *entities), player_hand=entities)
+    replay = ReplayState(states=(state,), friendly_player_id=1)
+    harness = _harness(replay)
+    harness.press(Chord("d"))
+    assert list(harness.horizontal.current_zone().items()) == [
+        entities[3], entities[2], entities[1], entities[0], None,
+    ]
+    harness.press(Chord("c"))
+    assert [item.entity_id for item in harness.horizontal.current_zone().items()] == [1, 2, 3, 4]
+    assert state.player_deck == (None, *entities)
+
+
 def _replay() -> ReplayState:
     boar = _card("BOAR", "Boar", attack=1, health=3, text="Charge.")
     yeti = _card("YETI", "Yeti", cost=4, attack=4, health=5)

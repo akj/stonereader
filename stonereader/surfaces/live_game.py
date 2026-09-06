@@ -6,7 +6,7 @@ from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from stonereader.models.card import Card
+from stonereader.models.card import Card, card_sort_key
 from stonereader.models.game_state import GameState
 from stonereader.surfaces._game_surface import (
     card_items,
@@ -94,7 +94,7 @@ def build_live_game(
             RemainingDeckItem(cards[card_id], copies, current.player_deck_count)
             for card_id, copies in sorted(
                 counts.items(),
-                key=lambda pair: (cards[pair[0]].cost, cards[pair[0]].name),
+                key=lambda pair: card_sort_key(cards[pair[0]]),
             )
         ]
 

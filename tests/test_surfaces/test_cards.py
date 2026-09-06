@@ -5,7 +5,7 @@ import pytest
 from stonereader.models.card import Card, CardDatabase
 from stonereader.services._audio_index import CardClip
 from stonereader.surfaces._help_content import screen_bindings
-from stonereader.surfaces.cards import build_cards
+from stonereader.surfaces.cards import CardsState, build_card_browser, build_cards
 from stonereader.surfaces.sounds_menu import SoundsMenuHolder
 from stonereader.ui.builder import build_active_surface
 from stonereader.ui.chords import Chord
@@ -84,12 +84,13 @@ def make_harness(
             lambda: placeholder_surface("Sounds menu"),
         )
     harness.set_surface(
-        build_cards(
+        build_card_browser(
             harness.announcer,
             [],
             harness.nav,
             card_db,
             harness.sink,
+            CardsState(),
             audio_index=audio_index,
             sounds=sounds,
         )
@@ -151,14 +152,15 @@ def commit_search(harness: Harness[None], query: str) -> None:
     harness.press(Chord("enter"))
 
 
-def test_real_database_is_loaded_once_and_initial_results_are_name_sorted(
+def test_real_database_is_loaded_once_and_initial_results_are_mana_then_name_sorted(
     real_card_db: CardDatabase,
 ) -> None:
     harness = make_harness(real_card_db)
     values = list(harness.subject_surface.spec.zones[0].items())
 
     assert values
-    assert [value.name for value in values] == sorted(value.name for value in values)
+    keys = [(value.cost, value.name.casefold(), value.dbf_id) for value in values]
+    assert keys == sorted(keys)
     assert all(value.collectible for value in values)
 
 
@@ -201,7 +203,7 @@ def test_filters_and_search_and_clearing_one_leaves_the_others() -> None:
     assert current_names(harness) == ["Mage Fire Three"]
 
     harness.press(Chord("3"))
-    assert current_names(harness) == ["Mage Fire Four", "Mage Fire Three"]
+    assert current_names(harness) == ["Mage Fire Three", "Mage Fire Four"]
     assert harness.subject_surface.spec.context_label is not None
     assert harness.subject_surface.spec.context_label() == "Mage cards, matching fire"
 
@@ -210,9 +212,9 @@ def test_filters_and_search_and_clearing_one_leaves_the_others() -> None:
         harness.press(Chord("backspace"))
     harness.press(Chord("enter"))
     assert current_names(harness) == [
-        "Mage Fire Four",
         "Mage Fire Three",
         "Mage Water Three",
+        "Mage Fire Four",
     ]
     assert harness.subject_surface.spec.context_label() == "Mage cards"
 
@@ -230,14 +232,14 @@ def test_digits_toggle_exact_zero_and_nine_plus_filters() -> None:
     harness.press(Chord("0"))
     assert current_names(harness) == ["Zero"]
     harness.press(Chord("0"))
-    assert current_names(harness) == ["Eight", "Nine", "Twelve", "Zero"]
+    assert current_names(harness) == ["Zero", "Eight", "Nine", "Twelve"]
 
     harness.press(Chord("9"))
     assert current_names(harness) == ["Nine", "Twelve"]
     assert harness.subject_surface.spec.context_label is not None
     assert harness.subject_surface.spec.context_label() == "All cards, 9 plus mana"
     harness.press(Chord("9"))
-    assert current_names(harness) == ["Eight", "Nine", "Twelve", "Zero"]
+    assert current_names(harness) == ["Zero", "Eight", "Nine", "Twelve"]
 
 
 def test_tab_cycles_both_directions_with_wraparound() -> None:
@@ -246,11 +248,11 @@ def test_tab_cycles_both_directions_with_wraparound() -> None:
     assert label is not None
 
     harness.press(Chord("tab"))
-    assert label() == "Demon Hunter cards"
+    assert label() == "Death Knight cards"
     harness.press(Chord("tab", shift=True))
     assert label() == "All cards"
     harness.press(Chord("tab", shift=True))
-    assert label() == "Warrior cards"
+    assert label() == "Neutral cards"
     harness.press(Chord("tab"))
     assert label() == "All cards"
 
@@ -378,6 +380,7 @@ def test_detail_lines_cover_minion_weapon_spell_and_empty_text() -> None:
         )
     )
 
+    harness.press(Chord("right"))
     assert harness.horizontal.items_snapshot()[2] == [
         "2 mana",
         "Minion",
@@ -397,7 +400,7 @@ def test_detail_lines_cover_minion_weapon_spell_and_empty_text() -> None:
         "Epic",
         "EXPERT1",
     ]
-    harness.press(Chord("right"))
+    harness.press(Chord("home"))
     assert harness.horizontal.items_snapshot()[2] == [
         "1 mana",
         "Spell",
@@ -435,12 +438,13 @@ def test_filter_state_survives_leave_and_return() -> None:
     def cards_factory() -> ActiveSurface:
         nonlocal builds, cards_surface
         builds += 1
-        cards_surface = build_cards(
+        cards_surface = build_card_browser(
             harness.announcer,
             [],
             harness.nav,
             card_db,
             harness.sink,
+            CardsState(),
         )
         return cards_surface
 
@@ -453,15 +457,15 @@ def test_filter_state_survives_leave_and_return() -> None:
         )
 
     harness.nav.register("Home", home_factory)
-    harness.nav.register("Cards", cards_factory)
-    harness.nav.jump("Cards")
+    harness.nav.register("Card Browser", cards_factory)
+    harness.nav.jump("Card Browser")
     assert cards_surface is not None
     cycle_to_mage(harness)
     harness.press(Chord("3"))
     commit_search(harness, "fire")
 
     harness.nav.jump("Home")
-    harness.nav.jump("Cards")
+    harness.nav.jump("Card Browser")
 
     assert cards_surface.spec.context_label is not None
     assert cards_surface.spec.context_label() == (
@@ -472,3 +476,87 @@ def test_filter_state_survives_leave_and_return() -> None:
         "Mage cards, 3 mana, matching fire, Fire Three, 1 of 1",
         True,
     )
+
+
+def test_class_menu_drills_down_to_sorted_cards_and_back_keeps_menu_position() -> None:
+    card_db = database(
+        card(1, "Zebra", cost=0, card_class="MAGE"),
+        card(2, "Beta", cost=2, card_class="MAGE"),
+        card(3, "alpha", cost=2, card_class="MAGE"),
+        card(4, "Neutral card", cost=1),
+    )
+    harness = make_base_harness(None)
+    state = CardsState()
+    harness.nav.register("Home", lambda: build_active_surface(
+        SurfaceSpec("Home", WidgetType.VERTICAL_MENU, options=lambda: []),
+        harness.announcer, [], harness.nav,
+    ))
+    harness.nav.register("Cards", lambda: build_cards(
+        harness.announcer, [], harness.nav, state,
+    ))
+    harness.nav.register("Card Browser", lambda: build_card_browser(
+        harness.announcer, [], harness.nav, card_db, harness.sink, state,
+    ))
+    harness.nav.jump("Cards")
+    titles, _ = harness.vertical.options_snapshot()
+    assert titles == [
+        "Death Knight", "Demon Hunter", "Druid", "Hunter", "Mage", "Paladin",
+        "Priest", "Rogue", "Shaman", "Warlock", "Warrior", "Neutral", "All cards",
+    ]
+    for _ in range(4):
+        harness.press(Chord("down"))
+    harness.press(Chord("enter"))
+    assert harness.nav.stack == ("Home", "Cards", "Card Browser")
+    assert current_names(harness) == ["Zebra", "alpha", "Beta"]
+    assert harness.speech.calls[-1] == ("Mage cards, Zebra, 1 of 3", True)
+    harness.press(Chord("2"))
+    harness.press(Chord("right"))
+    harness.press(Chord("escape"))
+    assert harness.nav.stack == ("Home", "Cards")
+    assert harness.vertical.options_snapshot()[1] == 4
+    assert harness.speech.calls[-1] == ("Cards, Mage", True)
+    harness.press(Chord("enter"))
+    assert current_names(harness) == ["alpha", "Beta"]
+    assert harness.horizontal.items_snapshot()[1] == 0
+    harness.press(Chord("2"))
+    harness.press(Chord("backspace"))
+    for _ in range(7):
+        harness.press(Chord("down"))
+    harness.press(Chord("enter"))
+    assert current_names(harness) == ["Neutral card"]
+    assert harness.speech.calls[-1] == ("Neutral cards, Neutral card, 1 of 1", True)
+    harness.nav.jump("Cards")
+    assert harness.nav.stack == ("Home", "Cards")
+    harness.press(Chord("escape"))
+    assert harness.nav.stack == ("Home",)
+
+
+def test_filter_changes_reset_card_and_detail_cursors_and_notify_renderer() -> None:
+    harness = make_harness(database(*(
+        card(index, f"Mage {index}", cost=2, card_class="MAGE")
+        for index in range(5)
+    )))
+    renders: list[int] = []
+    harness.horizontal.subscribe(
+        lambda: renders.append(harness.horizontal.items_snapshot()[1])
+    )
+    for change in (lambda: cycle_to_mage(harness),
+                   lambda: harness.press(Chord("2")),
+                   lambda: commit_search(harness, "Mage")):
+        harness.press(Chord("end"))
+        harness.press(Chord("down"))
+        change()
+        assert harness.horizontal.items_snapshot()[1] == 0
+        assert renders[-1] == 0
+        start = len(harness.speech.calls)
+        harness.press(Chord("down", shift=True))
+        assert harness.speech.calls[start][0] == "Mage 0"
+
+
+def test_abandoning_search_keeps_the_current_card() -> None:
+    harness = make_harness(database(card(1, "First"), card(2, "Second")))
+    harness.press(Chord("end"))
+    harness.press(Chord("f", ctrl=True))
+    harness.type("missing")
+    harness.press(Chord("escape"))
+    assert harness.horizontal.items_snapshot()[1] == 1

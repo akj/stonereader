@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Protocol
 
+from stonereader.models.card import card_sort_key
 from stonereader.models.game_state import GameEntity, GameState, PlayedCard
 from stonereader.models.replay import ReplayState
 from stonereader.services._event_phrases import phrase
@@ -260,7 +261,14 @@ def build_replay_viewer(
         # its constant "No {label} on this screen" phrase from this label.
         card_zone("your_weapon", "Your weapon", "w", "W: your weapon", singleton(state, "player_weapon")),
         card_zone("opponent_weapon", "Opponent weapon", "w", "Shift+W: opponent weapon", singleton(state, "opponent_weapon"), shift=True),
-        card_zone("your_deck", "Your deck", "d", "D: jump to Remaining Deck", card_items(state, "player_deck")),
+        card_zone("your_deck", "Your deck", "d", "D: jump to Remaining Deck", lambda: sorted(
+            state().player_deck,
+            key=lambda entity: (
+                (False, *card_sort_key(entity.base_card))
+                if entity is not None and entity.base_card is not None
+                else (True, 0, card_name(entity).casefold(), 0)
+            ),
+        )),
         card_zone("your_played", "Your played", "p", "P: cards you played", card_items(state, "player_played"), with_turn=True),
         card_zone("opponent_played", "Opponent played", "p", "Shift+P: cards your opponent played", card_items(state, "opponent_played"), shift=True, with_turn=True),
         card_zone("your_drawn", "Your drawn", "n", "N: cards you drew", card_items(state, "player_drawn"), with_turn=True),

@@ -22,7 +22,7 @@ from stonereader.models.game_state import GameState
 from stonereader.services._audio_player import AudioPlayer
 from stonereader.speech_service import SpeechService
 from stonereader.surfaces._deck_data import CurrentDeck, DeckData
-from stonereader.surfaces.cards import build_cards
+from stonereader.surfaces.cards import CardsState, build_card_browser, build_cards
 from stonereader.surfaces.deck_detail import build_deck_detail
 from stonereader.surfaces.decks import build_decks
 from stonereader.surfaces.help import HelpOrigin, build_help, open_help
@@ -403,13 +403,24 @@ class StoneReaderApp(wx.App):
                 _copy_to_clipboard,
             )
 
+        cards_state = CardsState()
+
         def cards_factory() -> ActiveSurface:
             return build_cards(
                 announcer,
                 self._frame.universal_bindings,
                 nav,
+                cards_state,
+            )
+
+        def card_browser_factory() -> ActiveSurface:
+            return build_card_browser(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
                 card_db,
                 self._frame._sink,
+                cards_state,
                 audio_index=audio_index,
                 sounds=sounds,
             )
@@ -558,6 +569,7 @@ class StoneReaderApp(wx.App):
         nav.register("Home", home_factory)
         nav.register("Live Game", live_game_factory)
         nav.register("Cards", cards_factory)
+        nav.register("Card Browser", card_browser_factory)
         nav.register("Decks", decks_factory)
         nav.register("Deck detail", deck_detail_factory)
         nav.register("Import Deck", import_deck_factory)

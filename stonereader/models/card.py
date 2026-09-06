@@ -240,7 +240,7 @@ class CardDatabase:
                 for c in candidates
                 if query_lower in c.name.lower() or query_lower in c.text.lower()
             ]
-        return sorted(candidates, key=lambda c: c.name)
+        return sorted(candidates, key=card_sort_key)
 
     def get_cards_by_class(self, card_class: str) -> List[Card]:
         return self.cards_by_class.get(card_class, [])
@@ -259,3 +259,8 @@ class CardDatabase:
 
     def total_collectible_cards(self) -> int:
         return len(self.collectible_cards)
+
+
+def card_sort_key(card: Card) -> tuple[int, str, int]:
+    """Order collections and deck contents by mana, name, then printing."""
+    return card.cost, card.name.casefold(), card.dbf_id

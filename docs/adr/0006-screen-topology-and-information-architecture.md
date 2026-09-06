@@ -99,13 +99,20 @@ is already assigned: F1's per-surface help menu (ticket #23) and Home
 itself. Reversible omission: a mirror menu bar could be added later without
 disturbing the topology.
 
-### Card Library is deleted; Cards is the Card Browser
+### Cards opens a class menu
 
-The Library's one job — pick a class — is a job ADR-0004 already gave the
-Browser (Tab/Shift+Tab group-jumps the class filter, HSA collection
-precedent). Home → Cards opens the Browser directly on All Cards with the
-standard entry announcement; class selection, search (Ctrl+F), and mana
-filter (0–9) live inside the list. One surface, one keymap.
+Revised 2026-09-06 for issue #8 at Andrew's request.
+
+Home → Cards opens a vertical menu of classes in alphabetical order, then
+Neutral, then All cards. Enter opens Card Browser for that choice. Back
+returns to the class menu at its previous position, then Home.
+
+Card Browser is a horizontal list ordered by printed mana cost, then card
+name without case distinctions. Tab and Shift+Tab cycle the same menu order.
+Search and mana filters stay in Card Browser and persist across class changes.
+Selecting a class, changing a mana filter, or committing a search resets the
+card and detail cursors to the first card. Back from help or Sounds menu keeps
+the current card. A screen jump to Cards always returns to the class menu.
 
 ### Import Deck lives inside Decks
 
@@ -168,7 +175,7 @@ surfaces slot in without new grammar — Battlegrounds tools and pack
 tracking land on reserved letters that agree with HSA's own B and O.
 Per-surface specs need only name their drill-downs.
 
-**Negative.** Shipped behavior changes: Card Library is deleted,
+**Negative.** Shipped behavior changes: Cards opens a class menu,
 `Ctrl+Shift+R` changes meaning, Import Deck leaves Home, the clipboard
 flow demands one extra keypress, and the stack model invalidates the
 current `NavigationController` append/pop logic (`stonereader/app.py`) —

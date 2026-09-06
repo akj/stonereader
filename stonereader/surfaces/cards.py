@@ -14,7 +14,7 @@ from stonereader.ui.chords import Chord
 from stonereader.ui.engines import HorizontalListEngine
 from stonereader.ui.navigation import ActiveSurface, NavigationController
 from stonereader.ui.registry import Command, Slot
-from stonereader.ui.surface import Binding, SurfaceSpec, WidgetType, ZoneSpec
+from stonereader.ui.surface import Binding, MenuOption, SurfaceSpec, WidgetType, ZoneSpec
 from stonereader.ui.text_mode import TextSession
 
 
@@ -25,13 +25,20 @@ class TextModeSink(Protocol):
 
 
 _CLASS_FILTERS: tuple[tuple[str, str | None], ...] = (
-    ("All", None),
-    *((label, value) for value, label in CARD_CLASS_NAMES.items()),
+    *sorted(
+        (label, value)
+        for value, label in CARD_CLASS_NAMES.items()
+        if value != "NEUTRAL"
+    ),
+    ("Neutral", "NEUTRAL"),
+    ("All cards", None),
 )
 
 
 @dataclass
-class _CardsState:
+class CardsState:
+    """Shared selection and filters for Cards and Card Browser."""
+
     class_filter: str | None = None
     mana_filter: int | None = None
     search: str = ""
@@ -82,22 +89,61 @@ def build_cards(
     announcer: Announcer,
     universal_bindings: list[tuple[Chord, Command]],
     nav: NavigationController,
+    state: CardsState,
+) -> ActiveSurface:
+    """Build the class menu that opens the selected collection."""
+
+    def select_class(value: str | None) -> None:
+        state.class_filter = value
+        state.invalidate()
+        browser = nav.peek("Card Browser")
+        if not isinstance(browser.engine, HorizontalListEngine):
+            raise TypeError("Card Browser requires a horizontal-list engine")
+        browser.engine.set_zone_cursor("cards", 0)
+        nav.drill_down("Card Browser")
+
+    return build_active_surface(
+        SurfaceSpec(
+            "Cards",
+            WidgetType.VERTICAL_MENU,
+            options=lambda: [
+                MenuOption(
+                    f"cards.class.{value or 'all'}",
+                    lambda label=label: label,
+                    lambda value=value: select_class(value),
+                )
+                for label, value in _CLASS_FILTERS
+            ],
+        ),
+        announcer,
+        universal_bindings,
+        nav,
+    )
+
+
+def build_card_browser(
+    announcer: Announcer,
+    universal_bindings: list[tuple[Chord, Command]],
+    nav: NavigationController,
     card_db: CardDatabase,
     sink: TextModeSink,
+    state: CardsState,
     *,
     audio_index: CardAudioIndex | None = None,
     sounds: SoundsMenuHolder | None = None,
 ) -> ActiveSurface:
-    """Build the lazy-singleton Cards Surface and its persistent filters."""
-    state = _CardsState()
+    """Build the card collection with persistent mana and search filters."""
     engine: HorizontalListEngine | None = None
 
     def items() -> list[Card]:
         return state.items(card_db)
 
-    def reland() -> None:
+    def reland(*, reset: bool = True) -> None:
         if engine is None:
             raise RuntimeError("Cards engine is not active")
+        if reset:
+            engine.set_zone_cursor("cards", 0)
+        engine.refresh()
         engine.on_landing()
 
     def cycle_class(direction: int) -> None:
@@ -120,7 +166,7 @@ def build_cards(
 
     def abandon_search() -> None:
         sink.exit_text_mode()
-        reland()
+        reland(reset=False)
 
     def open_search() -> None:
         sink.enter_text_mode(
@@ -191,7 +237,7 @@ def build_cards(
         lambda: page(-10),
     )
     spec = SurfaceSpec(
-        "Cards",
+        "Card Browser",
         WidgetType.HORIZONTAL_LIST,
         context_label=state.context_label,
         zones=[
