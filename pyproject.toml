@@ -13,13 +13,13 @@ dependencies = [
     "hsreplay>=1.16.2",
     "pip",
     "psutil>=7.0,<8",
-    "setuptools>=80.9.0,<81",
+    "setuptools>=84,<85",
     "unitypy>=1.25.3",
     "wxpython>=4.2.5",
 ]
 
 [build-system]
-requires = ["setuptools>=80.9.0,<81"]
+requires = ["setuptools>=84,<85"]
 build-backend = "setuptools.build_meta"
 
 [dependency-groups]
