@@ -164,6 +164,50 @@ def test_real_database_is_loaded_once_and_initial_results_are_mana_then_name_sor
     assert all(value.collectible for value in values)
 
 
+def test_class_lists_hold_only_deck_cards_and_no_hero_skins(
+    real_card_db: CardDatabase,
+) -> None:
+    harness = make_harness(real_card_db)
+    label = harness.subject_surface.spec.context_label
+    assert label is not None
+    lists: dict[str, list[Card]] = {}
+    for _ in range(13):
+        harness.press(Chord("tab"))
+        lists[label()] = list(harness.subject_surface.spec.zones[0].items())
+
+    assert list(lists) == [
+        "Death Knight cards", "Demon Hunter cards", "Druid cards",
+        "Hunter cards", "Mage cards", "Paladin cards", "Priest cards",
+        "Rogue cards", "Shaman cards", "Warlock cards", "Warrior cards",
+        "Neutral cards", "All cards",
+    ]
+    every_card = [card for cards in lists.values() for card in cards]
+    assert [card.id for card in every_card if card.card_set == "HERO_SKINS"] == []
+    assert {card.card_type for card in every_card} == {
+        "HERO", "LOCATION", "MINION", "SPELL", "WEAPON",
+    }
+    hunter = {card.name for card in lists["Hunter cards"]}
+    assert {"Beaststalker Tavish", "Deathstalker Rexxar", "Zul'jin"} <= hunter
+    assert "Alleria Windrunner" not in hunter
+
+
+def test_torch_reads_its_damage_and_set_name(real_card_db: CardDatabase) -> None:
+    harness = make_harness(real_card_db)
+
+    commit_search(harness, "Deal 8 damage to a damaged")
+
+    assert current_names(harness) == ["Torch"]
+    assert harness.horizontal.items_snapshot()[2] == [
+        "1 mana",
+        "Spell",
+        "Deal 8 damage to a damaged minion. "
+        "Return this to hand with any excess damage.",
+        "Warrior",
+        "Rare",
+        "CATACLYSM",
+    ]
+
+
 def test_context_label_composes_all_spec_rows_verbatim() -> None:
     harness = make_harness(
         database(
@@ -371,7 +415,7 @@ def test_detail_lines_cover_minion_weapon_spell_and_empty_text() -> None:
                 3,
                 "C Spell",
                 cost=1,
-                card_class="MAGE",
+                card_class="DEATHKNIGHT",
                 card_type="SPELL",
                 attack=8,
                 health=8,
@@ -388,7 +432,7 @@ def test_detail_lines_cover_minion_weapon_spell_and_empty_text() -> None:
         "Taunt.",
         "Mage",
         "Rare",
-        "CORE",
+        "Core",
     ]
     harness.press(Chord("right"))
     assert harness.horizontal.items_snapshot()[2] == [
@@ -398,15 +442,14 @@ def test_detail_lines_cover_minion_weapon_spell_and_empty_text() -> None:
         "Swing.",
         "Warrior",
         "Epic",
-        "EXPERT1",
+        "Classic",
     ]
     harness.press(Chord("home"))
     assert harness.horizontal.items_snapshot()[2] == [
         "1 mana",
         "Spell",
-        "Mage",
+        "Death Knight",
         "Common",
-        "TEST",
     ]
 
 
