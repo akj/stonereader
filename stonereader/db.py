@@ -307,7 +307,9 @@ def _rederive_replay_metadata(conn: sqlite3.Connection) -> None:
     """
     from stonereader.services._replay_store import derive_replay_metadata
 
-    rows = conn.execute("SELECT id, file_path FROM replays").fetchall()
+    rows = conn.execute(
+        "SELECT id, file_path, turns, game_type, format_type FROM replays"
+    ).fetchall()
     updates: list[tuple[int, str, str, int]] = []
     for row in rows:
         try:
@@ -315,8 +317,15 @@ def _rederive_replay_metadata(conn: sqlite3.Connection) -> None:
         except Exception:
             logger.exception("replay metadata repair skipped replay %s", row["id"])
             continue
+        # A file can omit what the row already knows (the recorder falls back
+        # to plain XML when enrichment fails), so only known values replace.
         updates.append(
-            (derived.turns, derived.game_type, derived.format_type, row["id"])
+            (
+                derived.turns or row["turns"],
+                _known(derived.game_type, row["game_type"]),
+                _known(derived.format_type, row["format_type"]),
+                row["id"],
+            )
         )
     conn.executemany(
         "UPDATE replays SET turns = ?, game_type = ?, format_type = ? WHERE id = ?",
@@ -329,6 +338,11 @@ def _rederive_replay_metadata(conn: sqlite3.Connection) -> None:
         len(updates),
         len(rows) - len(updates),
     )
+
+
+def _known(derived: str, stored: str | None) -> str:
+    """Prefer a derived enum name, falling back when the file did not say."""
+    return derived if derived and derived.upper() != "UNKNOWN" else (stored or "")
 
 
 def save_deck(

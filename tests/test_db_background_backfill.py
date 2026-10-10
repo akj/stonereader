@@ -131,14 +131,19 @@ def test_init_db_resumes_interrupted_backfill_at_current_schema(
     conn.close()
 
 
-def _player_two_replay(path: Path) -> Path:
-    """Write the synthetic Player 2 fixture as the recorder would save it."""
+def _player_two_replay(path: Path, *, with_meta: bool = True) -> Path:
+    """Write the synthetic Player 2 fixture as the recorder would save it.
+
+    Without meta it is the recorder's plain-XML fallback, which names no game
+    type or format.
+    """
     parser = LogParser()
     parser._current_date = datetime(2026, 6, 20, tzinfo=timezone.utc)
     with open(PLAYER_TWO_FIXTURE, encoding="utf-8") as f:
         parser.read(f)
     document = HSReplayDocument.from_packet_tree(parser.games)
-    set_game_meta_on_game({"hs_game_type": 7, "format": 1}, document.games[0])
+    if with_meta:
+        set_game_meta_on_game({"hs_game_type": 7, "format": 1}, document.games[0])
     path.write_text(document.to_xml(), encoding="utf-8")
     return path
 
@@ -215,5 +220,31 @@ def test_v3_to_v4_rederives_replay_metadata_and_converges(tmp_path):
     init_db(conn)
     assert _wait_for_replay_backfills(timeout=10)
     assert rows() == [unchanged, repaired]
+    assert get_schema_version(conn) == 4
+    conn.close()
+
+
+def test_v4_repair_keeps_known_metadata_a_plain_file_omits(tmp_path):
+    db_path = tmp_path / "test.db"
+    conn = get_connection(str(db_path))
+    conn.executescript(_SCHEMA_V4_FRESH)
+    conn.execute("INSERT INTO schema_version (version) VALUES (3)")
+    stored = _player_two_replay(tmp_path / "plain.hsreplay", with_meta=False)
+    conn.execute(
+        """INSERT INTO replays
+        (file_path, checksum, source, friendly_class, opponent_class,
+         result, turns, game_type, format_type, played_at, in_stats)
+        VALUES (?, 'plain', 'live_auto', 'DEATHKNIGHT', 'ROGUE', 'LOST', 2,
+                'RANKED', 'WILD', '2026-08-16T19:31:26+00:00', 1)""",
+        (str(stored),),
+    )
+    conn.commit()
+
+    init_db(conn)
+    assert _wait_for_replay_backfills(timeout=10)
+
+    assert tuple(
+        conn.execute("SELECT turns, game_type, format_type FROM replays").fetchone()
+    ) == (4, "RANKED", "WILD")
     assert get_schema_version(conn) == 4
     conn.close()

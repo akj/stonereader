@@ -1013,10 +1013,11 @@ def test_enter_on_a_replayed_card_finds_its_own_play() -> None:
         harness.press(Chord("enter"))
         landings.append(harness.speech.calls[-1][0])
 
-    first, second = landings
-    assert first.startswith("Your turn 1, Events, You played Boar, ")
-    assert second.startswith("Your turn 1, Events, You played Boar, ")
-    assert first != second
+    # The first row finds the first play; the second, after the bounce, the replay.
+    assert landings == [
+        "Your turn 1, Events, You played Boar, 5 of 7",
+        "Your turn 1, Events, You played Boar, 7 of 7",
+    ]
 
 
 def _recorded_replay(tmp_path: Path, log_name: str) -> Path:
