@@ -7,6 +7,12 @@ surfaces to the whole app. Implementation lands via PRDs opened against the
 final UI spec (wayfinder map #17); nothing here ships code by itself.
 Decided in ticket #18.
 
+Amended 2026-10-10 by ADR-0017: which surface gets which widget type now
+follows the axis rule — cards and game state move sideways (Card Browser,
+Deck detail, Live Game, Replay Viewer), everything else moves up and down,
+Decks and Replays included. Enter follows the fact on records, games, and a
+replay's played or drawn cards.
+
 ## Context
 
 StoneReader's screens accreted one at a time, each choosing its own keys. A

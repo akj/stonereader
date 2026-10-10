@@ -9,6 +9,12 @@ Live Game list. Retires the **Live game timeline** from CONTEXT.md.
 Implementation lands via PRDs opened against the final UI spec (wayfinder
 map #17); nothing here ships code by itself. Decided in ticket #34.
 
+Amended 2026-10-10 by ADR-0017: with no game in progress, Live Game lands on
+"Live Game, waiting for a game", and its zone, query, and navigation keys say
+"Waiting for a game"; Home's option reads the live state. The Replay
+Viewer's turn label becomes the prefix "Your turn {t}" / "Opponent's turn
+{t}", which a zone switch leaves out.
+
 ## Context
 
 ADR-0004 gave Live Game four zones (`D`, `Shift+C`, `Shift+P`, `N`) while

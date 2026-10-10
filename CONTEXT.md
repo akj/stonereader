@@ -13,19 +13,19 @@ A navigable list in the StoneReader UI with a persistent cursor and a user-facin
 _Avoid_: "pane", "section", "list", "region"
 
 **Surface**:
-A distinct place in the StoneReader UI the **User** can be — Home, Card Browser, Replay Viewer, a help screen. Surfaces stack; going back pops to the previous one. Each surface presents exactly one **Widget type**. See ADR-0004.
-_Avoid_: "screen", "panel", "page", "view" (when naming the user-facing concept)
+A distinct place in the StoneReader UI the **User** can be — Home, Decks, a Deck page, Games, Card Browser, the Replay Viewer, the **Help menu**. Surfaces stack; going back pops to the previous one. Each surface presents exactly one **Widget type**. See ADR-0004.
+_Avoid_: "screen", "panel", "page", "view" (when naming the user-facing concept in general; "the Deck page" is the Deck Surface's own name)
 
 **Widget type**:
-One of the two navigation shapes a **Surface** presents: **Vertical menu** or **Horizontal list**. There is no third type. See ADR-0004.
+One of the two navigation shapes a **Surface** presents: **Vertical menu** or **Horizontal list**. There is no third type. Which one follows the axis rule: cards and game state move sideways; everything else moves up and down. See ADR-0004, ADR-0017.
 _Avoid_: "control type", "layout"
 
 **Vertical menu**:
-The **Widget type** for choosing among options: Up/Down move a cursor over options, Enter acts on the current one. Forms are vertical menus whose options are fields and actions.
+The **Widget type** for choosing among options, records included: Up/Down move a cursor over options, Enter acts on the current one. Every **Surface** except the four **Horizontal lists** is one — Home, Decks, Deck, Games, Replays, Cards, Settings, help among them. Forms are vertical menus whose options are fields and actions. An option has no detail lines; a **Record** option says what tells it apart in its title. See ADR-0004, ADR-0017.
 _Avoid_: "list box", "menu screen"
 
 **Horizontal list**:
-The **Widget type** for browsing items with depth: Left/Right move between items, Up/Down read the detail lines of the current item.
+The **Widget type** for cards and game state: Left/Right move between items, Up/Down read the detail lines of the current item. Exactly four **Surfaces** are horizontal lists: Card Browser, Deck detail, Live Game, and the Replay Viewer. See ADR-0017.
 _Avoid_: "card list", "browse mode"
 
 **Screen jump**:
@@ -33,7 +33,7 @@ Reaching a **Surface** via a Home menu option, its Home letter, or a system-wide
 _Avoid_: "switch screen", "navigate to" (ambiguous with **Drill-down**)
 
 **Drill-down**:
-Reaching a **Surface** from within another (Replays → Replay Viewer, Decks → Import Deck, F1 → help). A drill-down pushes one level onto the surface stack; back pops exactly one. See ADR-0006.
+Reaching a **Surface** from within another (Decks → Deck → Games → Replay Viewer, Replays → Deck by D, Decks → Import Deck, F1 → **Help menu**). A drill-down pushes one level onto the surface stack; back pops exactly one. See ADR-0006, ADR-0017.
 _Avoid_: "sub-screen", "child screen"
 
 **Text mode**:
@@ -65,7 +65,7 @@ The canonical one-line identity of an item — the shortest string that distingu
 _Avoid_: "summary", "row text", "label" (that's the context's name, not the item's)
 
 **Context-entry utterance**:
-The single utterance spoken whenever the **User** lands in a context — by **Screen jump**, **Drill-down**, back-reveal, zone switch, in-place rebuild (filter/search), or orientation reread (Shift+Up). Route-invariant: the same place always sounds the same. See ADR-0007.
+The single utterance spoken whenever the **User** lands in a context — by **Screen jump**, **Drill-down**, back-reveal, zone switch, in-place rebuild (filter/search, a **Replay** turn step), or orientation reread (Shift+Up). Route-invariant: the same place always sounds the same, with one rule for what changed — a Surface-wide context prefix (the Replay Viewer's turn, "Opponent's turn 3") leads every landing, reread, and rebuild, and a zone switch leaves it out because the turn did not change. See ADR-0007, ADR-0017.
 _Avoid_: "entry announcement" (suggests surface entry only — the utterance covers every landing route)
 
 **Speech lane**:
@@ -133,6 +133,10 @@ _Avoid_: "narration event" (names a single consumer's purpose), "engine event"
 The set of **Games** counted in the **User**'s statistics. Membership is the User's say-so, not provenance: live-recorded games are members by default; imported **Replays** join only when the User opts them in. See ADR-0012.
 _Avoid_: "tracked games", "history" (the Replays list holds everything; the corpus is the counted subset)
 
+**Record**:
+A set of counted **Games** from the **Stats corpus** together with its summary — wins, losses, and ties when there are any ("3 wins, 1 loss"; "no games yet"). Records exist per saved deck, for All decks, for Other games, for the last 20 games, and per **Opponent** class, recomputed on every view. Every record shown opens the **Games** behind it. See ADR-0012, ADR-0017.
+_Avoid_: "stats", "statistics" (the retired Surface), "score"
+
 **Hearthstone Access** (or **HSA**):
 The third-party Hearthstone accessibility mod (hearthstoneaccess.com), used as StoneReader's canonical reference for keyboard navigation conventions. StoneReader's **Replay** viewer and Cards surface mirror HSA's key conventions — including its internal inconsistencies — so that HSA users carry muscle memory across. See ADR-0003.
 _Avoid_: "the mod", "HearthstoneAccess" (single word), generic "accessibility mod"
@@ -146,7 +150,8 @@ _Avoid_: "the mod", "HearthstoneAccess" (single word), generic "accessibility mo
 - A UI **zone** either projects from a game **Zone** (e.g., the Remaining Deck zone is `Zone.DECK` minus draws) or is *synthesised* (Your drawn, Opponent played) and corresponds to no single game **Zone**.
 - Each UI **zone** owns one cursor; cursors persist across zone switches via `ZoneNavigationMixin`.
 - Every item has exactly one **Title line**; everything else spoken (context label, position, "empty", confirmations) is ephemeral wrapping added by the announcement layer, never baked into item text.
-- The **Context-entry utterance** wraps the **Title line**: `"{Context label}, {title}, {position} of {count}"` for **Horizontal lists** and zones, `"{Context label}, {current option}"` for **Vertical menus**, `"{Context label}: empty"` when empty.
+- The **Context-entry utterance** wraps the **Title line**: `"{Context label}, {title}, {position} of {count}"` for **Horizontal lists** and zones, `"{Context label}, {current option}"` for **Vertical menus**, `"{Context label}: empty"` when empty. An empty UI **zone** is a place: its letter lands there and says so.
+- Every **Record** shown opens the **Games** it counts; a **Game** in Replays opens the Deck page of the saved deck it was played with, when that deck is still saved (ADR-0017).
 - Every utterance belongs to exactly one **Speech lane**; a **Game event** may only ever speak on Lane 2.
 - Every **Surface** has a **Help menu**, reached by F1; its options mirror the surface's bindings exactly (they are one registry), and Enter performs the chosen binding.
 - **Game audio** never delays or preempts speech; at most one clip plays at a time (a new one replaces it); surface transitions and a bare Ctrl tap stop it; ordinary navigation lets it play out. A **Live game** surface never plays **Game audio** — the real client's audio is already present.

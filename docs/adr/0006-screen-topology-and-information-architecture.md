@@ -6,6 +6,13 @@ Accepted (design contract, 2026-08-13). Builds on ADR-0004's navigation
 contract; implementation lands via PRDs opened against the final UI spec
 (wayfinder map #17); nothing here ships code by itself. Decided in ticket #19.
 
+Amended 2026-10-10 by ADR-0017: the Statistics drill-down is retired. Records
+live on a Deck page, reached from Decks' options and from Replays' D, and each
+record row drills into a Games list. "Import deck…" and "Import replays…"
+stay the last options of Decks and Replays. The window gains a heading with
+the stack path and shows a horizontal list's detail lines beside the list;
+the title names a Surface's subject where it has one ("Odd Hunter").
+
 ## Context
 
 StoneReader's screens accreted without an information architecture. Home is a
