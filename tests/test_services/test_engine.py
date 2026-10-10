@@ -245,6 +245,39 @@ def test_dead_minion_drives_minion_died_end_to_end():
     assert deaths[0].controller == 1
 
 
+def test_card_missing_from_card_data_keeps_its_id_out_of_names():
+    """A card id the card data lacks (a newer set) never becomes a card's name,
+    and the game's own CARDTYPE tag still lets the card die as a minion.
+    """
+    engine = GameEngine(card_db=CardDatabase())
+    engine.apply(
+        CreateGamePacket(
+            packet_id=0,
+            game_entity_id=1,
+            players=((2, 1, "P1", 1, 1), (3, 2, "P2", 2, 2)),
+        )
+    )
+    engine.apply(
+        FullEntityPacket(
+            packet_id=1,
+            entity_id=10,
+            card_id="ZZZ_001",
+            tags={"CONTROLLER": 1, "ZONE": 3, "CARDTYPE": 4, "HEALTH": 3},
+        )
+    )
+    engine.apply(BlockStartPacket(packet_id=2, block_type="PLAY", entity_id=10))
+    engine.apply(TagChangePacket(packet_id=3, entity_id=10, tag="ZONE", value=1))
+    prev = engine.current_state
+    assert prev is not None
+    assert [(c.card_id, c.name) for c in prev.player_played] == [("ZZZ_001", "")]
+    assert [(e.name, e.card_type) for e in prev.player_board] == [("", "MINION")]
+
+    engine.apply(TagChangePacket(packet_id=4, entity_id=10, tag="ZONE", value=4))
+    curr = engine.current_state
+    assert curr is not None
+    assert [type(e).__name__ for e in diff(prev, curr)] == ["MinionDied"]
+
+
 def test_damage_under_attack_block_republishes_and_drives_damage_dealt():
     """A DAMAGE TagChange under an open ATTACK block must republish the snapshot
     so the diff seam emits DamageDealt while the block context is still open.

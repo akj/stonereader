@@ -402,6 +402,58 @@ def test_hidden_to_revealed_card_id_emits_card_revealed() -> None:
     assert ev.controller == 2
 
 
+def test_own_draw_is_not_also_a_reveal() -> None:
+    """Your own draw arrives face up: the draw names the card, so a reveal at
+    the same moment would only say it again."""
+    in_deck = _entity(entity_id=51, zone="DECK", controller=1)
+    drawn = _entity(
+        entity_id=51, zone="HAND", card_id="CS2_182", name="Chillwind Yeti"
+    )
+    prev = _state(turn=1, player_deck=(in_deck,))
+    curr = _state(turn=1, player_hand=(drawn,))
+
+    assert [type(e) for e in diff(prev, curr)] == [CardDrawn]
+
+
+def test_play_that_turns_a_card_face_up_is_not_also_a_reveal() -> None:
+    hidden = _entity(entity_id=52, zone="HAND", controller=2)
+    played = _entity(
+        entity_id=52,
+        zone="PLAY",
+        card_id="CS2_182",
+        name="Chillwind Yeti",
+        controller=2,
+        card_type="MINION",
+    )
+    prev = _state(turn=2, opponent_hand=(hidden,))
+    curr = _state(turn=2, opponent_board=(played,), block_stack=("PLAY",))
+
+    assert [type(e) for e in diff(prev, curr)] == [CardPlayed]
+
+
+def test_deck_card_turned_face_up_in_place_is_still_a_reveal() -> None:
+    """A joust shows a deck card without moving it: the reveal is the news."""
+    hidden = _entity(entity_id=53, zone="DECK", controller=1)
+    shown = _entity(entity_id=53, zone="DECK", card_id="CS2_182", name="Yeti")
+    prev = _state(turn=3, player_deck=(hidden,))
+    curr = _state(turn=3, player_deck=(shown,))
+
+    assert [type(e) for e in diff(prev, curr)] == [CardRevealed]
+
+
+def test_expired_enchantment_is_not_a_removed_card() -> None:
+    enchantment = _entity(
+        entity_id=54,
+        zone="GRAVEYARD",
+        card_id="ZZZ_001e",
+        card_type="ENCHANTMENT",
+    )
+    prev = _state(turn=2)
+    curr = _state(turn=2, graveyard=(enchantment,))
+
+    assert list(diff(prev, curr)) == []
+
+
 # ------------------------------------------------------------------ Secrets
 
 
@@ -453,6 +505,7 @@ def test_known_secret_leaving_for_graveyard_emits_secret_revealed_once() -> None
             turn=4,
             name="Freezing Trap",
             controller=2,
+            card_id="EX1_611",
         )
     ]
 

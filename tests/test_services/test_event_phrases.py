@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from stonereader.models.card import Card
 from stonereader.models.game_state import GameEntity, GameState, Hero
 from stonereader.services._event_phrases import phrase
@@ -95,6 +97,34 @@ def test_phrases_every_existing_event_type() -> None:
         (SecretPlayed(0, 4, 2), "Opponent played a secret"),
         (SecretPlayed(0, 4, 1), "You played a secret"),
         (SecretRevealed(0, 4, "Freezing Trap", 2), "Secret revealed, Freezing Trap"),
+    ]
+    for event, expected in cases:
+        assert phrase(event, state) == expected
+
+
+def test_a_card_missing_from_card_data_is_unrecognized_never_its_id() -> None:
+    newer = GameEntity(70, "ZZZ_001", None, "", 0, 5, 3, "MINION", "PLAY", 1, 1)
+    hidden = GameEntity(71, "", None, "", 0, 0, 0, "", "GRAVEYARD", 0, 2)
+    state = _state()
+    state = replace(
+        state, player_board=(*state.player_board, newer), graveyard=(hidden,)
+    )
+    cases = [
+        (CardDrawn(0, 4, 70, "ZZZ_001", None, "", 1), "You drew Unrecognized card"),
+        (
+            CardPlayed(0, 4, 70, "ZZZ_001", None, "", 2),
+            "Opponent played Unrecognized card",
+        ),
+        (CardRevealed(0, 4, 70, "ZZZ_001", None, "", 2), "Unrecognized card revealed"),
+        (MinionDied(0, 4, 70, "ZZZ_001", "", 1), "Unrecognized card died"),
+        (
+            SecretRevealed(0, 4, "", 2, "ZZZ_002"),
+            "Secret revealed, Unrecognized card",
+        ),
+        (CardRemoved(0, 4, 70, "ZZZ_001", 1), "Unrecognized card removed"),
+        (AttackStarted(0, 4, 70, 20, 1), "Unrecognized card attacks Yeti"),
+        # A card the game kept hidden is a different fact.
+        (CardRemoved(0, 4, 71, "", 2), "Unknown card removed"),
     ]
     for event, expected in cases:
         assert phrase(event, state) == expected

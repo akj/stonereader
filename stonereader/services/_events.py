@@ -109,11 +109,16 @@ class SecretRevealed(GameEvent):
 
     name: str
     controller: int
+    card_id: str = ""
 
 
 @dataclass(frozen=True)
 class CardRevealed(GameEvent):
-    """Emitted when a previously-hidden card becomes visible (e.g., opponent secret triggers, joust reveal)."""
+    """Emitted when a previously-hidden card becomes visible (e.g., a joust or hand reveal).
+
+    Not emitted beside a CardPlayed or your own CardDrawn of the same entity:
+    those already name the card.
+    """
 
     entity_id: int
     card_id: str

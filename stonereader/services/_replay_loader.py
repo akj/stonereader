@@ -59,7 +59,7 @@ from hsreplay.document import HSReplayDocument
 from stonereader.models.game_state import GameState
 from stonereader.models.replay import ReplayState
 from stonereader.services._engine import GameEngine
-from stonereader.services._hslog_translator import translate_packet_tree
+from stonereader.services._hslog_translator import is_sub_spell, translate_packet_tree
 from stonereader.services._packets import CreateGamePacket, GameMetaPacket
 
 
@@ -218,8 +218,9 @@ def _resolve_enums(tree: Any) -> None:
        ``"POWER"`` and ``"ATTACK"`` never match — replay event drilldown then
        silently drops card-play, attack and damage events.
 
-    Re-resolving both restores parity with a freshly-parsed live tree. Unknown
-    int identifiers are left as-is (idempotent and lossless).
+    Re-resolving both restores parity with a freshly-parsed live tree. The
+    walk descends into Block and SubSpell children alike. Unknown int
+    identifiers are left as-is (idempotent and lossless).
     """
     _walk_resolve(getattr(tree, "packets", []) or [])
 
@@ -228,6 +229,8 @@ def _walk_resolve(nodes: Any) -> None:
     for node in nodes:
         if isinstance(node, hslog_packets.Block):
             node.type = _to_blocktype(getattr(node, "type", None))
+            _walk_resolve(getattr(node, "packets", []) or [])
+        elif is_sub_spell(node):
             _walk_resolve(getattr(node, "packets", []) or [])
         elif isinstance(node, hslog_packets.TagChange):
             node.tag = _to_gametag(node.tag)

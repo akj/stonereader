@@ -188,6 +188,34 @@ def test_live_parser_matches_translate_packet_tree() -> None:
     )
 
 
+def test_sub_spell_children_translate_in_place_live_and_whole_file() -> None:
+    """A SUB_SPELL only wraps a visual effect: the cards it reveals and draws
+    land inside the enclosing block, with no block boundary of its own.
+
+    reveals_and_new_cards.log draws entities 5 and 6 inside a sub-spell in a
+    POWER block of the friendly hero (entity 10).
+    """
+    name = "reveals_and_new_cards.log"
+    whole_file = translate_packet_tree(_tree_from_fixture(name))
+    start = next(
+        i
+        for i, p in enumerate(whole_file)
+        if isinstance(p, BlockStartPacket) and p.block_type == "POWER"
+    )
+    block = whole_file[start : start + 5]
+
+    assert [(type(p).__name__, getattr(p, "entity_id")) for p in block] == [
+        ("BlockStartPacket", 10),
+        ("ShowEntityPacket", 5),
+        ("ShowEntityPacket", 6),
+        ("TagChangePacket", 6),
+        ("BlockEndPacket", 10),
+    ]
+    assert [_normalize(p) for p in _live_sequence(name)] == [
+        _normalize(p) for p in whole_file
+    ]
+
+
 def test_equivalence_preserves_create_game_structure() -> None:
     """The normalized equivalence still pins everything except player names.
 
