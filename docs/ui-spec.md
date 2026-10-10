@@ -1320,8 +1320,11 @@ when nonzero. Lines: hero power, weapon, and `"{n} secrets"` ("1 secret").
 already names the side and number — "Opponent's turn 2, Events, Start of
 turn, 1 of 1" (ADR-0017). A reveal that only restates a draw or play at the
 same moment is not a separate event, and an enchantment wearing off is not
-an event. Lines: 1 `"Turn {t}"`; 2 the source card's title where the event
-has one.
+an event. A spell cast from hand is played like a minion ("Opponent played
+Fireball"); a weapon that breaks reads "{Weapon} destroyed". A card created
+straight into a hand (The Coin) is drawn, in the events and the drawn zones
+alike. Lines: 1 `"Turn {t}"`; 2 the source card's title where the event has
+one.
 
 **Event scrubbing** (ADR-0015). The events zone is the Surface's **fine
 axis**: the selected event renders every other zone at the game just after
