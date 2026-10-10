@@ -12,7 +12,7 @@ from stonereader.db import (
     insert_replay,
     save_deck,
 )
-from stonereader.services._stats import compute_stats
+from stonereader.services._stats import Record, compute_records
 
 
 @pytest.fixture
@@ -34,8 +34,8 @@ def _replay(
     deck_name: str | None = None,
     opponent_class: str = "WARRIOR",
     played_at: str = "2026-08-16T12:00:00",
-) -> None:
-    insert_replay(
+) -> int:
+    return insert_replay(
         conn,
         file_path=f"{checksum}.hsreplay",
         checksum=checksum,
@@ -53,89 +53,77 @@ def _replay(
     )
 
 
-def test_corpus_attribution_zero_decks_and_row_order(
+def _ids(record: Record) -> list[int]:
+    return [game.id for game in record.games]
+
+
+def test_corpus_splits_into_saved_decks_plus_other_games(
     conn: sqlite3.Connection,
 ) -> None:
-    current_id = save_deck(conn, "Current saved name", "MAGE", "Standard", "a")
-    save_deck(conn, "Zulu Zero", "MAGE", "Standard", "b")
-    save_deck(conn, "Alpha Zero", "MAGE", "Standard", "c")
-    deleted_id = save_deck(conn, "Deleted saved name", "MAGE", "Standard", "d")
+    saved_id = save_deck(conn, "Saved", "MAGE", "Standard", "a")
+    unused_id = save_deck(conn, "Unused", "MAGE", "Standard", "b")
+    deleted_id = save_deck(conn, "Deleted", "MAGE", "Standard", "c")
     delete_deck(conn, deleted_id)
-    conn.execute(
-        "UPDATE decks SET created_at = CASE name "
-        "WHEN 'Alpha Zero' THEN '2026-08-17T12:00:00' "
-        "WHEN 'Zulu Zero' THEN '2026-08-15T12:00:00' END "
-        "WHERE name IN ('Alpha Zero', 'Zulu Zero')"
-    )
-    conn.commit()
 
-    _replay(
-        conn,
-        "deleted-new",
-        deck_id=deleted_id,
-        deck_name="Renamed snapshot",
-        played_at="2026-08-16T12:00:00",
+    saved_new = _replay(
+        conn, "saved-new", deck_id=saved_id, played_at="2026-08-16T12:00:00"
     )
-    _replay(
+    deleted = _replay(
         conn,
-        "current",
-        result="LOST",
-        deck_id=current_id,
-        deck_name="Current snapshot",
+        "deleted",
+        result="TIED",
+        deck_id=deleted_id,
+        deck_name="Deleted",
         played_at="2026-08-16T11:00:00",
     )
-    _replay(
+    unattributed = _replay(
         conn,
-        "other",
+        "unattributed",
         result="UNKNOWN",
         game_type="",
         played_at="2026-08-16T10:00:00",
     )
-    _replay(
-        conn,
-        "deleted-old",
-        result="TIED",
-        deck_id=deleted_id,
-        deck_name="Old snapshot",
-        played_at="2026-08-16T09:00:00",
-    )
-    _replay(conn, "not-member", in_stats=False)
-    _replay(
+    arena = _replay(
         conn,
         "arena",
         game_type="ARENA",
-        deck_id=current_id,
-        deck_name="Current snapshot",
+        deck_id=saved_id,
+        played_at="2026-08-16T09:00:00",
     )
-    _replay(conn, "battlegrounds", game_type="BATTLEGROUNDS")
+    battlegrounds = _replay(
+        conn, "bg", game_type="BATTLEGROUNDS", played_at="2026-08-16T08:00:00"
+    )
+    saved_old = _replay(
+        conn,
+        "saved-old",
+        result="LOST",
+        deck_id=saved_id,
+        played_at="2026-08-16T07:00:00",
+    )
+    _replay(conn, "not-member", deck_id=saved_id, in_stats=False)
 
-    rows = compute_stats(conn)
+    records = compute_records(conn)
 
-    assert [row.name for row in rows] == [
-        "All decks",
-        "Alpha Zero",
-        "Renamed snapshot",
-        "Current snapshot",
-        "Zulu Zero",
-        "Other games",
+    assert _ids(records.all_decks) == [
+        saved_new,
+        deleted,
+        unattributed,
+        arena,
+        battlegrounds,
+        saved_old,
     ]
-    assert (rows[0].wins, rows[0].losses, rows[0].ties, rows[0].unknowns) == (
-        3,
-        1,
-        1,
-        1,
+    assert _ids(records.deck(saved_id)) == [saved_new, saved_old]
+    assert _ids(records.deck(unused_id)) == []
+    assert _ids(records.deck(deleted_id)) == []
+    assert _ids(records.other_games) == [deleted, unattributed, arena, battlegrounds]
+    assert sorted(_ids(records.all_decks)) == sorted(
+        _ids(records.deck(saved_id))
+        + _ids(records.deck(unused_id))
+        + _ids(records.other_games)
     )
-    assert rows[0].total_games == 6
-    assert rows[1].total_games == 0
-    assert rows[2].total_games == 2
-    assert rows[3].total_games == 1
-    assert rows[-1].unknowns == 1
-    assert rows[-1].total_games == 2
 
 
-def test_unknowns_rate_rounding_and_per_class_order(
-    conn: sqlite3.Connection,
-) -> None:
+def test_summary_counts_rate_and_opponent_order(conn: sqlite3.Connection) -> None:
     deck_id = save_deck(conn, "Rate deck", "MAGE", "Standard", "a")
     games = [
         ("WON", "WARRIOR"),
@@ -155,70 +143,55 @@ def test_unknowns_rate_rounding_and_per_class_order(
             f"game-{index}",
             result=result,
             deck_id=deck_id,
-            deck_name="Rate deck",
             opponent_class=opponent_class,
             played_at=f"2026-08-16T{index:02d}:00:00",
         )
 
-    deck = compute_stats(conn)[1]
+    record = compute_records(conn).deck(deck_id)
 
-    assert (deck.wins, deck.losses, deck.ties, deck.unknowns) == (1, 7, 1, 1)
-    assert deck.win_rate_percent == 13
-    assert deck.per_class == [
-        ("WARRIOR", 1, 1),
-        ("DRUID", 0, 3),
-        ("MAGE", 0, 3),
+    assert (record.wins, record.losses, record.ties) == (1, 7, 1)
+    assert len(record.games) == 10
+    assert record.win_rate_percent == 13
+    assert [
+        (opponent, versus.wins, versus.losses, len(versus.games))
+        for opponent, versus in record.by_opponent()
+    ] == [
+        ("WARRIOR", 1, 1, 4),
+        ("DRUID", 0, 3, 3),
+        ("MAGE", 0, 3, 3),
     ]
-    assert deck.last20 is None
+    assert record.versus("DRUID").games == record.by_opponent()[1][1].games
 
 
-def test_last20_uses_recent_games_and_starts_above_threshold(
-    conn: sqlite3.Connection,
-) -> None:
-    long_id = save_deck(conn, "Long history", "MAGE", "Standard", "a")
-    recent_results = ["WON"] * 10 + ["LOST"] * 8 + ["TIED", "UNKNOWN"]
-    for index, result in enumerate(recent_results):
+def test_recent_is_the_newest_twenty_games(conn: sqlite3.Connection) -> None:
+    deck_id = save_deck(conn, "Long history", "MAGE", "Standard", "a")
+    results = ["WON"] * 10 + ["LOST"] * 8 + ["TIED", "UNKNOWN", "LOST"]
+    ids = [
         _replay(
             conn,
-            f"recent-{index}",
+            f"game-{index}",
             result=result,
-            deck_id=long_id,
-            deck_name="Long history",
+            deck_id=deck_id,
             played_at=f"2026-08-{31 - index:02d}T12:00:00",
         )
-    _replay(
-        conn,
-        "oldest",
-        result="LOST",
-        deck_id=long_id,
-        deck_name="Long history",
-        played_at="2026-08-01T12:00:00",
-    )
+        for index, result in enumerate(results)
+    ]
 
-    threshold_id = save_deck(conn, "Exactly twenty", "MAGE", "Standard", "b")
-    for index in range(20):
-        _replay(
-            conn,
-            f"threshold-{index}",
-            deck_id=threshold_id,
-            deck_name="Exactly twenty",
-            played_at=f"2026-07-{20 - index:02d}T12:00:00",
-        )
+    record = compute_records(conn).deck(deck_id)
+    recent = record.recent()
 
-    rows = {row.name: row for row in compute_stats(conn)}
-
-    assert rows["Long history"].last20 == (10, 8)
-    assert rows["Long history"].total_games == 21
-    assert rows["Exactly twenty"].last20 is None
+    assert _ids(recent) == ids[:20]
+    assert (recent.wins, recent.losses, recent.ties) == (10, 8, 1)
+    assert (record.wins, record.losses, record.ties) == (10, 9, 1)
 
 
-def test_empty_corpus_has_only_overall_and_saved_decks(
-    conn: sqlite3.Connection,
-) -> None:
-    save_deck(conn, "Unused", "MAGE", "Standard", "a")
+def test_empty_corpus_has_empty_records_and_no_rate(conn: sqlite3.Connection) -> None:
+    deck_id = save_deck(conn, "Unused", "MAGE", "Standard", "a")
 
-    rows = compute_stats(conn)
+    records = compute_records(conn)
 
-    assert [row.name for row in rows] == ["All decks", "Unused"]
-    assert all(row.total_games == 0 for row in rows)
-    assert all(row.win_rate_percent is None for row in rows)
+    assert records.all_decks == Record()
+    assert records.other_games == Record()
+    assert records.deck(deck_id) == Record()
+    assert records.all_decks.win_rate_percent is None
+    assert records.all_decks.by_opponent() == []

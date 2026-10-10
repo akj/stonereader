@@ -1,122 +1,125 @@
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import dataclass
+from pathlib import Path
 
-from stonereader.db import get_all_decks, insert_replay, save_deck
-from stonereader.surfaces._deck_data import CurrentDeck, DeckData
-from stonereader.surfaces.decks import build_decks
-from stonereader.ui._sink_core import _SinkCore
+from stonereader.db import delete_deck, get_all_decks
 from stonereader.ui.chords import Chord
 
-from .conftest import (
-    Harness,
-    make_card,
-    make_card_db,
-    make_deckstring,
-    make_harness,
-    placeholder_surface,
+from .conftest import Harness
+from .records_harness import (
+    RecordsContext,
+    make_records_harness,
+    option_titles,
+    save_full_deck,
+    save_game,
 )
 
 
-class SeenSink:
-    def __init__(self) -> None:
-        self.subjects: list[str] = []
-
-    def mark_offer_subject_seen(self, subject: str) -> None:
-        self.subjects.append(subject)
-
-
-@dataclass
-class DecksContext:
-    current: CurrentDeck
-    copied: list[str]
-    offer_sink: SeenSink | _SinkCore
-
-
-def make_surface(
-    conn: sqlite3.Connection,
-    *,
-    offer_sink: SeenSink | _SinkCore | None = None,
-) -> Harness[DecksContext]:
-    hero = make_card(274, "Jaina", card_class="MAGE", card_type="HERO")
-    card = make_card(1000, "Arcane Bolt")
-    card_db = make_card_db(hero, card)
-    copied: list[str] = []
-    current = CurrentDeck()
-    actual_offer_sink = offer_sink or SeenSink()
-    harness = make_harness(DecksContext(current, copied, actual_offer_sink))
-    harness.nav.register(
-        "Deck detail", lambda: placeholder_surface("Deck detail")
-    )
-    harness.nav.register("Import Deck", lambda: placeholder_surface("Import Deck"))
-    harness.nav.register("Statistics", lambda: placeholder_surface("Statistics"))
-    harness.set_surface(
-        build_decks(
-            harness.announcer,
-            [],
-            harness.nav,
-            conn,
-            DeckData(conn, card_db),
-            current,
-            actual_offer_sink,
-            copied.append,
-        )
-    )
+def _decks(db_conn: sqlite3.Connection, tmp_path: Path) -> Harness[RecordsContext]:
+    harness = make_records_harness(db_conn, tmp_path / "replays")
     return harness
 
 
-def seed_decks(conn: sqlite3.Connection) -> tuple[str, str, int, int]:
-    code_one = make_deckstring([(1000, 1)])
-    code_two = make_deckstring([(1000, 2)])
-    first_id = save_deck(conn, "First", "Mage", "Standard", code_one)
-    second_id = save_deck(conn, "Second", "Mage", "Standard", code_two)
-    return code_one, code_two, first_id, second_id
-
-
-def test_rows_are_decks_then_actions_with_every_detail_line(
-    db_conn: sqlite3.Connection,
+def test_options_are_all_decks_saved_decks_other_games_then_import(
+    db_conn: sqlite3.Connection, tmp_path: Path
 ) -> None:
-    _first_code, _second_code, _first_id, second_id = seed_decks(db_conn)
-    insert_replay(
-        db_conn,
-        file_path="second.hsreplay",
-        checksum="second",
-        source="manual_import",
-        friendly_class="MAGE",
-        opponent_class="WARRIOR",
-        result="WON",
-        turns=8,
-        deck_id=second_id,
-        played_at="2026-08-15T22:10:00",
+    harness = _decks(db_conn, tmp_path)
+    store = harness.context.store
+    hunter = save_full_deck(db_conn, "Odd Hunter", "HUNTER")
+    knight = save_full_deck(
+        db_conn, "Blood Control", "DEATHKNIGHT", format_name="Wild", cards=29
     )
-    harness = make_surface(db_conn)
+    save_full_deck(db_conn, "Empty Mage", "MAGE")
+    gone = save_full_deck(db_conn, "Gone", "PRIEST")
+    delete_deck(db_conn, gone)
+    save_game(store, deck_id=hunter, result="WON")
+    save_game(store, deck_id=hunter, result="LOST")
+    save_game(store, deck_id=knight, result="WON")
+    save_game(store, deck_id=knight, result="WON")
+    save_game(store, deck_id=knight, result="TIED")
+    save_game(store, deck_id=gone, deck_name="Gone", result="LOST")
+    save_game(store, result="LOST")
+    save_game(store, deck_id=hunter, in_stats=False)
 
-    assert harness.horizontal.items_snapshot() == (
-        ["Second", "First", "Import deck…", "Statistics…"],
-        0,
-        ["Mage, Standard", "2 cards", "Last played 2026-08-15"],
-    )
-    harness.press(Chord("right"))
-    assert harness.horizontal.items_snapshot()[2] == [
-        "Mage, Standard",
-        "1 cards",
-        "Never played",
+    harness.nav.jump("Decks")
+
+    assert option_titles(harness, "Decks") == [
+        "All decks, 3 wins, 3 losses, 1 tie",
+        "Empty Mage, no games yet",
+        "Blood Control, Death Knight, Wild, 29 cards, 2 wins, 0 losses, 1 tie",
+        "Odd Hunter, 1 win, 1 loss",
+        "Other games, 0 wins, 2 losses",
+        "Import deck…",
     ]
-    harness.press(Chord("right"))
-    assert harness.horizontal.items_snapshot()[2] == []
+    assert harness.titles[-1] == "Decks — StoneReader"
+    assert harness.speech.calls[-1] == (
+        "Decks, All decks, 3 wins, 3 losses, 1 tie",
+        True,
+    )
+
+
+def test_other_games_appears_only_when_the_corpus_holds_some(
+    db_conn: sqlite3.Connection, tmp_path: Path
+) -> None:
+    harness = _decks(db_conn, tmp_path)
+    harness.nav.jump("Decks")
+
+    assert option_titles(harness, "Decks") == [
+        "All decks, no games yet",
+        "Import deck…",
+    ]
+
+
+def test_enter_opens_the_deck_page_for_each_record_and_import(
+    db_conn: sqlite3.Connection, tmp_path: Path
+) -> None:
+    harness = _decks(db_conn, tmp_path)
+    save_full_deck(db_conn, "Odd Hunter", "HUNTER")
+    save_game(harness.context.store)
+    harness.nav.jump("Decks")
+
+    harness.press(Chord("enter"))
+    assert harness.nav.stack == ("Home", "Decks", "Deck")
+    assert harness.titles[-1] == "All decks — StoneReader"
+    assert harness.speech.calls[-1] == (
+        "All decks, Games, 1 win, 0 losses, 100 percent",
+        True,
+    )
+
+    harness.press(Chord("escape"))
+    harness.press(Chord("down"))
+    harness.press(Chord("enter"))
+    assert harness.titles[-1] == "Odd Hunter — StoneReader"
+    assert harness.speech.calls[-1] == ("Odd Hunter, Cards, 30", True)
+
+    harness.press(Chord("escape"))
+    harness.press(Chord("down"))
+    harness.press(Chord("enter"))
+    assert harness.titles[-1] == "Other games — StoneReader"
+    assert harness.speech.calls[-1] == (
+        "Other games, Games, 1 win, 0 losses, 100 percent",
+        True,
+    )
+
+    harness.press(Chord("escape"))
+    harness.press(Chord("end"))
+    harness.press(Chord("enter"))
+    assert harness.nav.stack == ("Home", "Decks", "Import Deck")
 
 
 def test_armed_delete_move_disarms_then_repeat_deletes_with_continuing_reentry(
-    db_conn: sqlite3.Connection,
+    db_conn: sqlite3.Connection, tmp_path: Path
 ) -> None:
-    code = make_deckstring([(1000, 1)])
-    save_deck(db_conn, "Aggro Shaman", "Mage", "Standard", code)
-    harness = make_surface(db_conn)
+    harness = _decks(db_conn, tmp_path)
+    save_full_deck(db_conn, "Aggro Shaman", "SHAMAN")
+    harness.nav.jump("Decks")
+    harness.press(Chord("down"))
+    harness.speech.calls.clear()
 
     harness.press(Chord("delete"))
-    harness.press(Chord("right"))
-    harness.press(Chord("left"))
+    harness.press(Chord("down"))
+    harness.press(Chord("up"))
     harness.press(Chord("delete"))
     harness.press(Chord("delete"))
 
@@ -124,81 +127,70 @@ def test_armed_delete_move_disarms_then_repeat_deletes_with_continuing_reentry(
     assert harness.speech.calls == [
         ("Press Delete again to delete Aggro Shaman", True),
         ("Import deck…", True),
-        ("Aggro Shaman", True),
+        ("Aggro Shaman, no games yet", True),
         ("Press Delete again to delete Aggro Shaman", True),
         ("Aggro Shaman deleted", True),
-        ("Decks, Import deck…, 1 of 2", False),
+        ("Decks, Import deck…", False),
     ]
 
 
-def test_shift_delete_is_immediate(db_conn: sqlite3.Connection) -> None:
-    code = make_deckstring([(1000, 1)])
-    save_deck(db_conn, "Tempo Mage", "Mage", "Standard", code)
-    harness = make_surface(db_conn)
+def test_shift_delete_is_immediate(db_conn: sqlite3.Connection, tmp_path: Path) -> None:
+    harness = _decks(db_conn, tmp_path)
+    save_full_deck(db_conn, "Tempo Mage", "MAGE")
+    harness.nav.jump("Decks")
+    harness.press(Chord("down"))
+    harness.speech.calls.clear()
 
     harness.press(Chord("delete", shift=True))
 
     assert get_all_decks(db_conn) == []
     assert harness.speech.calls == [
         ("Tempo Mage deleted", True),
-        ("Decks, Import deck…, 1 of 2", False),
+        ("Decks, Import deck…", False),
     ]
 
 
 def test_copy_confirms_marks_seen_and_own_copy_never_offers(
-    db_conn: sqlite3.Connection,
+    db_conn: sqlite3.Connection, tmp_path: Path
 ) -> None:
-    code = make_deckstring([(1000, 1)])
-    save_deck(db_conn, "Copy Me", "Mage", "Standard", code)
-    offer_harness = make_harness(None)
-    harness = make_surface(
-        db_conn,
-        offer_sink=offer_harness.sink,
-    )
+    harness = _decks(db_conn, tmp_path)
+    save_full_deck(db_conn, "Copy Me", "MAGE")
+    code = get_all_decks(db_conn)[0].deckstring
+    harness.nav.jump("Decks")
+    harness.press(Chord("down"))
+    harness.speech.calls.clear()
 
     harness.press(Chord("c"))
 
     assert harness.context.copied == [code]
     assert harness.speech.calls == [("Deck code copied", True)]
-    assert offer_harness.sink.arm_offer(code, lambda: None) is False
+    assert harness.sink.arm_offer(code, lambda: None) is False
 
 
-def test_enter_dispatches_for_deck_import_and_statistics_rows(
-    db_conn: sqlite3.Connection,
+def test_non_deck_options_get_exact_delete_and_copy_noops(
+    db_conn: sqlite3.Connection, tmp_path: Path
 ) -> None:
-    code = make_deckstring([(1000, 1)])
-    save_deck(db_conn, "Open Me", "Mage", "Standard", code)
-    harness = make_surface(db_conn)
-    harness.press(Chord("enter"))
-    assert harness.context.current.get().name == "Open Me"
-    assert harness.nav.stack == ("Home", "Deck detail")
+    harness = _decks(db_conn, tmp_path)
+    save_game(harness.context.store)
+    harness.nav.jump("Decks")
+    harness.speech.calls.clear()
 
-    empty_conn = sqlite3.connect(":memory:")
-    empty_conn.row_factory = sqlite3.Row
-    from stonereader.db import init_db
+    for _option in ("All decks", "Other games", "Import deck…"):
+        for chord in (Chord("delete"), Chord("delete", shift=True), Chord("c")):
+            harness.press(chord)
+        harness.press(Chord("down"))
 
-    init_db(empty_conn)
-    try:
-        harness = make_surface(empty_conn)
-        harness.press(Chord("enter"))
-        assert harness.nav.stack == ("Home", "Import Deck")
-
-        harness = make_surface(empty_conn)
-        harness.press(Chord("right"))
-        harness.press(Chord("enter"))
-        assert harness.nav.stack == ("Home", "Statistics")
-    finally:
-        empty_conn.close()
-
-
-def test_action_rows_get_exact_delete_and_copy_noops(
-    db_conn: sqlite3.Connection,
-) -> None:
-    harness = make_surface(db_conn)
-    for chord in (Chord("delete"), Chord("delete", shift=True), Chord("c")):
-        harness.press(chord)
     assert harness.speech.calls == [
         ("Nothing to delete here", True),
         ("Nothing to delete here", True),
         ("Nothing to copy here", True),
+        ("Other games, 1 win, 0 losses", True),
+        ("Nothing to delete here", True),
+        ("Nothing to delete here", True),
+        ("Nothing to copy here", True),
+        ("Import deck…", True),
+        ("Nothing to delete here", True),
+        ("Nothing to delete here", True),
+        ("Nothing to copy here", True),
+        ("Import deck…", True),
     ]

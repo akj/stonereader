@@ -141,7 +141,10 @@ def test_entry_context_and_display_name_window_title(
     db_conn: sqlite3.Connection,
 ) -> None:
     harness = make_detail(db_conn)
-    assert harness.speech.calls == [("Control Warrior, River Crocolisk x2, 1 of 2", True)]
+    assert harness.speech.calls == [
+        ("Control Warrior cards, River Crocolisk x2, 1 of 2", True)
+    ]
+    assert harness.titles == ["Control Warrior cards — StoneReader"]
     assert harness.nav.stack == ("Home", "Deck detail")
 
 
@@ -174,7 +177,7 @@ def test_imported_deck_browses_by_mana_then_name_preserving_counts_and_code(
     current = CurrentDeck()
     current.set(get_all_decks(db_conn)[0])
     data = DeckData(db_conn, cards)
-    original = data.resolve(current.get()).cards
+    original = data.resolve(current.saved()).cards
     harness = make_harness(None)
     harness.set_surface(build_deck_detail(
         harness.announcer, [], harness.nav, data, current,
@@ -182,5 +185,5 @@ def test_imported_deck_browses_by_mana_then_name_preserving_counts_and_code(
     assert harness.horizontal.items_snapshot()[0] == [
         "Zebra x2", "alpha", "Beta x2", "Expensive",
     ]
-    assert data.resolve(current.get()).cards == original
+    assert data.resolve(current.saved()).cards == original
     assert get_all_decks(db_conn)[0].deckstring == code
