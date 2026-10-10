@@ -9,7 +9,7 @@ from datetime import datetime
 from stonereader.models.card import CardDatabase
 from stonereader.services._replay_store import ReplayMeta, ReplayStore
 from stonereader.services._stats import compute_records
-from stonereader.surfaces._deck_data import CurrentGames
+from stonereader.surfaces._deck_data import CurrentGames, Versus
 from stonereader.surfaces._replay_rows import ReplayDeletion, open_replay, replay_title
 from stonereader.surfaces.replay_viewer import CurrentReplay
 from stonereader.ui.announcer import Announcer
@@ -43,11 +43,15 @@ def build_games(
 
     def options() -> list[MenuOption]:
         moment = now()
-        with_deck = not current_games.get().one_deck
+        selection = current_games.get()
+        with_deck = not selection.one_deck
+        with_class = not isinstance(selection.games, Versus)
         return [
             MenuOption(
                 option_id,
-                lambda meta=meta: replay_title(meta, moment, with_deck=with_deck),
+                lambda meta=meta: replay_title(
+                    meta, moment, with_deck=with_deck, with_class=with_class
+                ),
                 lambda meta=meta: open_replay(
                     meta, announcer, nav, card_db, current_replay
                 ),

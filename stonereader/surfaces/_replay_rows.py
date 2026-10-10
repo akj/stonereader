@@ -21,15 +21,27 @@ from stonereader.ui.surface import Binding
 
 
 _OUTCOMES = {"WON": "Won against", "LOST": "Lost to", "TIED": "Tied with"}
+# A list of games against one class already names it, so its rows don't.
+_CLASSLESS_OUTCOMES = {"WON": "Won", "LOST": "Lost", "TIED": "Tied"}
 # Said only when unusual: Ranked and Standard are the usual case, and unknown
 # or empty values are omitted rather than spoken as "Unknown".
 _USUAL_GAME_TYPES = {"", "UNKNOWN", "RANKED"}
 _USUAL_FORMATS = {"", "UNKNOWN", "STANDARD"}
-_GAME_TYPE_NAMES = {
-    "VS_AI": "Practice",
-    "VS_FRIEND": "Friendly",
-    "TAVERNBRAWL": "Tavern Brawl",
-}
+# Game types by family, most specific prefix first.
+_GAME_TYPE_NAMES = (
+    ("VS_AI", "Practice"),
+    ("VS_FRIEND", "Friendly"),
+    ("TAVERNBRAWL", "Tavern Brawl"),
+    ("TB_", "Tavern Brawl"),
+    ("FSG_BRAWL", "Tavern Brawl"),
+    ("BATTLEGROUNDS_DUO", "Battlegrounds Duos"),
+    ("BATTLEGROUNDS", "Battlegrounds"),
+    ("UNDERGROUND_ARENA", "Underground Arena"),
+    ("ARENA", "Arena"),
+    ("PVPDR_PAID", "Heroic Duels"),
+    ("PVPDR", "Duels"),
+    ("MERCENARIES", "Mercenaries"),
+)
 _WEEKDAYS = (
     "Monday",
     "Tuesday",
@@ -55,17 +67,25 @@ _MONTHS = (
 )
 
 
-def replay_title(meta: ReplayMeta, now: datetime, *, with_deck: bool = True) -> str:
+def replay_title(
+    meta: ReplayMeta,
+    now: datetime,
+    *,
+    with_deck: bool = True,
+    with_class: bool = True,
+) -> str:
     """Return a game's Title line, most telling part first.
 
     "Won against Mage in 8 turns, today 3:36 PM, Odd Hunter, Casual, Wild,
     imported, not counted" — every part after the first only when it applies.
     """
-    outcome = _OUTCOMES.get(meta.result.upper(), "Result unknown against")
-    parts = [
-        f"{outcome} {class_name(meta.opponent_class)} "
-        f"in {count(meta.turns, 'turn')}"
-    ]
+    result = meta.result.upper()
+    turns = f"in {count(meta.turns, 'turn')}"
+    if with_class:
+        outcome = _OUTCOMES.get(result, "Result unknown against")
+        parts = [f"{outcome} {class_name(meta.opponent_class)} {turns}"]
+    else:
+        parts = [f"{_CLASSLESS_OUTCOMES.get(result, 'Result unknown')} {turns}"]
     when = spoken_when(meta.played_at, now)
     if when is not None:
         parts.append(when)
@@ -73,7 +93,7 @@ def replay_title(meta: ReplayMeta, now: datetime, *, with_deck: bool = True) -> 
         parts.append(meta.deck_name)
     game_type = (meta.game_type or "").upper()
     if game_type not in _USUAL_GAME_TYPES:
-        parts.append(_GAME_TYPE_NAMES.get(game_type, _title(game_type)))
+        parts.append(_game_type_name(game_type))
     format_type = (meta.format_type or "").upper()
     if format_type not in _USUAL_FORMATS:
         parts.append(_title(format_type))
@@ -197,6 +217,13 @@ class ReplayDeletion:
         # Replay titles are intentionally too long for a confirmation object.
         self._announcer.confirmation("Replay deleted")
         self._engine.on_landing(continues=True)
+
+
+def _game_type_name(game_type: str) -> str:
+    return next(
+        (name for prefix, name in _GAME_TYPE_NAMES if game_type.startswith(prefix)),
+        _title(game_type),
+    )
 
 
 def _clock(moment: datetime) -> str:

@@ -129,7 +129,7 @@ def test_shift_delete_is_immediate_and_an_emptied_list_says_so(
     harness.press(Chord("up"))
     harness.press(Chord("enter"))
     assert option_titles(harness, "Games") == [
-        "Won against Warrior in 8 turns, Wednesday",
+        "Won in 8 turns, Wednesday",
     ]
     harness.speech.calls.clear()
 

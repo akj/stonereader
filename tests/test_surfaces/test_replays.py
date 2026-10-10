@@ -8,6 +8,8 @@ import pytest
 
 from stonereader.db import delete_deck, get_all_decks
 from stonereader.services._replay_loader import ReplayLoadError
+from stonereader.services._replay_store import ReplayMeta
+from stonereader.surfaces._replay_rows import replay_title
 from stonereader.ui.chords import Chord
 
 from .conftest import Harness
@@ -276,3 +278,41 @@ def test_d_without_a_saved_deck_announces_and_stays(
         ("Import replays…", True),
         ("Nothing to open here", True),
     ]
+
+
+@pytest.mark.parametrize(
+    ("game_type", "spoken"),
+    [
+        ("PVPDR", "Duels"),
+        ("PVPDR_PAID", "Heroic Duels"),
+        ("BATTLEGROUNDS_DUO_FRIENDLY", "Battlegrounds Duos"),
+        ("BATTLEGROUNDS", "Battlegrounds"),
+        ("UNDERGROUND_ARENA", "Underground Arena"),
+        ("FSG_BRAWL_VS_FRIEND", "Tavern Brawl"),
+        ("MERCENARIES_PVE", "Mercenaries"),
+        ("ACHIEVEMENT_TEST", "Achievement Test"),
+    ],
+)
+def test_game_types_are_spoken_by_family(game_type: str, spoken: str) -> None:
+    meta = ReplayMeta(
+        id=1,
+        file_path="game.hsreplay",
+        checksum="c",
+        source="live_auto",
+        friendly_class="MAGE",
+        opponent_class="ROGUE",
+        result="WON",
+        turns=9,
+        game_type=game_type,
+        format_type="STANDARD",
+        deck_name=None,
+        deck_id=None,
+        played_at="2026-08-16T18:00:00",
+        duration_seconds=None,
+        imported_at="2026-08-16T18:00:00",
+        in_stats=True,
+    )
+
+    assert replay_title(meta, datetime(2026, 8, 16, 20, 0)) == (
+        f"Won against Rogue in 9 turns, today 6:00 PM, {spoken}"
+    )

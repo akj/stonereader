@@ -88,20 +88,21 @@ def test_every_record_row_opens_exactly_the_games_it_counts(
     harness.press(Chord("escape"))
     _open_option(harness, 2)
     assert harness.titles[-1] == "Odd Hunter versus Mage — StoneReader"
+    # A list of games against one class doesn't repeat the class per row.
     assert option_titles(harness, "Games") == [
-        "Won against Mage in 8 turns, today 3:36 PM",
-        "Lost to Mage in 8 turns, yesterday 9:10 PM",
-        "Tied with Mage in 8 turns, August 1",
+        "Won in 8 turns, today 3:36 PM",
+        "Lost in 8 turns, yesterday 9:10 PM",
+        "Tied in 8 turns, August 1",
     ]
 
     harness.press(Chord("escape"))
     _open_option(harness, 3)
     assert harness.speech.calls[-1] == (
-        "Odd Hunter versus Warrior, Won against Warrior in 8 turns, Wednesday",
+        "Odd Hunter versus Warrior, Won in 8 turns, Wednesday",
         True,
     )
     assert option_titles(harness, "Games") == [
-        "Won against Warrior in 8 turns, Wednesday",
+        "Won in 8 turns, Wednesday",
     ]
 
 
@@ -244,7 +245,7 @@ def test_all_decks_and_other_games_pages_name_their_games(
     harness.press(Chord("down"))
     harness.press(Chord("enter"))
     assert harness.speech.calls[-1] == (
-        "Other games versus Mage, Lost to Mage in 8 turns, today 10:00 AM, Casual",
+        "Other games versus Mage, Lost in 8 turns, today 10:00 AM, Casual",
         True,
     )
 
