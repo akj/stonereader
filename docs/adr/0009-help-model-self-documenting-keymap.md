@@ -11,7 +11,10 @@ Amended 2026-10-10 by ADR-0017: F1 always opens the Help menu on its
 widget-type sentence with no search. Enter's phrase comes first, then the
 surface's keys in the ui-spec's order; bindings that share one phrase (the
 digits) are one option. The "No {zone} on this screen" no-op is retired —
-an empty zone is a place.
+an empty zone is a place. Help is named after the origin Surface's display
+name ("Odd Hunter help"), and the widget-type sentence names only the type
+("Horizontal list: Left and Right move between items, …"), since the help
+label already names the Surface.
 
 ## Context
 

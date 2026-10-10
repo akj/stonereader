@@ -17,6 +17,12 @@ so All decks equals the saved decks plus Other games. Stats membership moves
 from a Replays detail line into the title ("not counted"). The corpus,
 attribution, and win-rate rules are unchanged.
 
+Amended 2026-10-10: schema v4 re-derives every stored replay's turn count,
+game type, and format from its file in the background on first launch,
+repairing live-recorded rows that took a player's own turn counter for the
+game turn and never learned the game type or format.
+Attribution, membership, result, and classes are untouched.
+
 ## Context
 
 The replay store (PR #16) records every finished live game: result

@@ -305,3 +305,35 @@ def test_retitle_shows_a_surface_renamed_in_place() -> None:
 
     assert headings[-2:] == ["Cards › Hunter cards", "Cards › Mage cards"]
     assert titles[-1] == "Mage cards — StoneReader"
+
+
+def test_a_crumb_naming_its_parent_outright_uses_its_surface_name() -> None:
+    headings: list[str] = []
+    navigation = NavigationController(
+        lambda _title: None,
+        headings.append,
+        Announcer(FakeSpeech()),
+        lambda: None,
+        lambda _surface: None,
+    )
+    named = {"Deck": "Other games", "Games": "Other games"}
+    for name in ["Decks", "Deck", "Games"]:
+        navigation.register(
+            name,
+            lambda name=name: ActiveSurface(
+                SurfaceSpec(
+                    name,
+                    WidgetType.VERTICAL_MENU,
+                    options=lambda: [],
+                    display_name=(lambda: named[name]) if name in named else None,
+                ),
+                FakeEngine(name, []),
+                CommandRegistry(),
+            ),
+        )
+
+    navigation.jump("Decks")
+    navigation.drill_down("Deck")
+    navigation.drill_down("Games")
+
+    assert headings[-1] == "Decks › Other games › Games"

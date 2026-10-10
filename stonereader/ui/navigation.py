@@ -141,9 +141,10 @@ class NavigationController:
     def retitle(self) -> None:
         """Show the stack's names again after a Surface renamed itself in place."""
         # ADR-0017: the heading leaves out the Home root every deeper path shares.
-        path = [self._display_name(name) for name in self._stack[1:] or self._stack]
+        names = self._stack[1:] or self._stack
+        path = [self._display_name(name) for name in names]
         self._set_title(f"{path[-1]} — StoneReader")
-        self._set_heading(" › ".join(_crumbs(path)))
+        self._set_heading(" › ".join(_crumbs(path, names)))
 
     def _display_name(self, name: str) -> str:
         if name not in self._factories:
@@ -160,13 +161,19 @@ class NavigationController:
         surface.engine.on_landing(continues=continues)
 
 
-def _crumbs(path: list[str]) -> list[str]:
-    """Drop the parent's name a heading crumb repeats: "Odd Hunter cards" is "Cards"."""
+def _crumbs(path: list[str], names: list[str]) -> list[str]:
+    """Drop the parent's name a heading crumb repeats: "Odd Hunter cards" is "Cards".
+
+    A crumb that is its parent's name outright ("Other games" under "Other
+    games") falls back to its Surface's registered name.
+    """
     crumbs = path[:1]
-    for parent, name in zip(path, path[1:]):
+    for parent, name, registered in zip(path, path[1:], names[1:]):
         rest = ""
         for joiner in (" ", ", "):
             if name.startswith(parent + joiner):
                 rest = name[len(parent + joiner) :]
+        if name == parent:
+            rest = registered
         crumbs.append(rest[:1].upper() + rest[1:] if rest else name)
     return crumbs
