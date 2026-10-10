@@ -192,7 +192,7 @@ class Parser:
                         hslog_packets.ChangeEntity,
                     ),
                 )
-                and self._entity_packet_still_building(hp)
+                and self._entity_packet_still_building(hp, hslog_pkts)
             ):
                 return True
             self._seen_ids.add(pyid)
@@ -239,7 +239,7 @@ class Parser:
         out.append(translator.make_block_end(hp, self._next_id()))
         return True
 
-    def _entity_packet_still_building(self, hp: Any) -> bool:
+    def _entity_packet_still_building(self, hp: Any, container: Any) -> bool:
         """True if hslog's parser is still appending tag rows to this packet.
 
         hslog tracks the currently-being-built entity packet via
@@ -247,13 +247,20 @@ class Parser:
         target, more `tag=...` rows may be appended on subsequent lines.
         Once a new packet starts (or hslog moves into a different parsing
         target), the entity packet is stable and safe to translate.
+
+        hslog never clears ``entity_packet``, so the pointer alone would keep
+        a reveal that ends a SubSpell or block "building" until the next
+        entity line. ``container`` is the packet list holding ``hp``; once
+        hslog's current block appends elsewhere, that container has closed
+        (SUB_SPELL_END or BLOCK_END) and no more tag rows will arrive.
         """
         try:
             state = self._hslog._parsing_state
             entity_packet = getattr(state, "entity_packet", None)
+            current = getattr(state.current_block, "packets", None)
         except AttributeError:
             return False
-        return entity_packet is hp
+        return entity_packet is hp and current is container
 
     def _create_game_still_building(self, hp: Any) -> bool:
         """True if hslog is still appending Player rows to this CreateGame.
