@@ -6,6 +6,7 @@ import pytest
 from stonereader.db import (
     _SCHEMA_V1_LEGACY,
     REPLAY_RESULTS,
+    _wait_for_replay_backfills,
     REPLAY_SOURCES,
     delete_deck,
     get_all_decks,
@@ -31,11 +32,11 @@ def test_init_db_creates_tables(tmp_path):
     conn.close()
 
 
-def test_schema_version_is_three(tmp_path):
+def test_schema_version_is_four(tmp_path):
     db_path = tmp_path / "test.db"
     conn = get_connection(str(db_path))
     init_db(conn)
-    assert get_schema_version(conn) == 3
+    assert get_schema_version(conn) == 4
     conn.close()
 
 
@@ -44,7 +45,7 @@ def test_init_db_is_idempotent(tmp_path):
     conn = get_connection(str(db_path))
     init_db(conn)
     init_db(conn)  # second call should not raise or duplicate
-    assert get_schema_version(conn) == 3
+    assert get_schema_version(conn) == 4
     conn.close()
 
 
@@ -127,11 +128,11 @@ def _init_v1_only(conn):
     conn.commit()
 
 
-def test_fresh_db_is_version_three(tmp_path):
+def test_fresh_db_is_version_four(tmp_path):
     db_path = tmp_path / "test.db"
     conn = get_connection(str(db_path))
     init_db(conn)
-    assert get_schema_version(conn) == 3
+    assert get_schema_version(conn) == 4
     conn.close()
 
 
@@ -203,7 +204,7 @@ def test_replays_checksum_unique(tmp_path):
     conn.close()
 
 
-def test_v1_to_v3_migration_preserves_decks_and_drops_games(tmp_path):
+def test_v1_to_v4_migration_preserves_decks_and_drops_games(tmp_path):
     db_path = tmp_path / "test.db"
     conn = get_connection(str(db_path))
     _init_v1_only(conn)
@@ -220,7 +221,7 @@ def test_v1_to_v3_migration_preserves_decks_and_drops_games(tmp_path):
 
     init_db(conn)
 
-    assert get_schema_version(conn) == 3
+    assert get_schema_version(conn) == 4
     decks = get_all_decks(conn)
     assert len(decks) == 1
     assert decks[0].name == "Legacy Deck"
@@ -236,17 +237,17 @@ def test_v1_to_v3_migration_preserves_decks_and_drops_games(tmp_path):
     conn.close()
 
 
-def test_init_db_idempotent_at_v3(tmp_path):
+def test_init_db_idempotent_at_v4(tmp_path):
     db_path = tmp_path / "test.db"
     conn = get_connection(str(db_path))
     init_db(conn)
     init_db(conn)
     init_db(conn)
-    assert get_schema_version(conn) == 3
+    assert get_schema_version(conn) == 4
     conn.close()
 
 
-def test_v2_to_v3_migration_backfills_in_stats_by_source_and_drops_games(tmp_path):
+def test_v2_to_v4_migration_backfills_in_stats_by_source_and_drops_games(tmp_path):
     from stonereader.db import _SCHEMA_V2
 
     conn = get_connection(str(tmp_path / "test.db"))
@@ -281,7 +282,8 @@ def test_v2_to_v3_migration_backfills_in_stats_by_source_and_drops_games(tmp_pat
         ("imported", 0),
         ("live", 1),
     ]
-    assert get_schema_version(conn) == 3
+    assert _wait_for_replay_backfills(timeout=2)
+    assert get_schema_version(conn) == 4
     assert conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='games'"
     ).fetchone() is None
@@ -326,6 +328,7 @@ def test_v2_migration_backfills_unique_deck_and_isolates_corrupt_replay(
 
     with caplog.at_level("INFO"):
         init_db(conn)
+        assert _wait_for_replay_backfills(timeout=2)
 
     rows = conn.execute(
         "SELECT checksum, deck_id, deck_name FROM replays ORDER BY checksum"
@@ -335,7 +338,7 @@ def test_v2_migration_backfills_unique_deck_and_isolates_corrupt_replay(
         ("good", deck_id, "Legacy Deck"),
     ]
     assert "replay deck backfill: attributed 1 / skipped 1" in caplog.text
-    assert get_schema_version(conn) == 3
+    assert get_schema_version(conn) == 4
     conn.close()
 
 

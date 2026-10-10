@@ -96,7 +96,7 @@ class ReplaySaveResult:
 
 
 @dataclass(frozen=True)
-class _ImportMetadata:
+class ReplayFileMetadata:
     friendly_class: str
     opponent_class: str
     result: str
@@ -236,7 +236,7 @@ class ReplayStore:
         existing = db.get_replay_by_checksum(self._conn, _checksum(xml))
         if existing is not None:
             return ReplaySaveResult(ReplayMeta.from_row(existing), created=False)
-        derived: _ImportMetadata | None = None
+        derived: ReplayFileMetadata | None = None
         if any(
             value is None
             for value in (
@@ -248,7 +248,7 @@ class ReplayStore:
             )
         ):
             try:
-                derived = _derive_import_metadata(Path(src_path), self._card_db)
+                derived = derive_replay_metadata(Path(src_path), self._card_db)
             except Exception as exc:
                 raise ReplayImportError(
                     f"Cannot read replay metadata from {src_path!r}: {exc}"
@@ -389,10 +389,14 @@ def _parse_dt(played_at: str) -> datetime | None:
     return None
 
 
-def _derive_import_metadata(
+def derive_replay_metadata(
     path: Path, card_db: CardDatabase | None = None
-) -> _ImportMetadata:
-    """Derive the minimal DB metadata exposed by the replay loader."""
+) -> ReplayFileMetadata:
+    """Derive the minimal DB metadata exposed by the replay loader.
+
+    Import fills a new row from it; the v4 schema step in ``db.py``
+    re-derives stored rows from it.
+    """
     from stonereader.services._replay_loader import load_replay
 
     replay = load_replay(path, card_db)
@@ -432,7 +436,7 @@ def _derive_import_metadata(
             "",
         )
 
-    return _ImportMetadata(
+    return ReplayFileMetadata(
         friendly_class=latest(lambda state: state.player_hero.hero_class),
         opponent_class=latest(lambda state: state.opponent_hero.hero_class),
         result=player_playstate,
