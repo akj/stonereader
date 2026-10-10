@@ -261,7 +261,9 @@ def build_live_game(
                 "A: how much mana you have",
                 lambda: query(
                     "Your mana",
-                    lambda current: f"{current.player_mana} of {current.player_max_mana}",
+                    lambda current: (
+                        f"{current.player_mana} of {current.player_max_mana}"
+                    ),
                 ),
             ),
         ),
@@ -307,34 +309,8 @@ def build_live_game(
                 "Shift+R: your opponent's hero power",
                 lambda: query(
                     "Opponent hero power",
-                    lambda current: (
-                        current.opponent_hero.hero_power or "No hero power"
-                    ),
+                    lambda current: current.opponent_hero.hero_power or "No hero power",
                 ),
-            ),
-        ),
-        Binding(
-            Chord("y"),
-            Command(
-                "live.no_events",
-                "Y: no events in a live game",
-                no_events,
-            ),
-        ),
-        Binding(
-            Chord("f5"),
-            Command(
-                "live.no_previous_event",
-                "F5: no events in a live game",
-                no_events,
-            ),
-        ),
-        Binding(
-            Chord("f6"),
-            Command(
-                "live.no_next_event",
-                "F6: no events in a live game",
-                no_events,
             ),
         ),
         Binding(
@@ -371,6 +347,34 @@ def build_live_game(
             ),
         )
     )
+    bindings.extend(
+        [
+            Binding(
+                Chord("y"),
+                Command(
+                    "live.no_events",
+                    "Y: no events in a live game",
+                    no_events,
+                ),
+            ),
+            Binding(
+                Chord("f5"),
+                Command(
+                    "live.no_previous_event",
+                    "F5: no events in a live game",
+                    no_events,
+                ),
+            ),
+            Binding(
+                Chord("f6"),
+                Command(
+                    "live.no_next_event",
+                    "F6: no events in a live game",
+                    no_events,
+                ),
+            ),
+        ]
+    )
 
     # Enter and the turn keys are constant no-ops during a game, but they are
     # filled rather than declared no-ops so that with no game they can wait.
@@ -389,13 +393,12 @@ def build_live_game(
             Slot.COARSE_AXIS: Command(
                 "noop.coarse_axis",
                 "Page Up and Page Down: no turns to step in a live game",
-                during_game(
-                    lambda: announcer.noop("No turns to step in a live game")
-                ),
+                during_game(lambda: announcer.noop("No turns to step in a live game")),
             ),
         },
         slot_noops={Slot.LISTEN: "No game audio during a live game"},
         waiting_for=waiting_for,
+        help_first=[Chord("b"), Chord("g"), Chord("c"), Chord("c", shift=True)],
     )
     surface = build_active_surface(spec, announcer, universal_bindings, nav)
     if not isinstance(surface.engine, HorizontalListEngine):
