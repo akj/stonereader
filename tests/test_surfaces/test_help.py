@@ -38,11 +38,11 @@ from .conftest import Harness, make_harness as make_base_harness
 
 
 CARDS_SENTENCE = (
-    "Cards is a horizontal list: Left and Right move between items, "
+    "Horizontal list: Left and Right move between items, "
     "Up and Down read details."
 )
 REPLAY_VIEWER_BINDINGS = [
-    "Replay Viewer is a horizontal list: Left and Right move between items, "
+    "Horizontal list: Left and Right move between items, "
     "Up and Down read details.",
     "Enter: go to the event where this card was played or drawn",
     "Page Up: go to the previous turn",
@@ -288,7 +288,7 @@ def test_content_builders_use_exact_generated_wording_order_and_deduplication() 
 
     assert widget_type_sentence(cards.spec) == CARDS_SENTENCE
     assert widget_type_sentence(settings.spec) == (
-        "Settings is a menu: Up and Down move between options, "
+        "Menu: Up and Down move between options, "
         "Enter acts on the current one."
     )
     entries = screen_bindings(cards)
@@ -338,7 +338,7 @@ def test_home_help_reads_enter_then_letters_in_option_order() -> None:
     harness.press(Chord("f1"))
 
     sentence = (
-        "Home is a menu: Up and Down move between options, "
+        "Menu: Up and Down move between options, "
         "Enter acts on the current one."
     )
     assert harness.speech.calls[-1] == (f"Home help, {sentence}", True)
@@ -542,7 +542,7 @@ def test_all_commands_reference_peeks_without_landing_and_is_read_only() -> None
     assert harness.titles[-1] == "Live Game commands — StoneReader"
     assert all(event != "activate:Live Game" for event in harness.events)
     assert option_titles(harness, "Command reference") == [
-        "Live Game is a horizontal list: Left and Right move between items, "
+        "Horizontal list: Left and Right move between items, "
         "Up and Down read details.",
         "R: jump to Remaining Deck",
     ]
@@ -575,7 +575,7 @@ def test_help_search_filters_case_insensitively_clears_and_resets_for_new_origin
     harness.nav.jump("Settings")
     harness.press(Chord("f1"))
     assert option_titles(harness, "Help menu") == [
-        "Settings is a menu: Up and Down move between options, "
+        "Menu: Up and Down move between options, "
         "Enter acts on the current one.",
         "Enter: act on the current option",
         "Universal keys",

@@ -81,7 +81,9 @@ def build_help(
     search = ""
 
     def origin_name() -> str:
-        return origin.get().spec.name
+        # Help takes the name the User hears: "Odd Hunter help", not "Deck help".
+        spec = origin.get().spec
+        return spec.display_name() if spec.display_name is not None else spec.name
 
     def execute(command: Command) -> None:
         nav.back()

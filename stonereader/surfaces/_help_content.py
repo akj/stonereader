@@ -38,17 +38,18 @@ _NON_EXECUTABLE_CHORDS: frozenset[Chord] = frozenset(
 
 
 def widget_type_sentence(spec: SurfaceSpec) -> str:
-    """Generate the ADR-0009 widget-type sentence for ``spec``."""
+    """Generate the ADR-0009 widget-type sentence for ``spec``.
+
+    Help already names the Surface ("Home help, …"), so the sentence names
+    only its type (ADR-0017).
+    """
     if spec.widget_type is WidgetType.VERTICAL_MENU:
-        return (
-            f"{spec.name} is a menu: Up and Down move between options, "
-            "Enter acts on the current one."
-        )
+        return "Menu: Up and Down move between options, Enter acts on the current one."
     # ADR-0009 gives Cards as a worked example, not an item-noun field in the
     # Surface contract. The generic generated form therefore says "items".
     return (
-        f"{spec.name} is a horizontal list: Left and Right move between "
-        "items, Up and Down read details."
+        "Horizontal list: Left and Right move between items, "
+        "Up and Down read details."
     )
 
 
