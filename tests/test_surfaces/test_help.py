@@ -4,6 +4,8 @@ from dataclasses import dataclass
 
 import pytest
 
+from stonereader.models.game_state import GameState, Hero
+from stonereader.models.replay import ReplayState
 from stonereader.surfaces._help_content import (
     screen_bindings,
     widget_type_sentence,
@@ -15,6 +17,9 @@ from stonereader.surfaces.help_reference import (
     build_help_reference,
 )
 from stonereader.surfaces.help_universal import build_help_universal
+from stonereader.surfaces.home import build_home
+from stonereader.surfaces.live_game import CurrentGame
+from stonereader.surfaces.replay_viewer import CurrentReplay, build_replay_viewer
 from stonereader.ui.arming import ArmedAction
 from stonereader.ui.builder import build_active_surface
 from stonereader.ui.chords import Chord
@@ -30,6 +35,45 @@ from stonereader.ui.surface import (
 )
 
 from .conftest import Harness, make_harness as make_base_harness
+
+
+CARDS_SENTENCE = (
+    "Cards is a horizontal list: Left and Right move between items, "
+    "Up and Down read details."
+)
+REPLAY_VIEWER_BINDINGS = [
+    "Replay Viewer is a horizontal list: Left and Right move between items, "
+    "Up and Down read details.",
+    "Enter: go to the event where this card was played or drawn",
+    "Page Up: go to the previous turn",
+    "Page Down: go to the next turn",
+    "F5: go to the previous event",
+    "F6: go to the next event",
+    "B: your minions",
+    "G: opponent minions",
+    "C: your hand",
+    "Shift+C: opponent hand",
+    "S: your secrets",
+    "Shift+S: opponent secrets",
+    "V: your hero",
+    "F: opponent hero",
+    "W: your weapon",
+    "Shift+W: opponent weapon",
+    "D: jump to Remaining Deck",
+    "P: cards you played",
+    "Shift+P: cards your opponent played",
+    "N: cards you drew",
+    "Shift+N: cards your opponent drew",
+    "Y: the game's events",
+    "A: how much mana you have",
+    "Shift+A: how much mana your opponent has",
+    "Shift+D: how many cards are in your opponent's deck",
+    "R: your hero power",
+    "Shift+R: your opponent's hero power",
+    "1 to 9: jump to that position in the list",
+    "0: jump to the tenth item",
+]
+
 
 @dataclass
 class HelpContext:
@@ -67,6 +111,15 @@ def make_harness() -> Harness[HelpContext]:
         (Chord("q", ctrl=True), quit_command),
         (Chord("f4", alt=True), quit_command),
     ]
+
+    def home_factory() -> ActiveSurface:
+        targets = {
+            name: lambda name=name: harness.nav.jump(name)
+            for name in ("Live Game", "Decks", "Cards", "Replays", "Settings")
+        }
+        return build_home(
+            harness.announcer, universal, harness.nav, targets, CurrentGame()
+        )
 
     def cards_factory() -> ActiveSurface:
         engine: HorizontalListEngine | None = None
@@ -165,9 +218,23 @@ def make_harness() -> Harness[HelpContext]:
             harness.nav,
         )
 
+    def replay_viewer_factory() -> ActiveSurface:
+        hero = Hero("hero", "Jaina", 30, 0, "", "MAGE")
+        replay = CurrentReplay()
+        replay.set(ReplayState((GameState(1, 1, (), (), (), (), hero, hero),), 1))
+        return build_replay_viewer(
+            harness.announcer,
+            universal,
+            harness.nav,
+            replay,
+            replay_autoplay=lambda: False,
+        )
+
+    harness.nav.register("Home", home_factory)
     harness.nav.register("Cards", cards_factory)
     harness.nav.register("Settings", settings_factory)
     harness.nav.register("Live Game", live_game_factory)
+    harness.nav.register("Replay Viewer", replay_viewer_factory)
     harness.nav.register(
         "Help menu",
         lambda: build_help(
@@ -204,30 +271,44 @@ def option_titles(harness: Harness[HelpContext], name: str) -> list[str]:
     return harness.menu(name).options_snapshot()[0]
 
 
+def move_to(harness: Harness[HelpContext], title: str) -> None:
+    """Press Down on the current menu until ``title`` is the current option."""
+    titles, cursor = harness.vertical.options_snapshot()
+    steps = titles.index(title) - cursor
+    assert steps > 0
+    for _ in range(steps):
+        harness.press(Chord("down"))
+    assert harness.speech.calls[-1] == (title, True)
+
+
 def test_content_builders_use_exact_generated_wording_order_and_deduplication() -> None:
     harness = make_harness()
     cards = harness.nav.peek("Cards")
     settings = harness.nav.peek("Settings")
 
-    assert widget_type_sentence(cards.spec) == (
-        "Cards is a horizontal list: Left and Right move between items, "
-        "Up and Down read details."
-    )
+    assert widget_type_sentence(cards.spec) == CARDS_SENTENCE
     assert widget_type_sentence(settings.spec) == (
         "Settings is a menu: Up and Down move between options, "
         "Enter acts on the current one."
     )
     entries = screen_bindings(cards)
     assert [entry.phrase for entry in entries] == [
+        "Enter: open this card",
         "D: jump to Remaining Deck",
         "Delete: delete this card, press twice",
         "Shift+Delete: delete this card without asking",
-        "Enter: open this card",
         "Tab: jump to the next group",
         "Ctrl+F: search for a card",
     ]
-    assert entries[3].command is None
-    assert entries[5].command is None
+    assert [entry.command is None for entry in entries] == [
+        True,
+        False,
+        False,
+        False,
+        False,
+        True,
+    ]
+    assert not any(entry.shared for entry in entries)
 
 
 def test_help_entry_utterance_title_and_option_order() -> None:
@@ -235,18 +316,14 @@ def test_help_entry_utterance_title_and_option_order() -> None:
 
     harness.press(Chord("f1"))
 
-    sentence = (
-        "Cards is a horizontal list: Left and Right move between items, "
-        "Up and Down read details."
-    )
-    assert harness.speech.calls[-1] == (f"Cards help, {sentence}", True)
+    assert harness.speech.calls[-1] == (f"Cards help, {CARDS_SENTENCE}", True)
     assert harness.titles[-1] == "Cards help — StoneReader"
     assert option_titles(harness, "Help menu") == [
-        sentence,
+        CARDS_SENTENCE,
+        "Enter: open this card",
         "D: jump to Remaining Deck",
         "Delete: delete this card, press twice",
         "Shift+Delete: delete this card without asking",
-        "Enter: open this card",
         "Tab: jump to the next group",
         "Ctrl+F: search for a card",
         "Universal keys",
@@ -254,10 +331,124 @@ def test_help_entry_utterance_title_and_option_order() -> None:
     ]
 
 
+def test_home_help_reads_enter_then_letters_in_option_order() -> None:
+    harness = make_harness()
+    harness.nav.jump("Home")
+
+    harness.press(Chord("f1"))
+
+    sentence = (
+        "Home is a menu: Up and Down move between options, "
+        "Enter acts on the current one."
+    )
+    assert harness.speech.calls[-1] == (f"Home help, {sentence}", True)
+    assert option_titles(harness, "Help menu") == [
+        sentence,
+        "Enter: open the selected screen",
+        "L: go to Live Game",
+        "D: go to Decks",
+        "C: go to Cards",
+        "R: go to Replays",
+        "S: go to Settings",
+        "Universal keys",
+        "All commands",
+    ]
+
+    move_to(harness, "L: go to Live Game")
+    harness.press(Chord("enter"))
+    assert harness.nav.stack == ("Home", "Live Game")
+
+
+def test_replay_viewer_help_leads_with_turns_and_shares_one_digit_option() -> None:
+    harness = make_harness()
+    harness.nav.jump("Replay Viewer")
+
+    harness.press(Chord("f1"))
+
+    assert harness.speech.calls[-1] == (
+        f"Replay Viewer help, {REPLAY_VIEWER_BINDINGS[0]}",
+        True,
+    )
+    assert option_titles(harness, "Help menu") == [
+        *REPLAY_VIEWER_BINDINGS,
+        "Universal keys",
+        "All commands",
+    ]
+
+    move_to(harness, "1 to 9: jump to that position in the list")
+    harness.press(Chord("enter"))
+    assert harness.speech.calls[-1] == ("Press one of these keys to use this", True)
+    assert harness.nav.current_name == "Help menu"
+
+    harness.press(Chord("down"))
+    harness.press(Chord("enter"))
+    assert harness.nav.stack == ("Home", "Replay Viewer")
+
+
+def test_all_commands_sections_share_one_option_per_phrase() -> None:
+    harness = make_harness()
+    harness.press(Chord("f1"))
+    move_to(harness, "All commands")
+    harness.press(Chord("enter"))
+
+    move_to(harness, "Replay Viewer")
+    harness.press(Chord("enter"))
+
+    assert option_titles(harness, "Command reference") == REPLAY_VIEWER_BINDINGS
+    move_to(harness, "1 to 9: jump to that position in the list")
+    harness.press(Chord("enter"))
+    assert harness.speech.calls[-1] == ("Only available on Replay Viewer", True)
+
+
+def test_f1_always_opens_fresh_on_the_widget_type_sentence() -> None:
+    harness = make_harness()
+    harness.nav.jump("Replay Viewer")
+    harness.press(Chord("f1"))
+    move_to(harness, "V: your hero")
+    harness.press(Chord("escape"))
+
+    harness.press(Chord("f1"))
+
+    assert harness.speech.calls[-1] == (
+        f"Replay Viewer help, {REPLAY_VIEWER_BINDINGS[0]}",
+        True,
+    )
+
+    harness.press(Chord("f", ctrl=True))
+    harness.type("hero")
+    harness.press(Chord("enter"))
+    harness.press(Chord("escape"))
+
+    harness.press(Chord("f1"))
+
+    assert harness.speech.calls[-1] == (
+        f"Replay Viewer help, {REPLAY_VIEWER_BINDINGS[0]}",
+        True,
+    )
+    assert len(option_titles(harness, "Help menu")) == len(REPLAY_VIEWER_BINDINGS) + 2
+
+
+def test_back_from_nested_help_menus_finds_help_as_left() -> None:
+    harness = make_harness()
+    harness.press(Chord("f1"))
+    move_to(harness, "Universal keys")
+    harness.press(Chord("enter"))
+
+    harness.press(Chord("escape"))
+
+    assert harness.speech.calls[-1] == ("Cards help, Universal keys", True)
+
+    harness.press(Chord("down"))
+    harness.press(Chord("enter"))
+    harness.press(Chord("escape"))
+
+    assert harness.speech.calls[-1] == ("Cards help, All commands", True)
+
+
 def test_enter_on_binding_pops_then_runs_after_origin_landing() -> None:
     harness = make_harness()
     harness.press(Chord("f1"))
-    harness.menu("Help menu").set_cursor(1)
+    move_to(harness, "D: jump to Remaining Deck")
     harness.events.clear()
 
     harness.press(Chord("enter"))
@@ -272,7 +463,7 @@ def test_enter_on_binding_pops_then_runs_after_origin_landing() -> None:
 def test_delete_from_help_only_arms_the_origin_action() -> None:
     harness = make_harness()
     harness.press(Chord("f1"))
-    harness.menu("Help menu").set_cursor(2)
+    move_to(harness, "Delete: delete this card, press twice")
 
     harness.press(Chord("enter"))
 
@@ -290,9 +481,7 @@ def test_non_executable_help_options_announce_default_noop() -> None:
     harness.press(Chord("enter"))
     assert harness.speech.calls[-1] == ("Nothing to do here", True)
 
-    help_engine = harness.menu("Help menu")
-    enter_index = option_titles(harness, "Help menu").index("Enter: open this card")
-    help_engine.set_cursor(enter_index)
+    move_to(harness, "Enter: open this card")
     harness.press(Chord("enter"))
     assert harness.speech.calls[-1] == ("Nothing to do here", True)
     assert harness.nav.current_name == "Help menu"

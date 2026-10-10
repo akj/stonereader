@@ -250,6 +250,7 @@ def build_card_browser(
             )
         ],
         bindings=mana_bindings,
+        help_first=[Chord("tab"), Chord("tab", shift=True), Chord("f", ctrl=True)],
         slot_fills={
             Slot.GROUP_JUMP: forward_class,
             Slot.SEARCH: Command(

@@ -330,10 +330,12 @@ def test_help_documents_both_directions_for_class_and_page_chords() -> None:
         entry.phrase for entry in screen_bindings(harness.subject_surface)
     ]
 
-    assert phrases[-5:] == [
+    assert phrases == [
         "Tab: jump to the next class",
         "Shift+Tab: jump to the previous class",
         "Ctrl+F: search for a card",
+        "0 to 8: show only cards of that mana cost",
+        "9: show only cards costing 9 or more",
         "Page Up: jump ten cards back",
         "Page Down: jump ten cards forward",
     ]

@@ -60,6 +60,9 @@ class SurfaceSpec:
     # While this names a subject ("a game"), the Surface has nothing to browse:
     # landing says "{name}, waiting for {subject}" and its keys say so too.
     waiting_for: Callable[[], str | None] | None = None
+    # Chords whose help options follow Enter's, in this order, where the
+    # Surface's spec lists keys out of registration order (ADR-0017).
+    help_first: list[Chord] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if not self.name:

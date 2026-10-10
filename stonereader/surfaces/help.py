@@ -5,7 +5,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Protocol
 
-from stonereader.surfaces._help_content import screen_bindings, widget_type_sentence
+from stonereader.surfaces._help_content import (
+    HelpEntry,
+    screen_bindings,
+    widget_type_sentence,
+)
 from stonereader.ui.announcer import Announcer
 from stonereader.ui.builder import build_active_surface
 from stonereader.ui.chords import Chord
@@ -51,19 +55,18 @@ class HelpOrigin:
         self._subscribers: list[Callable[[], None]] = []
 
     def set(self, surface: ActiveSurface) -> None:
-        changed = surface is not self._surface
+        """Record an F1 open; subscribers hear every open, same origin or not."""
         self._surface = surface
-        if changed:
-            for subscriber in tuple(self._subscribers):
-                subscriber()
+        for subscriber in tuple(self._subscribers):
+            subscriber()
 
     def get(self) -> ActiveSurface:
         if self._surface is None:
             raise RuntimeError("Help origin has not been set")
         return self._surface
 
-    def subscribe(self, on_change: Callable[[], None]) -> None:
-        self._subscribers.append(on_change)
+    def subscribe(self, on_open: Callable[[], None]) -> None:
+        self._subscribers.append(on_open)
 
 
 def build_help(
@@ -84,6 +87,16 @@ def build_help(
         nav.back()
         command.handler()
 
+    def press_a_key() -> None:
+        announcer.noop("Press one of these keys to use this")
+
+    def on_enter(entry: HelpEntry) -> Callable[[], None] | None:
+        if entry.shared:
+            return press_a_key
+        if entry.command is None:
+            return None
+        return lambda command=entry.command: execute(command)
+
     def unfiltered_options() -> list[MenuOption]:
         surface = origin.get()
         options = [
@@ -95,13 +108,9 @@ def build_help(
         ]
         options.extend(
             MenuOption(
-                f"binding.{entry.command.id if entry.command else index}",
+                f"binding.{index}",
                 lambda phrase=entry.phrase: phrase,
-                (
-                    None
-                    if entry.command is None
-                    else lambda command=entry.command: execute(command)
-                ),
+                on_enter(entry),
             )
             for index, entry in enumerate(screen_bindings(surface))
         )
@@ -149,10 +158,10 @@ def build_help(
             TextSession("Search help", search, announcer, commit_search, abandon_search)
         )
 
-    def origin_changed() -> None:
+    def open_fresh() -> None:
         nonlocal search
-        # Help is origin-dependent, so a filter from another Surface would be
-        # disorienting rather than useful persisted cursor state.
+        # Every F1 opens on the widget-type sentence with no filter. Only a
+        # back from Universal keys or All commands finds help as left.
         search = ""
         if engine is not None:
             engine.set_cursor(0)
@@ -172,5 +181,5 @@ def build_help(
     if not isinstance(surface.engine, VerticalMenuEngine):
         raise TypeError("Help requires a vertical-menu engine")
     engine = surface.engine
-    origin.subscribe(origin_changed)
+    origin.subscribe(open_fresh)
     return surface
