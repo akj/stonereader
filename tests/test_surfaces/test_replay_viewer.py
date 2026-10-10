@@ -290,7 +290,7 @@ def test_turn_prefix_leads_landings_rereads_and_turn_steps_but_not_zone_switches
     )
 
     harness.press(Chord("f6"))
-    assert harness.speech.calls[-1] == ("Your turn 1", True)
+    assert harness.speech.calls[-1] == ("Start of turn", True)
     harness.press(Chord("g"))
     assert harness.speech.calls[-1] == ("Opponent board, Enemy, 1 of 1", True)
     harness.press(Chord("up", shift=True))
@@ -398,7 +398,7 @@ def test_card_hidden_status_hero_and_event_rows_follow_the_spec() -> None:
     harness.press(Chord("y"))
     titles = harness.horizontal.items_snapshot()[0]
     assert "Game started, Mage versus Warrior" in titles
-    assert "Your turn 1" in titles
+    assert "Start of turn" in titles
     assert "Mulligan complete" in titles
     assert not any("damage" in title.lower() for title in titles)
     played_index = titles.index("You played Boar")
@@ -410,7 +410,7 @@ def test_event_scrubbing_renders_the_selected_moment_and_end_restores_turn_final
     harness = _harness()
     harness.press(Chord("y"))
     titles = harness.horizontal.items_snapshot()[0]
-    harness.horizontal.jump_to_position(titles.index("Your turn 1") + 1)
+    harness.horizontal.jump_to_position(titles.index("Start of turn") + 1)
 
     harness.press(Chord("b"))
     assert harness.horizontal.items_snapshot()[2][1] == "1 attack, 3 health"
@@ -437,7 +437,7 @@ def test_event_steps_from_board_speak_move_world_and_preserve_board_position() -
 
     harness.press(Chord("f6"))
 
-    assert harness.speech.calls[-1] == ("Your turn 1", True)
+    assert harness.speech.calls[-1] == ("Start of turn", True)
     assert [your_board.title(item) for item in your_board.items()] == ["Boar", "Yeti"]
     assert rendered_titles[-1] == ["Boar", "Yeti"]
     assert harness.horizontal.current_zone().zone_id == "your_board"
@@ -903,7 +903,7 @@ def test_enter_in_played_and_drawn_zones_follows_the_fact_to_its_event() -> None
         assert harness.speech.calls[-1][1] is True
         harness.press(Chord("pagedown"))
         assert harness.speech.calls[-1] == (
-            "Opponent's turn 2, Events, Opponent's turn 2, 1 of 1",
+            "Opponent's turn 2, Events, Start of turn, 1 of 1",
             True,
         )
 
@@ -930,7 +930,7 @@ def test_enter_elsewhere_stays_the_announced_noop() -> None:
     # Events, a board, and an empty played zone have no fact to follow.
     assert harness.speech.calls == [
         ("Nothing to do here", True),
-        ("Your turn 1", True),
+        ("Start of turn", True),
         ("Your board, Boar, 1 of 2", True),
         ("Nothing to do here", True),
         ("Game started, Mage versus Warrior", True),
@@ -957,3 +957,55 @@ def test_enter_on_a_card_with_no_matching_event_says_so() -> None:
 
     assert harness.speech.calls == [("No event for this card", True)]
     assert harness.horizontal.current_zone().zone_id == "your_drawn"
+
+
+def test_enter_on_a_replayed_card_finds_its_own_play() -> None:
+    boar = _card("BOAR", "Boar", attack=1, health=3)
+    played = _played(10, boar, 1, 1)
+    opening = _empty_state(0, 2)
+    in_hand = replace(
+        opening,
+        turn=1,
+        active_player_id=1,
+        mulligan_complete=True,
+        player_hand=(_entity(10, boar, zone="HAND"),),
+    )
+    played_once = replace(
+        in_hand,
+        player_hand=(),
+        player_board=(_entity(10, boar),),
+        player_played=(played,),
+        block_stack=("PLAY",),
+    )
+    bounced = replace(
+        played_once,
+        player_board=(),
+        player_hand=(_entity(10, boar, zone="HAND"),),
+        block_stack=("POWER",),
+    )
+    played_twice = replace(
+        bounced,
+        player_hand=(),
+        player_board=(_entity(10, boar),),
+        player_played=(played, played),
+        block_stack=("PLAY",),
+    )
+    turn_two = replace(played_twice, turn=2, active_player_id=2, block_stack=())
+    harness = _harness(
+        ReplayState(
+            states=(opening, in_hand, played_once, bounced, played_twice, turn_two),
+            friendly_player_id=1,
+        )
+    )
+    landings = []
+    for row_key in ("home", "end"):
+        harness.press(Chord("pagedown"))
+        harness.press(Chord("p"))
+        harness.press(Chord(row_key))
+        harness.press(Chord("enter"))
+        landings.append(harness.speech.calls[-1][0])
+
+    first, second = landings
+    assert first.startswith("Your turn 1, Events, You played Boar, ")
+    assert second.startswith("Your turn 1, Events, You played Boar, ")
+    assert first != second

@@ -44,8 +44,8 @@ def phrase(event: GameEvent, state: GameState) -> str | None:
         }.get(playstate.upper(), "tied")
         return f"Game over, {result}"
     if isinstance(event, TurnChanged):
-        side = "Your" if event.active_player_id == 1 else "Opponent's"
-        return f"{side} turn {event.turn}"
+        # The Replay Viewer's turn prefix already names the side and number.
+        return "Start of turn"
     if isinstance(event, MulliganDone):
         return "Mulligan complete"
     if isinstance(event, CardDrawn):

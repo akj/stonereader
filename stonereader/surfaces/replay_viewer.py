@@ -189,7 +189,18 @@ def build_replay_viewer(
         if event_type is None or not isinstance(card, PlayedCard):
             announcer.slot_noop(Slot.ENTER)
             return
-        found = _find_fact(turn_views(), event_type, card)
+        # The same card can be played or drawn twice in one turn (bounced and
+        # replayed); the row's place among its twins picks the matching event.
+        zone = list_engine.current_zone()
+        rows = list(zone.items())
+        occurrence = sum(
+            1
+            for row in rows[: list_engine.zone_cursor(zone.zone_id)]
+            if isinstance(row, PlayedCard)
+            and row.entity_id == card.entity_id
+            and row.turn == card.turn
+        )
+        found = _find_fact(turn_views(), event_type, card, occurrence)
         if found is None:
             announcer.noop("No event for this card")
             return
@@ -441,8 +452,13 @@ def _find_fact(
     turns: list[TurnView],
     event_type: type[CardPlayed] | type[CardDrawn],
     card: PlayedCard,
+    occurrence: int = 0,
 ) -> tuple[int, int] | None:
-    """Locate the event that played or drew a card as (turn, event) positions."""
+    """Locate the event that played or drew a card as (turn, event) positions.
+
+    `occurrence` counts earlier rows for the same card on the same turn, so the
+    second of two same-turn plays finds the second play event.
+    """
     matches = [
         (turn_index, event_index, item.event.turn)
         for turn_index, turn in enumerate(turns)
@@ -453,9 +469,10 @@ def _find_fact(
     if not matches:
         return None
     # A card bounced back to hand is drawn or played again; its own turn wins.
-    turn_index, event_index, _turn = min(
-        matches, key=lambda match: match[2] != card.turn
-    )
+    same_turn = [match for match in matches if match[2] == card.turn]
+    if not same_turn:
+        return matches[0][0], matches[0][1]
+    turn_index, event_index, _turn = same_turn[min(occurrence, len(same_turn) - 1)]
     return turn_index, event_index
 
 
