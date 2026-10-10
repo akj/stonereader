@@ -191,6 +191,7 @@ def test_class_lists_hold_only_deck_cards_and_no_hero_skins(
     ]
     every_card = [card for cards in lists.values() for card in cards]
     assert [card.id for card in every_card if card.card_set == "HERO_SKINS"] == []
+    assert [card.name for card in every_card if card.name.startswith("[")] == []
     assert {card.card_type for card in every_card} == {
         "HERO", "LOCATION", "MINION", "SPELL", "WEAPON",
     }

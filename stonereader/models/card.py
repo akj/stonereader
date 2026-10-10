@@ -182,11 +182,16 @@ class Card:
 
     @property
     def deckable(self) -> bool:
-        """Return whether a deck can hold this card; hero skins are cosmetic."""
+        """Return whether a deck can hold this card.
+
+        Hero skins are cosmetic, and a bracketed name ("[CORE 2024] …") marks
+        an internal card the game data still flags collectible.
+        """
         return (
             self.collectible
             and self.card_type in _DECK_CARD_TYPES
             and self.card_set != "HERO_SKINS"
+            and not self.name.startswith("[")
         )
 
     @classmethod
