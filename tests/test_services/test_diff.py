@@ -441,6 +441,30 @@ def test_deck_card_turned_face_up_in_place_is_still_a_reveal() -> None:
     assert [type(e) for e in diff(prev, curr)] == [CardRevealed]
 
 
+def test_spell_cast_from_hand_is_played_and_resolves_silently() -> None:
+    in_hand = _entity(entity_id=55, zone="HAND", card_id="CS2_029", name="Fireball")
+    cast = _entity(
+        entity_id=55,
+        zone="PLAY",
+        card_id="CS2_029",
+        name="Fireball",
+        card_type="SPELL",
+    )
+    resolved = _entity(
+        entity_id=55,
+        zone="GRAVEYARD",
+        card_id="CS2_029",
+        name="Fireball",
+        card_type="SPELL",
+    )
+    in_hand_state = _state(turn=3, player_hand=(in_hand,))
+    cast_state = _state(turn=3, spells_in_play=(cast,), block_stack=("PLAY",))
+    resolved_state = _state(turn=3, graveyard=(resolved,), block_stack=("PLAY",))
+
+    assert [type(e) for e in diff(in_hand_state, cast_state)] == [CardPlayed]
+    assert list(diff(cast_state, resolved_state)) == []
+
+
 def test_expired_enchantment_is_not_a_removed_card() -> None:
     enchantment = _entity(
         entity_id=54,

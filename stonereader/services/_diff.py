@@ -18,7 +18,8 @@ Output ordering (deterministic):
      CardRevealed (if card_id became visible and no zone-class event already
      names the card) and DamageDealt (if DAMAGE tag changed under an open
      ATTACK or POWER block). Enchantments are attached effects, not cards,
-     and produce no events.
+     and produce no events. A spell enters PLAY when cast (CardPlayed, like
+     any card played from hand) and leaves it silently as it resolves.
 
 Pure timestamps: every emitted event carries timestamp=0.0 — diff has no
 clock. Consumers that want wall-clock should associate timestamps at the
@@ -70,6 +71,9 @@ def _iter_entities(state: GameState) -> Iterable[GameEntity]:
     # PLAY→GRAVEYARD death or a *→terminal removal is never visited below, so
     # MinionDied / CardRemoved would be silently dropped from the event stream.
     yield from state.graveyard
+    # Spells resolving in PLAY — without these a spell cast from hand never
+    # reaches PLAY in the diff's eyes, so it gets no CardPlayed.
+    yield from state.spells_in_play
     # Hero entities — without these a DAMAGE change on a hero under an ATTACK/
     # POWER block (face damage) is never visited, so DamageDealt to face would
     # be dropped from the event stream.
@@ -217,7 +221,10 @@ def diff(prev: Optional[GameState], curr: GameState) -> Sequence[GameEvent]:
             # A played card enters face up; its reveal is the play itself.
             named = True
         elif prev_zone == "PLAY" and curr_ent.zone in _TERMINAL_ENTITY_ZONES:
-            if curr_ent.zone == "GRAVEYARD" and curr_ent.card_type == "MINION":
+            if curr_ent.card_type == "SPELL":
+                # A cast spell resolving; casting it was the news (CardPlayed).
+                pass
+            elif curr_ent.zone == "GRAVEYARD" and curr_ent.card_type == "MINION":
                 events.append(
                     MinionDied(
                         timestamp=0.0,

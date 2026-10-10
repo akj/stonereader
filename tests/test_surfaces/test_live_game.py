@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 
 from stonereader.app import _switch_live_zone
-from stonereader.models.card import Card
+from stonereader.models.card import Card, CardDatabase
 from stonereader.models.game_state import GameEntity, GameState, Hero, PlayedCard
+from stonereader.services._narrator import Narrator
+from stonereader.services._tracker import GameTracker
 from stonereader.surfaces.live_game import CurrentGame, build_live_game
 from stonereader.ui.chords import Chord
 
@@ -365,3 +368,55 @@ def test_compound_hotkey_with_no_game_keeps_the_waiting_landing() -> None:
         ),
     )
     assert harness.speech.calls == [("Live Game, waiting for a game", True)]
+
+
+class _Narrations:
+    def __init__(self) -> None:
+        self.spoken: list[str] = []
+
+    def narrate(self, text: str) -> None:
+        self.spoken.append(text)
+
+
+def test_a_live_log_narrates_the_opponents_spell_and_lists_it_as_played() -> None:
+    """Power.log lines through the tracker, wired as the app wires it.
+
+    The opponent casts a hidden Fireball (it arrives as a reveal straight into
+    PLAY), then plays Acidic Swamp Ooze: Key moments narrates both plays, and
+    Opponent played lists both.
+    """
+    heroes = (
+        replace(_card("HERO_08", "Jaina", card_type="HERO"), card_class="MAGE"),
+        replace(_card("HERO_01", "Garrosh", card_type="HERO"), card_class="WARRIOR"),
+    )
+    cards = (
+        _card("CS2_106", "Fiery War Axe", card_type="WEAPON"),
+        _card("EX1_277", "Arcane Missiles", card_type="SPELL"),
+        _card("CS2_029", "Fireball", card_type="SPELL"),
+        _card("EX1_066", "Acidic Swamp Ooze"),
+    )
+    card_db = CardDatabase(cards_by_id={card.id: card for card in (*heroes, *cards)})
+    tracker = GameTracker(card_db=card_db)
+    current = CurrentGame()
+    narrations = _Narrations()
+    narrator = Narrator(narrations, lambda: "key_moments", card_db)  # type: ignore[arg-type]
+    tracker.subscribe(current.on_state)
+    tracker.subscribe(narrator.on_state)
+
+    log = Path(__file__).parent.parent / "fixtures" / "log" / "spells_and_weapons.log"
+    tracker._on_lines(log.read_text(encoding="utf-8").splitlines())
+
+    assert narrations.spoken == [
+        "Opponent played Fireball",
+        "Opponent played Acidic Swamp Ooze",
+    ]
+    harness = _harness(current.get())
+    harness.press(Chord("p", shift=True))
+    assert harness.speech.calls[-1] == (
+        "Opponent played, Fireball, turn 2, 1 of 2",
+        True,
+    )
+    assert harness.horizontal.items_snapshot()[0] == [
+        "Fireball, turn 2",
+        "Acidic Swamp Ooze, turn 2",
+    ]

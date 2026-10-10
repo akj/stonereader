@@ -217,6 +217,7 @@ class GameEngine:
 
     def _record_entity(self, eid: int, card_id: str, tags: Dict[str, int]) -> None:
         ent = self._entities.setdefault(eid, {})
+        prev_zone = ent.get("ZONE")
         if card_id:
             ent["card_id"] = card_id
         for k, v in tags.items():
@@ -248,9 +249,15 @@ class GameEngine:
         # D-19: bookkeeping changed → republish the snapshot so opponent_hand
         # reflects newly-arrived / updated entities. _refresh_state is a no-op
         # if _current_state is None (pre-CREATE_GAME), so this is safe to
-        # invoke unconditionally for every record. Existing zone-change events
-        # already call _refresh_state from _handle_zone_change.
-        self._refresh_state()
+        # invoke unconditionally for every record. A reveal or creation that
+        # carries a new ZONE is a zone move in its own right (your draws and
+        # the opponent's plays arrive this way), so it takes the same path as
+        # a ZONE tag change, which republishes too. A later ZONE tag change to
+        # the same zone then finds nothing new to record.
+        if ent.get("ZONE") != prev_zone:
+            self._handle_zone_change(eid, prev_zone, ent["ZONE"])
+        else:
+            self._refresh_state()
         # gap-closure 03-07: late-arriving FullEntity packets for hero entities
         # (FULL_ENTITY may bring CARDTYPE/CONTROLLER after CREATE_GAME's initial
         # placeholder Hero is published). Cheap CARDTYPE guard avoids running
@@ -640,7 +647,13 @@ class GameEngine:
             else:
                 self._opponent_drawn.append(pc)
         elif new_zone == int(Zone.PLAY) and prev != int(Zone.PLAY):
-            if self._block_stack and self._block_stack[-1] == "PLAY":
+            # Played means this entity is the subject of the open PLAY block,
+            # not just anything (an enchantment, say) entering play inside it.
+            if (
+                self._block_stack
+                and self._block_stack[-1] == "PLAY"
+                and self._block_subjects[-1] == eid
+            ):
                 pc = PlayedCard(
                     entity_id=eid,
                     card_id=card_id,
@@ -799,6 +812,7 @@ class GameEngine:
           - HAND               -> player_hand / opponent_hand
           - SECRET             -> player_secrets / opponent_secrets
           - DECK               -> player_deck (friendly) + per-side deck counts
+          - PLAY-zone SPELLs   -> spells_in_play (diff-seam input only)
         Heroes are refined separately (CARDTYPE==HERO pass). Iteration over the
         entity dict (keyed by entity_id) implicitly dedupes — exactly one
         bookkeeping entry per entity. NUM_CARDS_IN_DECK is not a GameTag, so the
@@ -816,6 +830,7 @@ class GameEngine:
         opponent_weapons: List[GameEntity] = []
         player_deck_entities: List[GameEntity] = []
         graveyard: List[GameEntity] = []
+        spells_in_play: List[GameEntity] = []
         player_hero_entity: Optional[GameEntity] = None
         opponent_hero_entity: Optional[GameEntity] = None
         player_deck_count = 0
@@ -830,6 +845,7 @@ class GameEngine:
         weapon_type = int(CardType.WEAPON)
         location_type = int(CardType.LOCATION)
         hero_type = int(CardType.HERO)
+        spell_type = int(CardType.SPELL)
         for eid, ent in self._entities.items():
             zone = ent.get("ZONE")
             controller = ent.get("CONTROLLER")
@@ -872,6 +888,10 @@ class GameEngine:
                         player_hero_entity = view
                     else:
                         opponent_hero_entity = view
+                elif ctype == spell_type:
+                    spells_in_play.append(
+                        self._entity_view(eid, ent, "PLAY", controller_int)
+                    )
             elif zone == graveyard_zone:
                 graveyard.append(
                     self._entity_view(eid, ent, "GRAVEYARD", controller_int)
@@ -893,6 +913,7 @@ class GameEngine:
         # GRAVEYARD has no meaningful zone_position; order by entity_id so the
         # projection (and therefore the diff seam) is deterministic.
         graveyard.sort(key=lambda e: e.entity_id)
+        spells_in_play.sort(key=lambda e: e.entity_id)
         self._current_state = dataclasses.replace(
             self._current_state,
             player_board=tuple(player_board),
@@ -911,6 +932,7 @@ class GameEngine:
             player_deck_count=player_deck_count,
             opponent_deck_count=opponent_deck_count,
             graveyard=tuple(graveyard),
+            spells_in_play=tuple(spells_in_play),
             player_hero_entity=player_hero_entity,
             opponent_hero_entity=opponent_hero_entity,
         )
