@@ -130,5 +130,15 @@ def test_a_card_missing_from_card_data_is_unrecognized_never_its_id() -> None:
         assert phrase(event, state) == expected
 
 
+def test_a_weapon_sent_to_the_graveyard_is_destroyed() -> None:
+    axe = _card("AXE", "Fiery War Axe")
+    broken = replace(_entity(30, axe, 1), card_type="WEAPON", zone="GRAVEYARD")
+    exiled = replace(broken, entity_id=31, zone="REMOVEDFROMGAME")
+    state = replace(_state(), graveyard=(broken, exiled))
+
+    assert phrase(CardRemoved(0, 4, 30, "AXE", 1), state) == "Fiery War Axe destroyed"
+    assert phrase(CardRemoved(0, 4, 31, "AXE", 1), state) == "Fiery War Axe removed"
+
+
 def test_damage_is_filtered_as_cumulative_value_noise() -> None:
     assert phrase(DamageDealt(0, 4, 20, 3, 2), _state()) is None

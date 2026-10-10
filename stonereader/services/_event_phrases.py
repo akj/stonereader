@@ -64,7 +64,17 @@ def phrase(event: GameEvent, state: GameState) -> str | None:
     if isinstance(event, CardRevealed):
         return f"{card_label(event.name, event.card_id, event.base_card)} revealed"
     if isinstance(event, CardRemoved):
-        return f"{_entity_name(state, event.entity_id, 'Unknown card')} removed"
+        name = _entity_name(state, event.entity_id, "Unknown card")
+        entity = _entity(state, event.entity_id)
+        # A weapon goes to the graveyard only when destroyed: broken, or
+        # replaced by a newly equipped one.
+        if (
+            entity is not None
+            and entity.card_type == "WEAPON"
+            and entity.zone == "GRAVEYARD"
+        ):
+            return f"{name} destroyed"
+        return f"{name} removed"
     if isinstance(event, AttackStarted):
         attacker = _entity_name(state, event.attacker_entity_id, "a minion")
         target = _entity_name(state, event.defender_entity_id, "a minion")
@@ -78,15 +88,22 @@ def phrase(event: GameEvent, state: GameState) -> str | None:
 
 
 def _entity_name(state: GameState, entity_id: int, fallback: str) -> str:
-    for entity in _entities(state):
-        if entity.entity_id == entity_id:
-            if entity.name:
-                return entity.name
-            if entity.base_card is not None:
-                return entity.base_card.name
-            # Only a hidden entity, with no id, takes the caller's fallback.
-            return card_label("", entity.card_id) if entity.card_id else fallback
-    return fallback
+    entity = _entity(state, entity_id)
+    if entity is None:
+        return fallback
+    if entity.name:
+        return entity.name
+    if entity.base_card is not None:
+        return entity.base_card.name
+    # Only a hidden entity, with no id, takes the caller's fallback.
+    return card_label("", entity.card_id) if entity.card_id else fallback
+
+
+def _entity(state: GameState, entity_id: int) -> GameEntity | None:
+    return next(
+        (entity for entity in _entities(state) if entity.entity_id == entity_id),
+        None,
+    )
 
 
 def _entities(state: GameState) -> Iterable[GameEntity]:

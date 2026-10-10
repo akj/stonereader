@@ -162,6 +162,11 @@ class GameState:
     # rendered by the live UI — a pure diff-seam input.
     graveyard: Tuple[GameEntity, ...] = ()
 
+    # Spells in PLAY while they resolve, projected so the diff seam sees a
+    # spell cast from hand enter PLAY under its PLAY block (CardPlayed), as a
+    # minion does, and leave it again. A pure diff-seam input, not rendered.
+    spells_in_play: Tuple[GameEntity, ...] = ()
+
     # PRD #7: GameEntity views of the two hero entities (CARDTYPE==HERO in PLAY),
     # separate from the display-oriented player_hero / opponent_hero Hero models.
     # They carry the hero's entity_id + DAMAGE tag so the diff seam can emit

@@ -1033,6 +1033,15 @@ def _recorded_replay(tmp_path: Path, log_name: str) -> Path:
     return path
 
 
+def _fixture_card_db(*cards: Card) -> CardDatabase:
+    """The fixtures' Mage-versus-Warrior heroes plus the given cards."""
+    heroes = (
+        replace(_card("HERO_08", "Jaina", card_type="HERO"), card_class="MAGE"),
+        replace(_card("HERO_01", "Garrosh", card_type="HERO"), card_class="WARRIOR"),
+    )
+    return CardDatabase(cards_by_id={card.id: card for card in (*heroes, *cards)})
+
+
 def test_a_recorded_game_speaks_each_card_once_and_never_its_card_id(
     tmp_path: Path,
 ) -> None:
@@ -1042,15 +1051,11 @@ def test_a_recorded_game_speaks_each_card_once_and_never_its_card_id(
     the card data lacks; your draw and the opponent's play arrive face up, and
     a later effect turns the opponent's Fireball face up in hand.
     """
-    card_db = CardDatabase()
-    for card in (
-        replace(_card("HERO_08", "Jaina", card_type="HERO"), card_class="MAGE"),
-        replace(_card("HERO_01", "Garrosh", card_type="HERO"), card_class="WARRIOR"),
+    card_db = _fixture_card_db(
         _card("CS2_182", "Chillwind Yeti"),
         _card("EX1_015", "Novice Engineer"),
         _card("CS2_029", "Fireball", card_type="SPELL"),
-    ):
-        card_db.cards_by_id[card.id] = card
+    )
     replay = load_replay(
         _recorded_replay(tmp_path, "reveals_and_new_cards.log"), card_db
     )
@@ -1080,4 +1085,66 @@ def test_a_recorded_game_speaks_each_card_once_and_never_its_card_id(
         "Opponent played Chillwind Yeti",
         "Fireball revealed",
         "Game over, lost",
+    ]
+
+
+def test_a_recorded_game_lists_revealed_draws_and_plays_and_casts_spells(
+    tmp_path: Path,
+) -> None:
+    """Your draws and the opponent's plays arrive as reveals that carry their
+    new zone, a spell cast from hand is played like any card, and a weapon
+    sent to the graveyard is destroyed.
+
+    spells_and_weapons.log: you draw Fiery War Axe and Arcane Missiles, cast
+    the Missiles and equip the Axe; the opponent casts a hidden Fireball, then
+    plays Acidic Swamp Ooze, whose battlecry destroys the Axe.
+    """
+    card_db = _fixture_card_db(
+        _card("CS2_106", "Fiery War Axe", card_type="WEAPON"),
+        _card("EX1_277", "Arcane Missiles", card_type="SPELL"),
+        _card("CS2_029", "Fireball", card_type="SPELL"),
+        _card("EX1_066", "Acidic Swamp Ooze"),
+    )
+    replay = load_replay(_recorded_replay(tmp_path, "spells_and_weapons.log"), card_db)
+    harness = _harness(replay)
+
+    assert harness.horizontal.items_snapshot()[0] == [
+        "Game started, Mage versus Warrior",
+        "You drew Fiery War Axe",
+        "You drew Arcane Missiles",
+        "Opponent drew a card",
+        "Opponent drew a card",
+        "You played Arcane Missiles",
+        "You played Fiery War Axe",
+    ]
+    harness.press(Chord("end"))
+    harness.press(Chord("n"))
+    harness.press(Chord("right"))
+    harness.press(Chord("enter"))
+    assert harness.speech.calls[-3:] == [
+        ("Your drawn, Fiery War Axe, turn 1, 1 of 2", True),
+        ("Arcane Missiles, turn 1", True),
+        ("Your turn 1, Events, You drew Arcane Missiles, 3 of 7", True),
+    ]
+    # Zones show the selected moment; End moves to the turn's last event.
+    harness.press(Chord("end"))
+    harness.press(Chord("p"))
+    assert harness.horizontal.items_snapshot()[0] == [
+        "Arcane Missiles, turn 1",
+        "Fiery War Axe, turn 1",
+    ]
+
+    harness.press(Chord("pagedown"))
+    harness.press(Chord("y"))
+    assert harness.horizontal.items_snapshot()[0] == [
+        "Start of turn",
+        "Opponent played Fireball",
+        "Opponent played Acidic Swamp Ooze",
+        "Fiery War Axe destroyed",
+    ]
+    harness.press(Chord("end"))
+    harness.press(Chord("p", shift=True))
+    assert harness.horizontal.items_snapshot()[0] == [
+        "Fireball, turn 2",
+        "Acidic Swamp Ooze, turn 2",
     ]
