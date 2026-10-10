@@ -20,6 +20,7 @@ from stonereader.services._events import (
     GameEvent,
     MinionDied,
 )
+from stonereader.spoken import count
 from stonereader.surfaces._game_surface import (
     card_items,
     card_zone,
@@ -284,7 +285,7 @@ def build_replay_viewer(
     bindings = [
         Binding(Chord("a"), Command("replay.query_mana", "A: how much mana you have", lambda: query("Your mana", f"{state().player_mana} of {state().player_max_mana}"))),
         Binding(Chord("a", shift=True), Command("replay.query_opponent_mana", "Shift+A: how much mana your opponent has", lambda: query("Opponent mana", f"{state().opponent_mana} of {state().opponent_max_mana}"))),
-        Binding(Chord("d", shift=True), Command("replay.query_opponent_deck", "Shift+D: how many cards are in your opponent's deck", lambda: query("Opponent deck", f"{state().opponent_deck_count} cards"))),
+        Binding(Chord("d", shift=True), Command("replay.query_opponent_deck", "Shift+D: how many cards are in your opponent's deck", lambda: query("Opponent deck", count(state().opponent_deck_count, "card")))),
         Binding(Chord("r"), Command("replay.query_hero_power", "R: your hero power", lambda: query("Your hero power", state().player_hero.hero_power or "No hero power"))),
         Binding(Chord("r", shift=True), Command("replay.query_opponent_hero_power", "Shift+R: your opponent's hero power", lambda: query("Opponent hero power", state().opponent_hero.hero_power or "No hero power"))),
         Binding(Chord("f5"), Command("replay.previous_event", "F5: go to the previous event", lambda: step_event(-1))),

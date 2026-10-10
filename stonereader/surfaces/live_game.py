@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from stonereader.models.card import Card, card_sort_key
 from stonereader.models.game_state import GameState
+from stonereader.spoken import count
 from stonereader.surfaces._game_surface import (
     card_items,
     card_zone,
@@ -287,7 +288,7 @@ def build_live_game(
                 "Shift+D: how many cards are in your opponent's deck",
                 lambda: query(
                     "Opponent deck",
-                    lambda current: f"{current.opponent_deck_count} cards",
+                    lambda current: count(current.opponent_deck_count, "card"),
                 ),
             ),
         ),

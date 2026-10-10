@@ -20,6 +20,7 @@ import stonereader
 from stonereader.db import get_connection, init_db
 from stonereader.services._audio_player import AudioPlayer
 from stonereader.speech_service import SpeechService
+from stonereader.spoken import count
 from stonereader.surfaces._deck_data import CurrentDeck, CurrentGames, DeckData
 from stonereader.surfaces.cards import CardsState, build_card_browser, build_cards
 from stonereader.surfaces.deck_detail import build_deck_detail
@@ -654,7 +655,7 @@ class StoneReaderApp(wx.App):
                     announcer,
                     current_game,
                     "Your deck",
-                    lambda state: f"{state.player_deck_count} cards",
+                    lambda state: count(state.player_deck_count, "card"),
                 ),
             },
         )
