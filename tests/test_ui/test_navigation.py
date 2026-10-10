@@ -270,3 +270,38 @@ def test_back_can_queue_the_revealed_surface_landing() -> None:
     cards = navigation._surfaces["Cards"]
     assert isinstance(cards.engine, FakeEngine)
     assert cards.engine.continuations == [False, True]
+
+
+def test_retitle_shows_a_surface_renamed_in_place() -> None:
+    titles: list[str] = []
+    headings: list[str] = []
+    navigation = NavigationController(
+        titles.append,
+        headings.append,
+        Announcer(FakeSpeech()),
+        lambda: None,
+        lambda _surface: None,
+    )
+    subject = ["Hunter cards"]
+    for name in ["Cards", "Card Browser"]:
+        navigation.register(
+            name,
+            lambda name=name: ActiveSurface(
+                SurfaceSpec(
+                    name,
+                    WidgetType.VERTICAL_MENU,
+                    options=lambda: [],
+                    display_name=(lambda: subject[0]) if name == "Card Browser" else None,
+                ),
+                FakeEngine(name, []),
+                CommandRegistry(),
+            ),
+        )
+    navigation.jump("Cards")
+    navigation.drill_down("Card Browser")
+
+    subject[0] = "Mage cards"
+    navigation.retitle()
+
+    assert headings[-2:] == ["Cards › Hunter cards", "Cards › Mage cards"]
+    assert titles[-1] == "Mage cards — StoneReader"

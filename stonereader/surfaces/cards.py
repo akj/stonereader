@@ -63,9 +63,13 @@ class CardsState:
             self._cache_key = key
         return self._cache
 
-    def context_label(self) -> str:
+    def subject_label(self) -> str:
+        """Name the class choice alone: "Hunter cards", "All cards"."""
         subject = "All" if self.class_filter is None else class_name(self.class_filter)
-        base = f"{subject} cards"
+        return f"{subject} cards"
+
+    def context_label(self) -> str:
+        base = self.subject_label()
         if self.search and self.class_filter is None and self.mana_filter is None:
             # The spec pins both comma-composed labels and this verbatim exception:
             # "Mage cards, 3 mana, matching fire" / "All cards matching fire".
@@ -148,6 +152,7 @@ def build_card_browser(
         index = values.index(state.class_filter)
         state.class_filter = values[(index + direction) % len(values)]
         state.invalidate()
+        nav.retitle()
         reland()
 
     def set_mana_filter(mana: int) -> None:
@@ -237,6 +242,7 @@ def build_card_browser(
         "Card Browser",
         WidgetType.HORIZONTAL_LIST,
         context_label=state.context_label,
+        display_name=state.subject_label,
         zones=[
             ZoneSpec(
                 "cards",

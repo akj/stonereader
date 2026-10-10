@@ -138,17 +138,24 @@ class NavigationController:
         self._surfaces[name] = surface
         return surface
 
+    def retitle(self) -> None:
+        """Show the stack's names again after a Surface renamed itself in place."""
+        # ADR-0017: the heading leaves out the Home root every deeper path shares.
+        path = [self._display_name(name) for name in self._stack[1:] or self._stack]
+        self._set_title(f"{path[-1]} — StoneReader")
+        self._set_heading(" › ".join(_crumbs(path)))
+
     def _display_name(self, name: str) -> str:
+        if name not in self._factories:
+            # The Home root need not be registered to be named (see jump_path).
+            return name
         spec = self._get_surface(name).spec
         return spec.display_name() if spec.display_name is not None else name
 
     def _land(self, surface: ActiveSurface, *, continues: bool = False) -> None:
         # A single landing path makes route invariance structural (ADR-0010).
         self._stop_audio()
-        # ADR-0017: the heading leaves out the Home root every deeper path shares.
-        path = [self._display_name(name) for name in self._stack[1:] or self._stack]
-        self._set_title(f"{path[-1]} — StoneReader")
-        self._set_heading(" › ".join(_crumbs(path)))
+        self.retitle()
         self._activate(surface)
         surface.engine.on_landing(continues=continues)
 
