@@ -12,7 +12,7 @@ from stonereader.db import get_all_decks
 from stonereader.models.card import CardDatabase
 from stonereader.models.deck import Deck, DeckSummary
 from stonereader.services._stats import LAST_GAMES, CorpusRecords, Record
-from stonereader.surfaces._spoken import class_name, count
+from stonereader.spoken import class_name, count
 from stonereader.ui.announcer import Announcer
 
 

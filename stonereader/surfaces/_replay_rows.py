@@ -9,7 +9,7 @@ from pathlib import Path
 from stonereader.models.card import CardDatabase
 from stonereader.services._replay_loader import ReplayLoadError, load_replay
 from stonereader.services._replay_store import ReplayMeta, ReplayStore
-from stonereader.surfaces._spoken import class_name, count
+from stonereader.spoken import class_name, count
 from stonereader.surfaces.replay_viewer import CurrentReplay
 from stonereader.ui.announcer import Announcer
 from stonereader.ui.arming import ArmedAction

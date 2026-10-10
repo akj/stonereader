@@ -7,7 +7,7 @@ from typing import Protocol
 
 from stonereader.models.card import CARD_CLASS_NAMES, Card, CardDatabase, set_name
 from stonereader.surfaces._game_audio import CardAudioIndex, open_sounds_for_card
-from stonereader.surfaces._spoken import class_name
+from stonereader.spoken import class_name
 from stonereader.surfaces.sounds_menu import SoundsMenuHolder
 from stonereader.ui.announcer import Announcer
 from stonereader.ui.builder import build_active_surface

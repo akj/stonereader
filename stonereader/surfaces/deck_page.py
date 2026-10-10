@@ -22,7 +22,7 @@ from stonereader.surfaces._deck_data import (
     subject_name,
     subject_record,
 )
-from stonereader.surfaces._spoken import class_name
+from stonereader.spoken import class_name
 from stonereader.ui.announcer import Announcer
 from stonereader.ui.arming import ArmedAction
 from stonereader.ui.builder import build_active_surface

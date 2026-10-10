@@ -17,7 +17,7 @@ from stonereader.surfaces._deck_data import (
     copy_deck_code,
     spoken_record,
 )
-from stonereader.surfaces._spoken import class_name, count
+from stonereader.spoken import class_name, count
 from stonereader.ui.announcer import Announcer
 from stonereader.ui.arming import ArmedAction
 from stonereader.ui.builder import build_active_surface

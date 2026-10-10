@@ -1,4 +1,4 @@
-"""Shared spoken-phrase helpers for Title lines and labels (ADR-0007, ADR-0017)."""
+"""Spoken-phrase helpers shared by Surfaces and services (ADR-0007, ADR-0017)."""
 
 from __future__ import annotations
 

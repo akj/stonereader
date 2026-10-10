@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Protocol
 
 from stonereader.services._replay_store import ReplayImportError
-from stonereader.surfaces._spoken import count
+from stonereader.spoken import count
 from stonereader.ui.announcer import Announcer
 from stonereader.ui.builder import build_active_surface
 from stonereader.ui.chords import Chord

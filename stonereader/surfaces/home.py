@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping
 
 from stonereader.models.game_state import GameState
 from stonereader.surfaces._replay_turns import turn_number
-from stonereader.surfaces._spoken import class_name
+from stonereader.spoken import class_name
 from stonereader.surfaces.live_game import CurrentGame
 from stonereader.ui.announcer import Announcer
 from stonereader.ui.builder import build_active_surface

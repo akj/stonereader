@@ -21,6 +21,7 @@ from stonereader.services._events import (
     SecretRevealed,
     TurnChanged,
 )
+from stonereader.spoken import class_name
 
 # The preset table also names hero-power-use and trigger/deathrattle events.
 # GameState does not yet retain the packet/block context needed to derive them.
@@ -28,9 +29,6 @@ from stonereader.services._events import (
 
 def phrase(event: GameEvent, state: GameState) -> str | None:
     """Return the shared subject-first phrase, or ``None`` for filtered noise."""
-    # Imported here because the surfaces package imports this module.
-    from stonereader.surfaces._spoken import class_name
-
     if isinstance(event, GameStarted):
         return (
             f"Game started, {class_name(event.player_class)} versus "
