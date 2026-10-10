@@ -136,7 +136,7 @@ def test_heading_shows_the_stack_path_and_title_the_current_surface(
     nav.jump("Decks")
     nav.drill_down("Deck detail")
     nav.drill_down("Deck cards")
-    assert window._heading.GetLabelText() == "Decks › Odd Hunter › Odd Hunter cards"
+    assert window._heading.GetLabelText() == "Decks › Odd Hunter › Cards"
     assert window.GetTitle() == "Odd Hunter cards — StoneReader"
     nav.back()
     assert window._heading.GetLabelText() == "Decks › Odd Hunter"

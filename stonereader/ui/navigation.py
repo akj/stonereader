@@ -148,6 +148,18 @@ class NavigationController:
         # ADR-0017: the heading leaves out the Home root every deeper path shares.
         path = [self._display_name(name) for name in self._stack[1:] or self._stack]
         self._set_title(f"{path[-1]} — StoneReader")
-        self._set_heading(" › ".join(path))
+        self._set_heading(" › ".join(_crumbs(path)))
         self._activate(surface)
         surface.engine.on_landing(continues=continues)
+
+
+def _crumbs(path: list[str]) -> list[str]:
+    """Drop the parent's name a heading crumb repeats: "Odd Hunter cards" is "Cards"."""
+    crumbs = path[:1]
+    for parent, name in zip(path, path[1:]):
+        rest = ""
+        for joiner in (" ", ", "):
+            if name.startswith(parent + joiner):
+                rest = name[len(parent + joiner) :]
+        crumbs.append(rest[:1].upper() + rest[1:] if rest else name)
+    return crumbs

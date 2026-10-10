@@ -210,7 +210,7 @@ def test_display_name_controls_window_title() -> None:
     assert "title:Aggro Shaman — StoneReader" in events
 
 
-def test_heading_joins_stack_display_names_below_home() -> None:
+def test_heading_joins_stack_display_names_below_home_without_repeats() -> None:
     headings: list[str] = []
     navigation = NavigationController(
         lambda _title: None,
@@ -252,9 +252,9 @@ def test_heading_joins_stack_display_names_below_home() -> None:
         "Home",
         "Decks",
         "Decks › Odd Hunter",
-        "Decks › Odd Hunter › Odd Hunter cards",
+        "Decks › Odd Hunter › Cards",
         "Decks › Odd Hunter",
-        "Decks › Aggro Shaman › Aggro Shaman cards",
+        "Decks › Aggro Shaman › Cards",
         "Home",
     ]
 
