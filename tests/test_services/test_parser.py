@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 
+import pytest
 from hslog.exceptions import NoSuchEnum
 
 
@@ -74,14 +75,23 @@ def test_no_such_enum_logged_and_skipped(monkeypatch, caplog):
     assert any("NoSuchEnum" in rec.message for rec in caplog.records)
 
 
-def test_live_stream_packet_order_matches_whole_tree(power_log_fixture):
+@pytest.mark.parametrize(
+    "fixture_name",
+    [
+        "game_end.log",
+        "reveals_and_new_cards.log",
+        "sub_spell_reveal_then_game_end.log",
+    ],
+)
+def test_live_stream_packet_order_matches_whole_tree(power_log_fixture, fixture_name):
     """The live incremental Parser must emit packets in the SAME order as the
     shared whole-tree translator over the same log.
 
     A deferred child entity packet must not let a later sibling — or a block's
     own BlockEnd — jump ahead of it, which would process packets outside their
     block context and diverge from replay loading (codex review round 7). The
-    walk halts in tree order at the first not-ready packet instead.
+    walk halts in tree order at the first not-ready packet instead, and must
+    resume once that packet's container closes.
     """
     from datetime import datetime, timezone
 
@@ -91,7 +101,7 @@ def test_live_stream_packet_order_matches_whole_tree(power_log_fixture):
     from stonereader.services._packets import GameMetaPacket
     from stonereader.services._parser import Parser
 
-    lines = power_log_fixture("game_end.log").read_text(encoding="utf-8").splitlines()
+    lines = power_log_fixture(fixture_name).read_text(encoding="utf-8").splitlines()
 
     parser = Parser()
     live: list = []
@@ -109,6 +119,84 @@ def test_live_stream_packet_order_matches_whole_tree(power_log_fixture):
         whole.extend(translate_packet_tree(tree))
 
     assert [type(p).__name__ for p in live] == [type(p).__name__ for p in whole]
+
+
+def test_a_reveal_ending_a_sub_spell_does_not_silence_the_rest_of_the_game(
+    power_log_fixture,
+):
+    """Power.log lines through the tracker and narrator, wired as the app wires
+    them.
+
+    sub_spell_reveal_then_game_end.log: a hero power draws Novice Engineer
+    inside a SubSpell whose last line is the reveal. Only tag changes follow:
+    turn 2, lethal damage, and PLAYSTATE LOST. hslog never clears its entity
+    packet pointer, so the reveal must be released when its SubSpell closes,
+    or every later packet waits for an entity line that never comes.
+    """
+    from stonereader.models.card import Card, CardDatabase
+    from stonereader.services._narrator import Narrator
+    from stonereader.services._tracker import GameTracker
+
+    engineer = Card(
+        "EX1_015", 284, "Novice Engineer", 2, 1, 1, "", "COMMON", "NEUTRAL", "MINION"
+    )
+    card_db = CardDatabase(cards_by_id={engineer.id: engineer})
+    tracker = GameTracker(card_db=card_db)
+    spoken: list[str] = []
+
+    class _Narrations:
+        def narrate(self, text: str) -> None:
+            spoken.append(text)
+
+    narrator = Narrator(_Narrations(), lambda: "key_moments", card_db)  # type: ignore[arg-type]
+    tracker.subscribe(narrator.on_state)
+
+    log = power_log_fixture("sub_spell_reveal_then_game_end.log")
+    tracker._on_lines(log.read_text(encoding="utf-8").splitlines())
+
+    state = tracker.current_state
+    assert state is not None
+    assert (state.turn, state.game_state) == (2, "COMPLETE")
+    assert [entity.name for entity in state.player_hand] == ["Novice Engineer"]
+    assert spoken == ["Game over, lost"]
+
+
+def test_a_reveal_ending_a_block_is_emitted_on_the_block_end_line():
+    """The same hold-back outside a SubSpell: a reveal that is a block's last
+    line is released by that BLOCK_END, with its tag rows, rather than waiting
+    for the next entity line.
+    """
+    from stonereader.services._packets import BlockEndPacket, ShowEntityPacket
+    from stonereader.services._parser import Parser
+
+    prefix = "D 13:00:00.0000000 GameState.DebugPrintPower() - "
+    parser = Parser()
+    for line in [
+        prefix + "CREATE_GAME",
+        prefix + "    GameEntity EntityID=1",
+        prefix + "    Player EntityID=2 PlayerID=1 GameAccountId=[hi=1 lo=1]",
+        prefix + "    Player EntityID=3 PlayerID=2 GameAccountId=[hi=2 lo=2]",
+        prefix
+        + "BLOCK_START BlockType=POWER Entity=10 EffectCardId=System.Collections"
+        + ".Generic.List`1[System.String] EffectIndex=0 Target=0 SubOption=-1",
+        prefix + "    SHOW_ENTITY - Updating Entity=4 CardID=EX1_015",
+        prefix + "        tag=CONTROLLER value=1",
+        prefix + "        tag=ZONE value=HAND",
+    ]:
+        parser.feed_line(line)
+
+    closed = parser.feed_line(prefix + "BLOCK_END")
+
+    assert [type(p).__name__ for p in closed] == ["ShowEntityPacket", "BlockEndPacket"]
+    reveal, block_end = closed
+    assert isinstance(reveal, ShowEntityPacket)
+    assert (reveal.entity_id, reveal.card_id, reveal.tags) == (
+        4,
+        "EX1_015",
+        {"CONTROLLER": 1, "ZONE": 3},
+    )
+    assert isinstance(block_end, BlockEndPacket)
+    assert (block_end.block_type, block_end.entity_id) == ("POWER", 10)
 
 
 def test_game_type_and_format_lines_emit_game_meta_every_game():
