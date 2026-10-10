@@ -90,8 +90,10 @@ def test_live_game_option_follows_the_running_game_silently() -> None:
     current_game.on_state(_game(5), replace(_game(6), game_state="COMPLETE"))
 
     # The mulligan reads as turn 1, the number the Replay Viewer gives it.
+    # Landing redraws too, since a landing can follow unseen changes.
     assert renders == [
         "Live Game, turn 1 versus Death Knight",
+        "Live Game, turn 5 versus Death Knight",
         "Live Game, turn 5 versus Death Knight",
         "Live Game, waiting for a game",
     ]

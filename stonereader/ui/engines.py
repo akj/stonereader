@@ -89,6 +89,9 @@ class VerticalMenuEngine:
         confirmation already spoken instead of cutting it (ADR-0007).
         """
         options = self._options()
+        # A landing can follow a change the renderer never saw (a deletion, a
+        # new subject, a back-reveal), so the view redraws with the speech.
+        self._notify()
         if not options:
             self._announcer.context_empty(self._label(), continues=continues)
             return
@@ -283,6 +286,9 @@ class HorizontalListEngine:
         (ADR-0017). `continues` marks the landing as a Lane-1 continuation: it
         follows a confirmation already spoken instead of cutting it (ADR-0007).
         """
+        # As in menus, a landing can follow a change the renderer never saw.
+        self._items()
+        self._notify()
         self._announce_context(continues=continues, current_line=False)
 
     def switch_zone(self, zone_id: str) -> None:

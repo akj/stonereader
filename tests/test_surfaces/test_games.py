@@ -132,8 +132,15 @@ def test_shift_delete_is_immediate_and_an_emptied_list_says_so(
         "Won in 8 turns, Wednesday",
     ]
     harness.speech.calls.clear()
+    rendered: list[list[str]] = []
+    harness.menu("Games").subscribe(
+        lambda: rendered.append(option_titles(harness, "Games"))
+    )
 
     harness.press(Chord("delete", shift=True))
+
+    # The window redraws with the speech, so it no longer shows the game.
+    assert rendered[-1] == []
 
     assert len(harness.context.store.all_replays()) == 2
     assert harness.speech.calls == [
