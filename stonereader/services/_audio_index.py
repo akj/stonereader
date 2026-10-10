@@ -11,14 +11,28 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from stonereader.services._hs_install import detect_install
 from stonereader.services._settings import SettingsStore
 
 
-_ABSENT_REASON = "Game audio is unavailable — no Hearthstone install found"
-# UI-spec ruling: warming is distinct from the install-absent state.
-_INDEXING_REASON = "Game audio is not ready yet"
+AudioStatus = Literal["indexing", "ready", "absent", "failed"]
+
+# Why the channel is unavailable, as the clause after "unavailable — ". Only
+# "absent" means no install was found; "failed" means an install was found but
+# its audio could not be indexed or decoded.
+UNAVAILABLE_DETAILS: dict[AudioStatus, str] = {
+    "absent": "no Hearthstone install found",
+    "failed": "couldn't read Hearthstone's audio files",
+}
+_REASONS: dict[AudioStatus, str] = {
+    # UI-spec ruling: warming is distinct from the install-absent state.
+    "indexing": "Game audio is still preparing",
+    "ready": "",
+    "absent": f"Game audio is unavailable — {UNAVAILABLE_DETAILS['absent']}",
+    "failed": f"Game audio is unavailable — {UNAVAILABLE_DETAILS['failed']}",
+}
 
 
 @dataclass(frozen=True)
@@ -110,8 +124,9 @@ class AudioIndex:
         )
         self._lock = threading.Lock()
         self._finished = threading.Event()
-        self._status = "absent"
-        self._reason = _ABSENT_REASON
+        # Nothing has been looked for yet; start() runs at app startup.
+        self._status: AudioStatus = "indexing"
+        self._building = False
         self._install: Path | None = None
         self._unity_version = ""
         self._clip_count = 0
@@ -120,14 +135,15 @@ class AudioIndex:
         self._generic_clips: dict[str, tuple[str, ...]] = {}
 
     @property
-    def status(self) -> str:
+    def status(self) -> AudioStatus:
         with self._lock:
             return self._status
 
     @property
     def reason(self) -> str:
+        """The spoken sentence for the current status; empty when ready."""
         with self._lock:
-            return self._reason
+            return _REASONS[self._status]
 
     @property
     def clip_count(self) -> int:
@@ -149,14 +165,14 @@ class AudioIndex:
         )
         if install is None:
             with self._lock:
-                self._set_absent(_ABSENT_REASON)
+                self._disable("absent")
             self._finished.set()
             return
         with self._lock:
-            if self._status == "indexing":
+            if self._building:
                 return
+            self._building = True
             self._status = "indexing"
-            self._reason = _INDEXING_REASON
             self._install = install
             self._card_clips = {}
             self._card_events = {}
@@ -223,7 +239,7 @@ class AudioIndex:
                 "Game audio decode failed; disabling the channel"
             )
             with self._lock:
-                self._set_absent("Game audio is unavailable")
+                self._disable("failed")
             return b""
 
     def _build(self, install: Path) -> None:
@@ -243,19 +259,19 @@ class AudioIndex:
                 self._unity_version = version
                 self._clip_count = len(scanned)
                 self._status = "ready"
-                self._reason = ""
         except Exception:
             logging.getLogger(__name__).exception(
                 "Game audio indexing failed; disabling the channel"
             )
             with self._lock:
-                self._set_absent("Game audio is unavailable")
+                self._disable("failed")
         finally:
+            with self._lock:
+                self._building = False
             self._finished.set()
 
-    def _set_absent(self, reason: str) -> None:
-        self._status = "absent"
-        self._reason = reason
+    def _disable(self, status: Literal["absent", "failed"]) -> None:
+        self._status = status
         self._card_clips = {}
         self._card_events = {}
         self._generic_clips = {}

@@ -10,17 +10,19 @@ as it did live.
 
 Pipeline
 --------
-1. ``HSReplayDocument.from_xml_file`` -> ``to_packet_tree()`` -> first tree.
+1. ``ElementTree.parse`` -> ``HSReplayDocument.from_xml`` -> ``to_packet_tree()``
+   -> first tree, plus the game type and format from its ``<Game>`` element.
 2. Friendly player from ``FriendlyPlayerExporter`` (authoritative replay
    metadata — the recorded local side).
 3. ``translate_packet_tree`` -> canonical internal ``Packet`` list.
 4. Feed packets through a ``GameEngine``; immediately after the CREATE_GAME
    packet, ``force_friendly_player`` pins the recorded friendly side (CREATE_GAME
    resets + re-runs the live heuristic, which can disagree) so ``player_*`` /
-   ``opponent_*`` zones orient correctly. ``active_player_id`` is normalised to
-   the 1=friendly / 2=opponent contract.
+   ``opponent_*`` zones orient correctly, and a ``GameMetaPacket`` carries the
+   type and format.
 5. Capture ``current_state`` after each packet, collapsing only consecutive
-   identical snapshots. Deterministic.
+   identical snapshots, from the first snapshot with both heroes on the board.
+   Deterministic.
 
 Round-trip enum re-resolution (loader boundary adapter)
 -------------------------------------------------------
@@ -45,9 +47,9 @@ no real speech — keeping it reusable and unit-testable.
 
 from __future__ import annotations
 
-import dataclasses
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
+from xml.etree import ElementTree
 
 from hearthstone.enums import BlockType, GameTag
 from hslog import packets as hslog_packets
@@ -58,7 +60,7 @@ from stonereader.models.game_state import GameState
 from stonereader.models.replay import ReplayState
 from stonereader.services._engine import GameEngine
 from stonereader.services._hslog_translator import translate_packet_tree
-from stonereader.services._packets import CreateGamePacket
+from stonereader.services._packets import CreateGamePacket, GameMetaPacket
 
 
 class ReplayLoadError(Exception):
@@ -84,7 +86,7 @@ def load_replay(path: Path, card_db: Any = None) -> ReplayState:
     Raises :class:`ReplayLoadError` for invalid XML or an empty / corrupt
     packet tree.
     """
-    tree = _load_first_tree(path)
+    tree, game_type, format_type = _load_first_game(path)
 
     # Re-resolve round-trip artefacts (int GameTag AND int BlockType identifiers)
     # back to enums so the shared translator produces the same enum-NAME-keyed
@@ -99,11 +101,6 @@ def load_replay(path: Path, card_db: Any = None) -> ReplayState:
     if not packets:
         raise ReplayLoadError(f"no packets translated from replay: {path}")
 
-    # Map each player ENTITY id -> its server player_id (1/2), recovered from the
-    # CREATE_GAME packet. Used to normalize active_player_id to the documented
-    # 1=friendly / 2=opponent contract (see services/_events.py).
-    entity_to_pid = _player_entity_pids(packets)
-
     engine = GameEngine(card_db=card_db)
     states: List[GameState] = []
     for pkt in packets:
@@ -113,10 +110,18 @@ def load_replay(path: Path, card_db: Any = None) -> ReplayState:
             # override it with the authoritative recorded friendly side so
             # player_* / opponent_* zones orient correctly (incl. Player-2 replays).
             engine.force_friendly_player(friendly_player_id)
+            # The live log carries type and format as metadata lines after
+            # CREATE_GAME; the file keeps them on its <Game> element instead.
+            engine.apply(
+                GameMetaPacket(
+                    packet_id=pkt.packet_id,
+                    game_type=game_type,
+                    format_type=format_type,
+                )
+            )
         current = engine.current_state
         if current is None:
             continue
-        current = _normalize_active_player(current, entity_to_pid, friendly_player_id)
         # Dedupe only CONSECUTIVE identical snapshots (deterministic).
         if states and states[-1] == current:
             continue
@@ -125,19 +130,34 @@ def load_replay(path: Path, card_db: Any = None) -> ReplayState:
     if not states:
         raise ReplayLoadError(f"replay produced no game states: {path}")
 
-    return ReplayState(states=tuple(states), friendly_player_id=friendly_player_id)
+    # Hearthstone creates both heroes right after the decks, before any card is
+    # dealt. Earlier setup snapshots carry no events, and starting at the first
+    # one would make the opening GameStarted name two unknown heroes.
+    start = next(
+        (
+            index
+            for index, state in enumerate(states)
+            if state.player_hero_entity is not None
+            and state.opponent_hero_entity is not None
+        ),
+        0,
+    )
+    return ReplayState(
+        states=tuple(states[start:]), friendly_player_id=friendly_player_id
+    )
 
 
-def _load_first_tree(path: Path) -> Any:
-    """Parse the file into its first hslog packet tree, or raise ReplayLoadError.
+def _load_first_game(path: Path) -> tuple[Any, Optional[int], Optional[int]]:
+    """Parse the file's first game into a packet tree, game type, and format.
 
     Wraps every XML / serialization failure mode (malformed XML, wrong schema,
-    empty document, no games) in a controlled :class:`ReplayLoadError`.
+    empty document, no games) in a controlled :class:`ReplayLoadError`. Type
+    and format are ``None`` when the ``<Game>`` element omits them.
     """
     try:
         with open(path, "rb") as f:
-            doc = HSReplayDocument.from_xml_file(f)
-        trees = doc.to_packet_tree()
+            xml = ElementTree.parse(f)
+        trees = HSReplayDocument.from_xml(xml).to_packet_tree()
     except ReplayLoadError:
         raise
     except Exception as exc:  # noqa: BLE001 — controlled re-raise below.
@@ -148,7 +168,21 @@ def _load_first_tree(path: Path) -> Any:
     tree = trees[0]
     if tree is None or not getattr(tree, "packets", None):
         raise ReplayLoadError(f"replay packet tree is empty or corrupt: {path}")
-    return tree
+    # hsreplay's GameNode does not read its own attributes back from XML.
+    game = xml.getroot().find("Game")
+    attrib = game.attrib if game is not None else {}
+    return (
+        tree,
+        _optional_int(attrib.get("type")),
+        _optional_int(attrib.get("format")),
+    )
+
+
+def _optional_int(value: Any) -> Optional[int]:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _export_friendly_player(tree: Any) -> int:
@@ -250,45 +284,6 @@ def _to_blocktype(value: Any) -> Any:
         return BlockType(int(value))
     except (ValueError, TypeError):
         return value
-
-
-def _player_entity_pids(packets: List[Any]) -> Dict[int, int]:
-    """Map each player ENTITY id -> its server player_id from CREATE_GAME.
-
-    The translated ``CreateGamePacket.players`` are ``(entity_id, player_id,
-    name, hi, lo)`` tuples (same shape the engine's friendly heuristic unpacks).
-    """
-    mapping: Dict[int, int] = {}
-    for pkt in packets:
-        if isinstance(pkt, CreateGamePacket):
-            for player in pkt.players:
-                try:
-                    entity_id, player_id = player[0], player[1]
-                except (IndexError, TypeError):
-                    continue
-                mapping[int(entity_id)] = int(player_id)
-            break
-    return mapping
-
-
-def _normalize_active_player(
-    state: GameState, entity_to_pid: Dict[int, int], friendly_player_id: int
-) -> GameState:
-    """Remap ``active_player_id`` to the 1=friendly / 2=opponent contract.
-
-    The engine records ``active_player_id`` as the active player's ENTITY id
-    (2/3), but the documented contract (services/_events.py) and the viewer/diff
-    consumers expect 1 = friendly, 2 = opponent. Translate via the recorded
-    player-entity -> player_id map. Non-player active ids (e.g. the pre-turn
-    default) are left untouched.
-    """
-    pid = entity_to_pid.get(state.active_player_id)
-    if pid is None:
-        return state
-    relative = 1 if pid == friendly_player_id else 2
-    if relative == state.active_player_id:
-        return state
-    return dataclasses.replace(state, active_player_id=relative)
 
 
 # Quiet "unused import" warnings for symbols referenced only in type hints.

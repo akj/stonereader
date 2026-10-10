@@ -38,7 +38,7 @@ class GameEntity:
     card_type: str
     zone: str
     zone_position: int
-    controller: int
+    controller: int  # 1 = friendly, 2 = opponent (not the server PlayerID)
     exhausted: bool = False
     enchantment_names: Tuple[str, ...] = ()
     tags: Dict[str, Any] = field(default_factory=dict)
@@ -73,7 +73,7 @@ class PlayedCard:
     base_card: Optional[Card]  # resolved Card (None if hidden at play time)
     name: str  # convenience for speech
     turn: int  # the turn the play happened (0 = mulligan-into-hand)
-    controller: int  # 1 = friendly, 2 = opponent (matches PlayerID semantics)
+    controller: int  # 1 = friendly, 2 = opponent (not the server PlayerID)
 
 
 @dataclass(frozen=True)

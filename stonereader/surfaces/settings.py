@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from stonereader.services._audio_index import UNAVAILABLE_DETAILS, AudioStatus
 from stonereader.services._hotkeys import HotkeyMap
 from stonereader.services._hs_install import detect_install
 from stonereader.services._log_path import discover_power_log_path
@@ -37,10 +38,7 @@ class SettingsSink(Protocol):
 
 class AudioChannelStatus(Protocol):
     @property
-    def status(self) -> str: ...
-
-
-_NO_INSTALL = "unavailable — no Hearthstone install found"
+    def status(self) -> AudioStatus: ...
 
 
 @dataclass(frozen=True)
@@ -92,16 +90,24 @@ def build_settings(
             return store.hs_log_path
         return log_detector(effective_install())
 
-    def audio_available() -> bool:
+    def audio_unavailable_detail() -> str | None:
+        """Why game audio is unavailable, or None while it is or will be ready."""
         if audio_index is not None:
-            return audio_index.status != "absent"
-        return effective_install() is not None
+            return UNAVAILABLE_DETAILS.get(audio_index.status)
+        if effective_install() is None:
+            return UNAVAILABLE_DETAILS["absent"]
+        return None
 
     def narration_title() -> str:
         return f"Narration, {_narration_label(store.narration)}"
 
     def volume_title() -> str:
-        value = str(store.game_audio_volume) if audio_available() else _NO_INSTALL
+        detail = audio_unavailable_detail()
+        value = (
+            str(store.game_audio_volume)
+            if detail is None
+            else f"unavailable — {detail}"
+        )
         return f"Game audio volume, {value}"
 
     def autoplay_title() -> str:
@@ -139,7 +145,7 @@ def build_settings(
         )
 
     def edit_volume() -> None:
-        if not audio_available():
+        if audio_unavailable_detail() is not None:
             announcer.noop(volume_title())
             return
         open_picker(

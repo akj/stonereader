@@ -20,9 +20,11 @@ from hslog.exceptions import (
 
 from stonereader.services import _hslog_translator as translator
 from stonereader.services._exceptions import ParserError
-from stonereader.services._packets import Packet
+from stonereader.services._packets import GameMetaPacket, Packet
 
 logger = logging.getLogger(__name__)
+
+_GAME_META_MARKER = "GameState.DebugPrintGame() - "
 
 
 class Parser:
@@ -87,7 +89,30 @@ class Parser:
             logger.exception("unexpected error in hslog.read_line")
             return []
 
-        return self._collect_new_packets()
+        out = self._collect_new_packets()
+        meta = self._game_meta_packet(line)
+        if meta is not None:
+            out.append(meta)
+        return out
+
+    def _game_meta_packet(self, line: str) -> Optional[GameMetaPacket]:
+        """Emit the game type or format a ``DebugPrintGame()`` line just set.
+
+        hslog keeps these in ``game_meta`` rather than the packet tree and
+        never clears it between games, so the packet is emitted whenever the
+        line is read, even when the value matches the previous game's.
+        """
+        _, marker, data = line.partition(_GAME_META_MARKER)
+        if not marker:
+            return None
+        key = data.partition("=")[0].strip()
+        raw = self._hslog.game_meta.get(key)
+        if key not in ("GameType", "FormatType") or raw is None:
+            return None
+        value = int(raw)
+        if key == "GameType":
+            return GameMetaPacket(packet_id=self._next_id(), game_type=value)
+        return GameMetaPacket(packet_id=self._next_id(), format_type=value)
 
     def _collect_new_packets(self) -> List[Packet]:
         """Walk the in-progress packet tree and translate any unseen packets."""

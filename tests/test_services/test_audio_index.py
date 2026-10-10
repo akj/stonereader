@@ -192,8 +192,69 @@ def test_status_machine_distinguishes_absent_warming_and_ready(
     warming.start()
     assert entered.wait(timeout=2)
     assert warming.status == "indexing"
-    assert warming.reason == "Game audio is not ready yet"
+    assert warming.reason == "Game audio is still preparing"
 
     release.set()
     assert warming.wait(timeout=2)
     assert warming.status == "ready"
+
+
+def _installed(tmp_path: Path) -> SettingsStore:
+    install = tmp_path / "Hearthstone"
+    managers = install / "Hearthstone_Data" / "globalgamemanagers"
+    managers.parent.mkdir(parents=True)
+    managers.write_bytes(b"build")
+    store = SettingsStore(tmp_path / "settings.json")
+    store.set_hs_install_path(install)
+    return store
+
+
+def test_before_start_the_channel_is_preparing_not_missing(tmp_path: Path) -> None:
+    index = AudioIndex(
+        SettingsStore(tmp_path / "settings.json"),
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert index.status == "indexing"
+    assert index.reason == "Game audio is still preparing"
+
+
+def test_indexing_failure_with_an_install_is_not_reported_as_missing(
+    tmp_path: Path,
+) -> None:
+    def broken_scan(_install: Path, _version: str) -> list[ScannedClip]:
+        raise OSError("bundle unreadable")
+
+    index = AudioIndex(
+        _installed(tmp_path),
+        cache_dir=tmp_path / "cache",
+        scanner=broken_scan,
+        unity_version_detector=lambda _install: "6000.3.11f1",
+    )
+    index.start()
+
+    assert not index.wait(timeout=2)
+    assert index.status == "failed"
+    assert index.reason == (
+        "Game audio is unavailable — couldn't read Hearthstone's audio files"
+    )
+
+
+def test_decode_failure_disables_the_channel_as_unreadable(tmp_path: Path) -> None:
+    index = AudioIndex(
+        _installed(tmp_path),
+        cache_dir=tmp_path / "cache",
+        scanner=lambda _install, _version: [
+            ScannedClip("Data/Win/a.unity3d", "CARD_1_Play")
+        ],
+        unity_version_detector=lambda _install: "6000.3.11f1",
+    )
+    index.start()
+    assert index.wait(timeout=2)
+
+    assert index.decode("Data/Win/a.unity3d::CARD_1_Play") == b""
+
+    assert index.status == "failed"
+    assert index.reason == (
+        "Game audio is unavailable — couldn't read Hearthstone's audio files"
+    )

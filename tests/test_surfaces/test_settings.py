@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from stonereader.services._audio_index import AudioStatus
 from stonereader.services._hotkeys import HOTKEY_COMMANDS, HotkeyMap
 from stonereader.services._settings import SettingsStore
 from stonereader.surfaces.global_hotkeys import build_global_hotkeys
@@ -25,8 +26,8 @@ class Backend:
 
 
 class FakeAudioStatus:
-    def __init__(self, status: str) -> None:
-        self.status = status
+    def __init__(self, status: AudioStatus) -> None:
+        self.status: AudioStatus = status
 
 
 @dataclass
@@ -105,6 +106,45 @@ def test_volume_availability_follows_channel_status_not_path_detection(
     select(harness, 1)
     harness.press(Chord("enter"))
     assert harness.nav.stack[-1] == "Picker"
+
+
+def test_volume_row_says_why_audio_is_unavailable_for_each_status(
+    tmp_path: Path,
+) -> None:
+    install = tmp_path / "Hearthstone"
+    install.mkdir()
+    titles = {
+        status: make_settings(
+            tmp_path / status, install, FakeAudioStatus(status)
+        ).vertical.options_snapshot()[0][1]
+        for status in ("absent", "failed", "indexing", "ready")
+    }
+
+    assert titles == {
+        "absent": "Game audio volume, unavailable — no Hearthstone install found",
+        "failed": (
+            "Game audio volume, unavailable — couldn't read Hearthstone's audio files"
+        ),
+        "indexing": "Game audio volume, 80",
+        "ready": "Game audio volume, 80",
+    }
+
+
+def test_unreadable_audio_volume_explains_and_does_not_open_picker(
+    tmp_path: Path,
+) -> None:
+    install = tmp_path / "Hearthstone"
+    install.mkdir()
+    harness = make_settings(tmp_path, install, FakeAudioStatus("failed"))
+    select(harness, 1)
+
+    harness.press(Chord("enter"))
+
+    assert harness.nav.stack == ("Home", "Settings")
+    assert harness.speech.calls[-1] == (
+        "Game audio volume, unavailable — couldn't read Hearthstone's audio files",
+        True,
+    )
 
 
 def select(harness: Harness[SettingsContext], index: int) -> None:
