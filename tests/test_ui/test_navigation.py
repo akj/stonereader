@@ -32,6 +32,7 @@ def controller(
 ) -> NavigationController:
     return NavigationController(
         lambda title: events.append(f"title:{title}"),
+        lambda heading: events.append(f"heading:{heading}"),
         Announcer(speech),
         lambda: events.append("stop"),
         lambda surface: events.append(f"activate:{surface.spec.name}"),
@@ -79,14 +80,17 @@ def test_every_landing_route_uses_same_ordered_effects() -> None:
     assert events == [
         "stop",
         "title:Cards — StoneReader",
+        "heading:Cards",
         "activate:Cards",
         "landing:Cards:0",
         "stop",
         "title:Detail — StoneReader",
+        "heading:Cards › Detail",
         "activate:Detail",
         "landing:Detail:0",
         "stop",
         "title:Cards — StoneReader",
+        "heading:Cards",
         "activate:Cards",
         "landing:Cards:0",
     ]
@@ -169,9 +173,10 @@ def test_jump_path_resets_to_exact_validated_home_rooted_path() -> None:
     navigation.jump_path(["Home", "Cards", "Detail"])
 
     assert navigation.stack == ("Home", "Cards", "Detail")
-    assert events[-4:] == [
+    assert events[-5:] == [
         "stop",
         "title:Detail — StoneReader",
+        "heading:Cards › Detail",
         "activate:Detail",
         "landing:Detail:0",
     ]
@@ -203,6 +208,55 @@ def test_display_name_controls_window_title() -> None:
     navigation.jump("Deck detail")
 
     assert "title:Aggro Shaman — StoneReader" in events
+
+
+def test_heading_joins_stack_display_names_below_home() -> None:
+    headings: list[str] = []
+    navigation = NavigationController(
+        lambda _title: None,
+        headings.append,
+        Announcer(FakeSpeech()),
+        lambda: None,
+        lambda _surface: None,
+    )
+    deck = ["Odd Hunter"]
+    named = {
+        "Deck detail": lambda: deck[0],
+        "Deck cards": lambda: f"{deck[0]} cards",
+    }
+    for name in ["Home", "Decks", "Deck detail", "Deck cards"]:
+        navigation.register(
+            name,
+            lambda name=name: ActiveSurface(
+                SurfaceSpec(
+                    name,
+                    WidgetType.VERTICAL_MENU,
+                    options=lambda: [],
+                    display_name=named.get(name),
+                ),
+                FakeEngine(name, []),
+                CommandRegistry(),
+            ),
+        )
+
+    navigation.jump("Home")
+    navigation.jump("Decks")
+    navigation.drill_down("Deck detail")
+    navigation.drill_down("Deck cards")
+    navigation.back()
+    deck[0] = "Aggro Shaman"
+    navigation.jump_path(["Home", "Decks", "Deck detail", "Deck cards"])
+    navigation.jump("Home")
+
+    assert headings == [
+        "Home",
+        "Decks",
+        "Decks › Odd Hunter",
+        "Decks › Odd Hunter › Odd Hunter cards",
+        "Decks › Odd Hunter",
+        "Decks › Aggro Shaman › Aggro Shaman cards",
+        "Home",
+    ]
 
 
 def test_back_can_queue_the_revealed_surface_landing() -> None:

@@ -73,8 +73,20 @@ class MainWindow(wx.Frame):
         self._speech = SpeechService()
         self._announcer = Announcer(self._speech)
 
+        # A bare frame's default background is darker than the panels it hosts.
+        self.SetBackgroundColour(wx.SystemSettings.GetColour(wx.SYS_COLOUR_BTNFACE))
         self._sizer = wx.BoxSizer(wx.VERTICAL)
         self.SetSizer(self._sizer)
+        # ADR-0017: the heading shows the navigation path. When it is too long
+        # for the window, the start gives way so the current Surface stays.
+        self._heading = wx.StaticText(
+            self,
+            style=wx.ST_NO_AUTORESIZE | wx.ST_ELLIPSIZE_START,
+        )
+        self._heading.SetFont(self._heading.GetFont().Bold().Scaled(1.25))
+        self._heading.SetInitialSize()
+        self._sizer.Add(self._heading, 0, wx.EXPAND | wx.ALL, self.FromDIP(8))
+        self._sizer.Add(wx.StaticLine(self), 0, wx.EXPAND)
         self._panels: dict[str, SurfacePanel] = {}
         self._current_panel: SurfacePanel | None = None
         self._current_surface: ActiveSurface | None = None
@@ -86,6 +98,7 @@ class MainWindow(wx.Frame):
         self._sink = InputSink(self, self._announcer, stop_audio=audio_player.stop)
         self._nav = NavigationController(
             set_title=self.SetTitle,
+            set_heading=self._heading.SetLabelText,
             announcer=self._announcer,
             stop_audio=audio_player.stop,
             activate=self._activate_surface,
