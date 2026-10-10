@@ -7,7 +7,7 @@ from hslog.packets.* into our internal _packets.* types.
 from __future__ import annotations
 
 import logging
-from typing import Any, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from hslog import LogParser
 from hslog import packets as hslog_packets
@@ -47,6 +47,11 @@ class Parser:
         # closes it only when the BLOCK_END line is later parsed. We emit the
         # matching BlockEnd on the subsequent walk where it has closed, once.
         self._emitted_block_ends: Set[int] = set()
+        # How many leading packets of each hslog packet list are finished:
+        # emitted, and closed if they are blocks. A walk resumes after them, so
+        # each line costs what changed rather than the whole game so far. The
+        # list itself is kept beside its count so a recycled id never matches.
+        self._settled: Dict[int, Tuple[Any, int]] = {}
         self._next_packet_id: int = 0
         self._missing_enums_logged: Set[Tuple[str, Any]] = set()
         # Deferred emission tracking for CreateGame: hslog appends Player rows
@@ -61,6 +66,7 @@ class Parser:
         self._hslog = LogParser()
         self._seen_ids.clear()
         self._emitted_block_ends.clear()
+        self._settled.clear()
         self._next_packet_id = 0
         self._pending_create_game_pyid = None
         # Keep _missing_enums_logged across resets — same enum drift appears
@@ -149,8 +155,20 @@ class Parser:
         Returns True if the walk halted (the caller must stop too), False if it
         reached the end of this packet list.
         """
+        key = id(hslog_pkts)
+        entry = self._settled.get(key)
+        settled = entry[1] if entry is not None and entry[0] is hslog_pkts else 0
+
+        def finished(idx: int) -> None:
+            # Only a contiguous run of finished packets can be skipped later.
+            nonlocal settled
+            if idx == settled:
+                settled += 1
+                self._settled[key] = (hslog_pkts, settled)
+
         pkts_list = list(hslog_pkts)
-        for idx, hp in enumerate(pkts_list):
+        for idx in range(settled, len(pkts_list)):
+            hp = pkts_list[idx]
             pyid = id(hp)
             is_last = idx == len(pkts_list) - 1
             if pyid in self._seen_ids:
@@ -161,9 +179,16 @@ class Parser:
                         return True
                     if not self._maybe_emit_block_end(hp, pyid, out):
                         return True
+                    # Closed: every child was emitted before its BlockEnd, and
+                    # hslog appends nothing after BLOCK_END.
+                    finished(idx)
                 elif translator.is_sub_spell(hp):
+                    # hslog can leave a SubSpell open after its block ends, so
+                    # it is re-walked until the block around it settles.
                     if self._walk(hp.packets, out):
                         return True
+                else:
+                    finished(idx)
                 continue
             # Defer CreateGame emission until subsequent packets exist OR the
             # hslog parser state confirms we've moved past Player parsing.
@@ -205,6 +230,7 @@ class Parser:
                     return True
                 if not self._maybe_emit_block_end(hp, pyid, out):
                     return True
+                finished(idx)
             elif translator.is_sub_spell(hp):
                 # Children only, in place: a SubSpell has no block boundary.
                 if self._walk(hp.packets, out):
@@ -213,6 +239,7 @@ class Parser:
                 translated = translator.translate_packet(hp, self._next_id)
                 if translated is not None:
                     out.append(translated)
+                finished(idx)
         return False
 
     def _maybe_emit_block_end(self, hp: Any, pyid: int, out: List[Packet]) -> bool:
