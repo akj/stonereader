@@ -3,10 +3,10 @@
 ## Status
 
 Accepted (design contract, 2026-10-10; revised the same day to match the
-implementation — Deck's delete, Games' labels and fresh opens, Replays'
-weekday and game-type names, Enter's no-event reply, Live Game's waiting
-keys, the turn-change phrase, help order, card and set hygiene, and the
-window). Amends ADR-0004 (which Surfaces are
+implementation — Deck's delete, Games' labels, versus rows, and fresh
+opens, Replays' weekday and game-type names, Enter's no-event reply, Live
+Game's waiting keys, the turn-change phrase, help order and naming, card and
+set hygiene, and the window). Amends ADR-0004 (which Surfaces are
 horizontal lists), ADR-0006 (where Statistics and the import actions live),
 ADR-0007 (empty zones, and what a zone switch repeats), ADR-0009 (help
 ordering and key ranges), ADR-0012 (the Statistics surface), ADR-0013 (Live
@@ -98,10 +98,12 @@ the selection: `"{name} games"`, `"{name} versus {Class}"`,
 `"All games"` / `"Other games"` stand in for the name, and the full list is
 just `"All games"` / `"Other games"`. Every open starts at the newest game.
 Rows are Replays rows, without the deck name when the list is one saved
-deck's. Enter opens the replay; Delete and Shift+Delete delete it, and a list
-emptied that way says `"{context label}: empty"` ("Odd Hunter versus Warrior:
-empty"). No stats toggle (a toggle here would remove the row from under the
-cursor) and no import row.
+deck's, and without the opponent's class when the list is one class's
+("Won in 8 turns, Wednesday"). Enter opens the replay; Delete and
+Shift+Delete delete it, and a list emptied that way says
+`"{context label}: empty"` ("Odd Hunter versus Warrior: empty"). No stats
+toggle (a toggle here would remove the row from under the cursor) and no
+import row.
 
 ### Replays
 
@@ -146,8 +148,8 @@ landing, orientation reread, and in-place rebuilds that change it (turn
 step, event jump); a zone switch and empty-zone repeats omit it. Full form:
 `"Opponent's turn 3, Events, Threads of Despair revealed, 2 of 20"`; zone
 switch: `"Your board, Bloodmage Thalnos, 1 of 3"`. The turn-change event in
-the Events zone reads the same way: `"Your turn {t}"` / `"Opponent's turn
-{t}"`.
+the Events zone reads `"Start of turn"`, because the prefix already names
+the side and number.
 
 ### Live Game says its state
 
@@ -161,7 +163,10 @@ prefix — ADR-0013).
 
 ### Help
 
-F1 always opens a Help menu on its widget-type sentence. Bindings that share
+F1 always opens a Help menu on its widget-type sentence. Help takes the name
+the User hears for the Surface it opened from ("Odd Hunter help", "Hunter
+cards help"), so the sentence names only the type ("Menu: Up and Down move
+between options, Enter acts on the current one."). Bindings that share
 one help phrase (digits) are one option; Enter on it says "Press one of these
 keys to use this". Enter's phrase comes first, then the Surface's keys in the
 order its spec lists them, then Universal keys and All commands. Where a
@@ -175,7 +180,9 @@ formatter ("Death Knight", never "Deathknight"). Card text carries no
 markup ("[x]", "@", "$", "#", tags), set names are spoken names (never
 "HERO_SKINS"; all-capital names such as "TITANS" in title case), and Card
 Browser lists cards that can go in a deck, one printing per name — hero
-skins and other cosmetics are excluded.
+skins, other cosmetics, and bracketed internal cards are excluded. A card's
+name is never its card id: a card missing from StoneReader's card data is
+"Unrecognized card"; one the game hid is "Unknown card".
 
 ### Signature sound
 
@@ -186,11 +193,11 @@ sound beyond the event clips themselves.
 ### The window
 
 The window shows where the User is: a heading with the stack path
-("Decks › Odd Hunter › Odd Hunter cards"), a list that scrolls to keep the
-current row in view, and, on a horizontal list, a detail pane with the
-current item's detail lines beside the list rather than below it. The
-navigation controller sets the heading on every landing, as it sets the
-window title.
+("Decks › Odd Hunter › Cards" — a name drops the parent name it repeats), a
+list that scrolls to keep the current row in view, and, on a horizontal
+list, a detail pane with the current item's detail lines beside the list
+rather than below it. The navigation controller sets the heading on every
+landing, as it sets the window title.
 
 ## Alternatives considered and rejected
 
