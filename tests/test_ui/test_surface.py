@@ -39,6 +39,20 @@ def test_vertical_menu_refuses_zones() -> None:
         SurfaceSpec("Menu", WidgetType.VERTICAL_MENU, options=lambda: [], zones=[zone()])
 
 
+@pytest.mark.parametrize(
+    "surface_state",
+    [
+        {"context_prefix": lambda: "Your turn 1"},
+        {"waiting_for": lambda: "a game"},
+    ],
+)
+def test_vertical_menu_refuses_horizontal_surface_state(surface_state: dict) -> None:
+    with pytest.raises(ValueError):
+        SurfaceSpec(
+            "Menu", WidgetType.VERTICAL_MENU, options=lambda: [], **surface_state
+        )
+
+
 def test_horizontal_list_requires_zone() -> None:
     with pytest.raises(ValueError):
         SurfaceSpec("Cards", WidgetType.HORIZONTAL_LIST)

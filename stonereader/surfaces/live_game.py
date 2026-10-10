@@ -64,6 +64,24 @@ class RemainingDeckItem:
     cards_remaining: int
 
 
+# What Live Game says it is waiting for while no game is running (ADR-0017).
+_AWAITED = "a game"
+
+
+def speak_game_query(
+    announcer: Announcer,
+    current_game: CurrentGame,
+    subject: str,
+    value: Callable[[GameState], str],
+) -> None:
+    """Speak a drive-by query about the running Game, or wait for one."""
+    current = current_game.get()
+    if current is None:
+        announcer.waiting(_AWAITED)
+        return
+    announcer.query(subject, value(current))
+
+
 def build_live_game(
     announcer: Announcer,
     universal_bindings: list[tuple[Chord, Command]],
@@ -98,15 +116,25 @@ def build_live_game(
             )
         ]
 
-    def query(subject: str, value: Callable[[GameState], str]) -> None:
-        current = state()
-        if current is None:
-            announcer.noop("No game in progress")
-            return
-        announcer.query(subject, value(current))
+    def waiting_for() -> str | None:
+        return _AWAITED if state() is None else None
 
-    def no_events() -> None:
-        announcer.noop("No events in a live game")
+    def query(subject: str, value: Callable[[GameState], str]) -> None:
+        speak_game_query(announcer, current_game, subject, value)
+
+    def during_game(action: Callable[[], None]) -> Callable[[], None]:
+        """Run a key's action during a game; with none, say what Live Game awaits."""
+
+        def run() -> None:
+            subject = waiting_for()
+            if subject is not None:
+                announcer.waiting(subject)
+                return
+            action()
+
+        return run
+
+    no_events = during_game(lambda: announcer.noop("No events in a live game"))
 
     # Remaining Deck is intentionally first: Home -> L starts there, while the
     # lazy singleton still preserves the found-as-left zone after first visit.
@@ -314,7 +342,9 @@ def build_live_game(
             Command(
                 "live.opponent_hand",
                 "Shift+C: the game announces the opponent's hand",
-                lambda: announcer.noop("The game announces the opponent's hand"),
+                during_game(
+                    lambda: announcer.noop("The game announces the opponent's hand")
+                ),
             ),
         ),
     ]
@@ -342,15 +372,29 @@ def build_live_game(
         )
     )
 
+    # Enter and the turn keys are constant no-ops during a game, but they are
+    # filled rather than declared no-ops so that with no game they can wait.
     spec = SurfaceSpec(
         "Live Game",
         WidgetType.HORIZONTAL_LIST,
         zones=zones,
         bindings=bindings,
-        slot_noops={
-            Slot.COARSE_AXIS: "No turns to step in a live game",
-            Slot.LISTEN: "No game audio during a live game",
+        slot_fills={
+            Slot.ENTER: Command(
+                "live.enter",
+                "Enter: nothing to do here",
+                during_game(lambda: announcer.slot_noop(Slot.ENTER)),
+            ),
+            Slot.COARSE_AXIS: Command(
+                "live.no_turns",
+                "Page Up and Page Down: no turns to step in a live game",
+                during_game(
+                    lambda: announcer.noop("No turns to step in a live game")
+                ),
+            ),
         },
+        slot_noops={Slot.LISTEN: "No game audio during a live game"},
+        waiting_for=waiting_for,
     )
     surface = build_active_surface(spec, announcer, universal_bindings, nav)
     if not isinstance(surface.engine, HorizontalListEngine):

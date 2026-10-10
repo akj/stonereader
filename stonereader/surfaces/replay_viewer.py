@@ -16,6 +16,7 @@ from stonereader.services._events import (
     CardPlayed,
     CardRemoved,
     CardRevealed,
+    GameEnded,
     GameEvent,
     MinionDied,
 )
@@ -54,8 +55,8 @@ class CurrentReplay:
     def set(self, replay: ReplayState) -> None:
         self._replay = replay
         if self._reset_viewer is not None:
-            # A different replay is new content, not a revisit. Found-as-left
-            # still governs zone cursors while navigating one replay session.
+            # Every open starts at the game's first event (ADR-0017); only
+            # back-reveal finds the viewer as left.
             self._reset_viewer()
 
     def get(self) -> ReplayState:
@@ -103,14 +104,6 @@ def build_replay_viewer(
     cached_turns: list[TurnView] = []
     engine: HorizontalListEngine | None = None
 
-    def reset_for_new_replay() -> None:
-        nonlocal turn_index, cached_replay, cached_turns
-        turn_index = 0
-        cached_replay = None
-        cached_turns = []
-        if engine is not None:
-            engine.set_zone_cursor("events", 0)
-
     def turn_views() -> list[TurnView]:
         nonlocal cached_replay, cached_turns
         replay = current_replay.get()
@@ -139,31 +132,13 @@ def build_replay_viewer(
             return turn.state
         return shown[cursor].state
 
-    def context_label() -> str:
-        if engine is None:
-            raise RuntimeError("Replay Viewer engine is not active")
+    def context_prefix() -> str:
         turn = current_turn()
-        side = "yours" if turn.is_friendly else "opponent's"
-        return f"Turn {turn.number}, {side}, {engine.current_zone().label}"
+        side = "Your" if turn.is_friendly else "Opponent's"
+        return f"{side} turn {turn.number}"
 
     def event_items() -> list[_EventItem]:
-        current = current_turn()
-        values: list[_EventItem] = []
-        for turn_event in current.events:
-            event = turn_event.event
-            title = phrase(event, current.state)
-            if title is not None:
-                source_card_id, source_title = _event_source(event, current.state)
-                values.append(
-                    _EventItem(
-                        event,
-                        turn_event.state,
-                        title,
-                        source_card_id,
-                        source_title,
-                    )
-                )
-        return values
+        return _event_items(current_turn())
 
     def step_turn(delta: int) -> None:
         nonlocal turn_index
@@ -174,7 +149,7 @@ def build_replay_viewer(
         if target == turn_index:
             item = engine.current_item()
             if item is None:
-                announcer.context_empty(context_label())
+                announcer.context_empty(engine.current_zone().label)
             else:
                 # A clamped coarse-axis step is a boundary, so it repeats the
                 # current bare Title line rather than pretending to re-land.
@@ -189,7 +164,7 @@ def build_replay_viewer(
     def step_event(delta: int) -> None:
         shown = event_items()
         if engine is None or not shown:
-            announcer.empty_zone(events_zone.label)
+            announcer.context_empty(events_zone.label)
             return
         cursor = engine.zone_cursor("events")
         target = min(max(cursor + delta, 0), len(shown) - 1)
@@ -204,6 +179,24 @@ def build_replay_viewer(
 
     def query(subject: str, value: str) -> None:
         announcer.query(subject, value)
+
+    def follow_fact() -> None:
+        """Move the replay to the event that played or drew the focused card."""
+        nonlocal turn_index
+        list_engine = require_engine(engine, "Replay Viewer")
+        event_type = _FACT_EVENTS.get(list_engine.current_zone().zone_id)
+        card = list_engine.current_item()
+        if event_type is None or not isinstance(card, PlayedCard):
+            announcer.slot_noop(Slot.ENTER)
+            return
+        found = _find_fact(turn_views(), event_type, card)
+        if found is None:
+            announcer.noop("No event for this card")
+            return
+        turn_index, event_index = found
+        list_engine.set_zone_cursor("events", event_index)
+        list_engine.set_active_zone("events")
+        list_engine.on_landing()
 
     def listen() -> None:
         if engine is None or audio_index is None or sounds is None:
@@ -257,8 +250,6 @@ def build_replay_viewer(
         card_zone("opponent_secrets", "Opponent secrets", "s", "Shift+S: opponent secrets", card_items(state, "opponent_secrets"), shift=True),
         ZoneSpec("your_hero", "Your hero", hero_items(state, "player_hero"), hero_title, player_hero_details(state), Chord("v"), "V: your hero"),
         ZoneSpec("opponent_hero", "Opponent hero", hero_items(state, "opponent_hero"), hero_title, opponent_hero_details(state), Chord("f"), "F: opponent hero"),
-        # An absent weapon is deliberately an empty zone: the engine composes
-        # its constant "No {label} on this screen" phrase from this label.
         card_zone("your_weapon", "Your weapon", "w", "W: your weapon", singleton(state, "player_weapon")),
         card_zone("opponent_weapon", "Opponent weapon", "w", "Shift+W: opponent weapon", singleton(state, "opponent_weapon"), shift=True),
         card_zone("your_deck", "Your deck", "d", "D: jump to Remaining Deck", lambda: sorted(
@@ -327,11 +318,16 @@ def build_replay_viewer(
     spec = SurfaceSpec(
         "Replay Viewer",
         WidgetType.HORIZONTAL_LIST,
-        context_label=context_label,
+        context_prefix=context_prefix,
         zones=zones,
         bindings=bindings,
         slot_reverse_fills={Slot.COARSE_AXIS: reverse_turn},
         slot_fills={
+            Slot.ENTER: Command(
+                "replay.follow",
+                "Enter: go to the event where this card was played or drawn",
+                follow_fact,
+            ),
             Slot.COARSE_AXIS: forward_turn,
             **(
                 {
@@ -355,7 +351,6 @@ def build_replay_viewer(
     if not isinstance(surface.engine, HorizontalListEngine):
         raise TypeError("Replay Viewer requires a horizontal-list engine")
     engine = surface.engine
-    engine.set_zone_cursor("events", 0)
 
     def autoplay_event(item: _EventItem) -> None:
         if (
@@ -380,10 +375,7 @@ def build_replay_viewer(
         if isinstance(current, _EventItem):
             autoplay_event(current)
 
-    autoplay_location = (
-        engine.current_zone().zone_id,
-        engine.items_snapshot()[1],
-    )
+    autoplay_location = ("events", 0)
 
     def current_autoplay_location() -> tuple[str, int]:
         return engine.current_zone().zone_id, engine.items_snapshot()[1]
@@ -401,9 +393,69 @@ def build_replay_viewer(
         if location[0] == "events":
             autoplay_current_event()
 
+    def open_at_first_event() -> None:
+        """Start on the Events zone at the game's first event (ADR-0017)."""
+        nonlocal turn_index, autoplay_location
+        turn_index = 0
+        # Opening is silent: the reset is not a landing on the first event.
+        autoplay_location = ("events", 0)
+        engine.reset("events")
+
+    open_at_first_event()
     engine.subscribe(autoplay_on_landing_transition)
-    current_replay.bind_viewer_reset(reset_for_new_replay)
+    current_replay.bind_viewer_reset(open_at_first_event)
     return surface
+
+
+_FACT_EVENTS: dict[str, type[CardPlayed] | type[CardDrawn]] = {
+    "your_played": CardPlayed,
+    "opponent_played": CardPlayed,
+    "your_drawn": CardDrawn,
+    "opponent_drawn": CardDrawn,
+}
+
+_OUTCOME_JINGLES = {"WON": "victory", "LOST": "defeat", "CONCEDED": "defeat"}
+
+
+def _event_items(turn: TurnView) -> list[_EventItem]:
+    values: list[_EventItem] = []
+    for turn_event in turn.events:
+        event = turn_event.event
+        title = phrase(event, turn.state)
+        if title is not None:
+            source_card_id, source_title = _event_source(event, turn.state)
+            values.append(
+                _EventItem(
+                    event,
+                    turn_event.state,
+                    title,
+                    source_card_id,
+                    source_title,
+                )
+            )
+    return values
+
+
+def _find_fact(
+    turns: list[TurnView],
+    event_type: type[CardPlayed] | type[CardDrawn],
+    card: PlayedCard,
+) -> tuple[int, int] | None:
+    """Locate the event that played or drew a card as (turn, event) positions."""
+    matches = [
+        (turn_index, event_index, item.event.turn)
+        for turn_index, turn in enumerate(turns)
+        for event_index, item in enumerate(_event_items(turn))
+        if isinstance(item.event, event_type)
+        and item.event.entity_id == card.entity_id
+    ]
+    if not matches:
+        return None
+    # A card bounced back to hand is drawn or played again; its own turn wins.
+    turn_index, event_index, _turn = min(
+        matches, key=lambda match: match[2] != card.turn
+    )
+    return turn_index, event_index
 
 
 def _event_source(
@@ -437,6 +489,9 @@ def _event_audio_kind(event: GameEvent) -> str | None:
         return "attack"
     if isinstance(event, MinionDied):
         return "minion_death"
+    if isinstance(event, GameEnded):
+        # The signature sound: game over plays its jingle (ADR-0017).
+        return _OUTCOME_JINGLES.get(event.player_playstate.upper())
     return None
 
 

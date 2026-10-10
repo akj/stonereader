@@ -18,7 +18,6 @@ from hearthstone.deckstrings import parse_deckstring
 
 import stonereader
 from stonereader.db import get_connection, init_db
-from stonereader.models.game_state import GameState
 from stonereader.services._audio_player import AudioPlayer
 from stonereader.speech_service import SpeechService
 from stonereader.surfaces._deck_data import CurrentDeck, CurrentGames, DeckData
@@ -37,7 +36,11 @@ from stonereader.surfaces.help_universal import build_help_universal
 from stonereader.surfaces.home import build_home
 from stonereader.surfaces.import_deck import ImportDeckField, build_import_deck
 from stonereader.surfaces.import_replays import build_import_replays
-from stonereader.surfaces.live_game import CurrentGame, build_live_game
+from stonereader.surfaces.live_game import (
+    CurrentGame,
+    build_live_game,
+    speak_game_query,
+)
 from stonereader.surfaces.global_hotkeys import build_global_hotkeys
 from stonereader.surfaces.picker import PickerHolder, build_picker
 from stonereader.surfaces.replays import build_replays
@@ -391,6 +394,7 @@ class StoneReaderApp(wx.App):
                 self._frame.universal_bindings,
                 nav,
                 targets,
+                current_game,
             )
 
         def decks_factory() -> ActiveSurface:
@@ -628,12 +632,12 @@ class StoneReaderApp(wx.App):
                 "jump_live_game": lambda: nav.jump(
                     "Live Game",
                     then=lambda surface: _switch_live_zone(
-                        surface, "remaining_deck"
+                        surface, current_game, "remaining_deck"
                     ),
                 ),
                 "jump_cards": lambda: nav.jump("Cards"),
                 "jump_replays": lambda: nav.jump("Replays"),
-                "speak_deck_counts": lambda: _query_current_game(
+                "speak_deck_counts": lambda: speak_game_query(
                     announcer,
                     current_game,
                     "Your deck",
@@ -710,24 +714,18 @@ def _is_deckstring(text: str) -> bool:
     return True
 
 
-def _switch_live_zone(surface: ActiveSurface, zone_id: str) -> None:
+def _switch_live_zone(
+    surface: ActiveSurface,
+    current_game: CurrentGame,
+    zone_id: str,
+) -> None:
     engine = surface.engine
     if not isinstance(engine, HorizontalListEngine):
         raise TypeError("Live Game requires a horizontal-list engine")
-    engine.switch_zone(zone_id)
-
-
-def _query_current_game(
-    announcer: Announcer,
-    current_game: CurrentGame,
-    subject: str,
-    value: Callable[[GameState], str],
-) -> None:
-    state = current_game.get()
-    if state is None:
-        announcer.noop("No game in progress")
-        return
-    announcer.query(subject, value(state))
+    # With no game the landing already said Live Game is waiting; the zone
+    # key would only cut that short with "Waiting for a game" (ADR-0017).
+    if current_game.get() is not None:
+        engine.switch_zone(zone_id)
 
 
 def _ignore_raw_lines(lines: list[str]) -> None:

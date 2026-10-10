@@ -28,6 +28,11 @@ class TurnView:
     events: tuple[TurnEvent, ...]
 
 
+def turn_number(state: GameState) -> int:
+    """Return the turn a snapshot belongs to; the mulligan counts as turn 1."""
+    return max(1, state.turn)
+
+
 def turns(replay: ReplayState) -> list[TurnView]:
     """Group ordered replay snapshots by the transition's post-state turn.
 
@@ -39,7 +44,7 @@ def turns(replay: ReplayState) -> list[TurnView]:
     grouped: dict[int, tuple[GameState, list[TurnEvent]]] = {}
     previous: GameState | None = None
     for state in replay.states:
-        number = max(1, state.turn)
+        number = turn_number(state)
         if number not in grouped:
             grouped[number] = (state, [])
         _last_state, events = grouped[number]

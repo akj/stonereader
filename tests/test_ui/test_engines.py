@@ -95,6 +95,8 @@ def horizontal_engine(
     first_items: list[str] | None = None,
     second_items: list[str] | None = None,
     context_label: Callable[[], str] | None = None,
+    context_prefix: Callable[[], str] | None = None,
+    waiting_for: Callable[[], str | None] | None = None,
 ) -> HorizontalListEngine:
     one = (
         ["Fireball", "Frostbolt", "Arcane Intellect"]
@@ -129,6 +131,8 @@ def horizontal_engine(
         WidgetType.HORIZONTAL_LIST,
         context_label=context_label,
         zones=zones,
+        context_prefix=context_prefix,
+        waiting_for=waiting_for,
     )
     return HorizontalListEngine(spec, Announcer(speech))
 
@@ -247,12 +251,125 @@ def test_zone_switch_persists_each_zone_detail_cursor() -> None:
     assert speech.calls == [("Your hand, Fireball detail 1, 1 of 3", True)]
 
 
-def test_empty_zone_switch_is_announced_and_does_not_switch() -> None:
+def test_empty_zone_is_a_place_the_switch_lands_in() -> None:
     speech = FakeSpeech()
     engine = horizontal_engine(speech, second_items=[])
+    bindings = engine.widget_type_bindings()
+
+    dict(engine.zone_bindings())[Chord("c", shift=True)].handler()
+    assert engine.current_zone().zone_id == "two"
+    for chord in (
+        Chord("left"),
+        Chord("right"),
+        Chord("up"),
+        Chord("down"),
+        Chord("home"),
+        Chord("end"),
+    ):
+        run_binding(bindings, chord)
+    engine.jump_to_position(3)
+
+    assert [text for text, _interrupt in speech.calls] == ["Opponent hand: empty"] * 8
+
+
+def test_context_prefix_leads_landings_and_rereads_but_never_zone_switches() -> None:
+    speech = FakeSpeech()
+    engine = horizontal_engine(
+        speech,
+        second_items=[],
+        context_prefix=lambda: "Opponent's turn 3",
+    )
+    bindings = engine.widget_type_bindings()
+
+    engine.on_landing()
     engine.switch_zone("two")
+    run_binding(bindings, Chord("right"))
+    run_binding(bindings, Chord("up", shift=True))
+    engine.switch_zone("one")
+    run_binding(bindings, Chord("down"))
+    run_binding(bindings, Chord("up", shift=True))
+
+    assert [text for text, _interrupt in speech.calls] == [
+        "Opponent's turn 3, Your hand, Fireball, 1 of 3",
+        "Opponent hand: empty",
+        "Opponent hand: empty",
+        "Opponent's turn 3, Opponent hand: empty",
+        "Your hand, Fireball, 1 of 3",
+        "Fireball detail 1",
+        "Opponent's turn 3, Your hand, Fireball detail 1, 1 of 3",
+    ]
+
+
+def test_waiting_surface_lands_on_its_state_and_every_browse_key_says_it() -> None:
+    speech = FakeSpeech()
+    waiting: list[str | None] = ["a game"]
+    engine = horizontal_engine(
+        speech,
+        second_items=["Unknown"],
+        waiting_for=lambda: waiting[0],
+    )
+    bindings = engine.widget_type_bindings()
+
+    engine.on_landing()
+    for chord in (
+        Chord("left"),
+        Chord("right"),
+        Chord("up"),
+        Chord("down"),
+        Chord("down", shift=True),
+        Chord("home"),
+        Chord("end"),
+    ):
+        run_binding(bindings, chord)
+    dict(engine.zone_bindings())[Chord("c", shift=True)].handler()
+    engine.jump_to_position(2)
+    engine.page(1)
+    run_binding(bindings, Chord("up", shift=True))
+
+    assert [text for text, _interrupt in speech.calls] == [
+        "Cards, waiting for a game",
+        *["Waiting for a game"] * 10,
+        "Cards, waiting for a game",
+    ]
     assert engine.current_zone().zone_id == "one"
-    assert speech.calls == [("No Opponent hand on this screen", True)]
+    assert engine.current_item() == "Fireball"
+
+    waiting[0] = None
+    speech.calls.clear()
+    engine.on_landing()
+    run_binding(bindings, Chord("right"))
+    assert [text for text, _interrupt in speech.calls] == [
+        "Your hand, Fireball, 1 of 3",
+        "Frostbolt",
+    ]
+
+
+def test_reset_and_set_active_zone_move_cursors_without_speech() -> None:
+    speech = FakeSpeech()
+    engine = horizontal_engine(speech, second_items=["Unknown 1", "Unknown 2"])
+    changes: list[str] = []
+    engine.subscribe(lambda: changes.append("changed"))
+    bindings = engine.widget_type_bindings()
+    run_binding(bindings, Chord("end"))
+    run_binding(bindings, Chord("down"))
+    engine.switch_zone("two")
+    run_binding(bindings, Chord("right"))
+    speech.calls.clear()
+    changes.clear()
+
+    engine.set_active_zone("one")
+    assert engine.current_item() == "Arcane Intellect"
+    engine.reset("two")
+
+    assert speech.calls == []
+    assert changes == ["changed", "changed"]
+    assert engine.current_zone().zone_id == "two"
+    assert engine.current_item() == "Unknown 1"
+    assert engine.zone_cursor("one") == 0
+    engine.set_active_zone("one")
+    assert engine.items_snapshot()[2] == ["Fireball detail 1", "Fireball detail 2"]
+    run_binding(bindings, Chord("up", shift=True))
+    assert speech.calls == [("Your hand, Fireball, 1 of 3", True)]
 
 
 def test_jump_page_clamping_and_change_notifications() -> None:

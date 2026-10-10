@@ -208,24 +208,33 @@ class HorizontalListEngine:
         )
 
     def widget_type_bindings(self) -> list[tuple[Chord, Command]]:
+        # Shift+Up re-fires the landing utterance, which speaks the waiting
+        # state itself; every other key needs something to browse.
+        browse = self._unless_waiting
         return [
             (
                 Chord("left"),
-                Command("list.previous", "Left: previous item", self._previous_item),
+                Command(
+                    "list.previous", "Left: previous item", browse(self._previous_item)
+                ),
             ),
             (
                 Chord("right"),
-                Command("list.next", "Right: next item", self._next_item),
+                Command("list.next", "Right: next item", browse(self._next_item)),
             ),
             (
                 Chord("up"),
                 Command(
-                    "list.detail_previous", "Up: previous detail", self._previous_detail
+                    "list.detail_previous",
+                    "Up: previous detail",
+                    browse(self._previous_detail),
                 ),
             ),
             (
                 Chord("down"),
-                Command("list.detail_next", "Down: next detail", self._next_detail),
+                Command(
+                    "list.detail_next", "Down: next detail", browse(self._next_detail)
+                ),
             ),
             (
                 Chord("up", shift=True),
@@ -236,16 +245,16 @@ class HorizontalListEngine:
                 Command(
                     "list.read_remaining",
                     "Shift+Down: read remaining details",
-                    self._read_remaining,
+                    browse(self._read_remaining),
                 ),
             ),
             (
                 Chord("home"),
-                Command("list.first", "Home: first item", self._first_item),
+                Command("list.first", "Home: first item", browse(self._first_item)),
             ),
             (
                 Chord("end"),
-                Command("list.last", "End: last item", self._last_item),
+                Command("list.last", "End: last item", browse(self._last_item)),
             ),
         ]
 
@@ -267,31 +276,51 @@ class HorizontalListEngine:
         return bindings
 
     def on_landing(self, continues: bool = False) -> None:
-        """Fire the context-entry utterance for this landing.
+        """Fire the context-entry utterance for this landing, prefix first.
 
-        `continues` marks the landing as a Lane-1 continuation: it follows a
-        confirmation already spoken instead of cutting it (ADR-0007).
+        Landing covers every route plus in-place rebuilds such as a turn step
+        (ADR-0017). `continues` marks the landing as a Lane-1 continuation: it
+        follows a confirmation already spoken instead of cutting it (ADR-0007).
         """
         self._announce_context(continues=continues, current_line=False)
 
     def switch_zone(self, zone_id: str) -> None:
-        """Switch to a non-empty zone and fire its context-entry utterance."""
-        try:
-            zone = self._zones[zone_id]
-        except KeyError as error:
-            raise ValueError(f"Unknown zone id: {zone_id}") from error
-        if not zone.items():
-            self._announcer.empty_zone(zone.label)
+        """Switch zones and fire the zone's context entry without the prefix.
+
+        An empty zone is still a place: the switch lands there and says so
+        (ADR-0017).
+        """
+        zone = self._zone(zone_id)
+        if self._says_waiting():
             return
         changed = zone_id != self._active_zone_id
         self._active_zone_id = zone_id
         self._clamp(zone)
         if changed:
             self._notify()
-        self.on_landing()
+        self._announce_context(continues=False, current_line=False, prefixed=False)
+
+    def set_active_zone(self, zone_id: str) -> None:
+        """Make a zone active without landing there."""
+        zone = self._zone(zone_id)
+        changed = zone_id != self._active_zone_id
+        self._active_zone_id = zone_id
+        self._clamp(zone)
+        if changed:
+            self._notify()
+
+    def reset(self, zone_id: str) -> None:
+        """Start over in a zone with every cursor on its first item, silently."""
+        self._zone(zone_id)
+        self._active_zone_id = zone_id
+        self._item_cursors = dict.fromkeys(self._zones, 0)
+        self._detail_cursors = dict.fromkeys(self._zones, 0)
+        self._notify()
 
     def jump_to_position(self, n: int) -> None:
         """Move to a one-based item position, clamped to the active zone."""
+        if self._says_waiting():
+            return
         items = self._items()
         if not items:
             # ADR-0004: a bound key never dies silently.
@@ -302,6 +331,8 @@ class HorizontalListEngine:
 
     def page(self, delta_items: int) -> None:
         """Move by a caller-defined page size, clamped to the active zone."""
+        if self._says_waiting():
+            return
         items = self._items()
         if not items:
             # ADR-0004: PageUp/PageDown fill a universal slot; never silent.
@@ -324,19 +355,12 @@ class HorizontalListEngine:
 
     def zone_cursor(self, zone_id: str) -> int:
         """Return a zone's zero-based item cursor, clamped to its current items."""
-        try:
-            zone = self._zones[zone_id]
-        except KeyError as error:
-            raise ValueError(f"Unknown zone id: {zone_id}") from error
-        self._clamp(zone)
+        self._clamp(self._zone(zone_id))
         return self._item_cursors[zone_id]
 
     def set_zone_cursor(self, zone_id: str, target: int) -> None:
         """Set a zone's zero-based item cursor without landing there."""
-        try:
-            zone = self._zones[zone_id]
-        except KeyError as error:
-            raise ValueError(f"Unknown zone id: {zone_id}") from error
+        zone = self._zone(zone_id)
         items = list(zone.items())
         self._item_cursors[zone_id] = min(max(target, 0), max(len(items) - 1, 0))
         self._detail_cursors[zone_id] = 0
@@ -430,9 +454,23 @@ class HorizontalListEngine:
             self._notify()
         self._announcer.moved(self.current_zone().title(items[target]))
 
-    def _announce_context(self, *, continues: bool, current_line: bool) -> None:
+    def _announce_context(
+        self,
+        *,
+        continues: bool,
+        current_line: bool,
+        prefixed: bool = True,
+    ) -> None:
+        subject = self._waiting_for()
+        if subject is not None:
+            self._announcer.context_waiting(
+                self._spec.name, subject, continues=continues
+            )
+            return
         items = self._items()
         label = self._context_label()
+        if prefixed and self._spec.context_prefix is not None:
+            label = f"{self._spec.context_prefix()}, {label}"
         if not items:
             self._announcer.context_empty(label, continues=continues)
             return
@@ -451,11 +489,37 @@ class HorizontalListEngine:
         )
 
     def _context_label(self) -> str:
+        """Return the active zone's label; the Surface prefix is the caller's."""
         if self._spec.context_label is not None:
             return self._spec.context_label()
         if len(self._spec.zones) > 1:
             return self.current_zone().label
         return self._spec.name
+
+    def _waiting_for(self) -> str | None:
+        waiting_for = self._spec.waiting_for
+        return None if waiting_for is None else waiting_for()
+
+    def _says_waiting(self) -> bool:
+        """Speak what the Surface is waiting for, if it has nothing to browse."""
+        subject = self._waiting_for()
+        if subject is None:
+            return False
+        self._announcer.waiting(subject)
+        return True
+
+    def _unless_waiting(self, action: Callable[[], None]) -> Callable[[], None]:
+        def run() -> None:
+            if not self._says_waiting():
+                action()
+
+        return run
+
+    def _zone(self, zone_id: str) -> ZoneSpec:
+        try:
+            return self._zones[zone_id]
+        except KeyError as error:
+            raise ValueError(f"Unknown zone id: {zone_id}") from error
 
     def _items(self) -> list[Any]:
         zone = self.current_zone()
