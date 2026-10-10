@@ -623,7 +623,9 @@ class GameEngine:
         controller = ent.get("CONTROLLER", 0)
         card_id = ent.get("card_id", "")
         base = self._lookup_card(card_id)
-        name = base.name if base else card_id
+        # Never the card id: a card the card data lacks is nameless, as a
+        # hidden card is, and its card_id tells the two apart.
+        name = base.name if base else ""
         if new_zone == int(Zone.HAND) and prev != int(Zone.HAND):
             pc = PlayedCard(
                 entity_id=eid,
@@ -765,6 +767,11 @@ class GameEngine:
         # Live health = base (minion HEALTH, or weapon DURABILITY) minus DAMAGE.
         base_hp = (ent.get("HEALTH", 0) or 0) or (ent.get("DURABILITY", 0) or 0)
         current_health = base_hp - (ent.get("DAMAGE", 0) or 0)
+        # The game tags a revealed card's type even when the card data lacks
+        # the card, so it can still die as a minion or expire as an enchantment.
+        card_type = base.card_type if base else ""
+        if base is None and ent.get("CARDTYPE"):
+            card_type = self._enum_name(CardType, ent["CARDTYPE"])
         return GameEntity(
             entity_id=eid,
             card_id=card_id,
@@ -773,7 +780,7 @@ class GameEngine:
             cost=base.cost if base else 0,
             current_attack=ent.get("ATK", 0) or 0,
             current_health=current_health,
-            card_type=base.card_type if base else "",
+            card_type=card_type,
             zone=zone_name,
             zone_position=ent.get("ZONE_POSITION", 0) or 0,
             controller=self._side(controller_int),

@@ -161,6 +161,9 @@ class Parser:
                         return True
                     if not self._maybe_emit_block_end(hp, pyid, out):
                         return True
+                elif translator.is_sub_spell(hp):
+                    if self._walk(hp.packets, out):
+                        return True
                 continue
             # Defer CreateGame emission until subsequent packets exist OR the
             # hslog parser state confirms we've moved past Player parsing.
@@ -201,6 +204,10 @@ class Parser:
                 if self._walk(hp.packets, out):
                     return True
                 if not self._maybe_emit_block_end(hp, pyid, out):
+                    return True
+            elif translator.is_sub_spell(hp):
+                # Children only, in place: a SubSpell has no block boundary.
+                if self._walk(hp.packets, out):
                     return True
             else:
                 translated = translator.translate_packet(hp, self._next_id)

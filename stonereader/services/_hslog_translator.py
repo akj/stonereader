@@ -17,7 +17,7 @@ translation the live pipeline uses, guaranteeing the two paths agree.
 
 from __future__ import annotations
 
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, List, Optional, TypeGuard
 
 from hslog import packets as hslog_packets
 
@@ -74,7 +74,8 @@ def _walk_tree(
     """Recursively walk hslog packets, appending translated internal packets.
 
     Block nodes emit a BlockStartPacket, then their children, then (if the
-    block closed) a BlockEndPacket. Leaf packets are translated via
+    block closed) a BlockEndPacket. SubSpell nodes contribute only their
+    children (see :func:`is_sub_spell`). Leaf packets are translated via
     :func:`translate_packet`.
     """
     for hp in hslog_pkts:
@@ -83,6 +84,9 @@ def _walk_tree(
             _walk_tree(getattr(hp, "packets", []) or [], out, next_id)
             if getattr(hp, "ended", False):
                 out.append(make_block_end(hp, next_id()))
+            continue
+        if is_sub_spell(hp):
+            _walk_tree(getattr(hp, "packets", []) or [], out, next_id)
             continue
         translated = translate_packet(hp, next_id)
         if translated is not None:
@@ -97,10 +101,11 @@ def translate_packet(hp: Any, next_id: Callable[[], int]) -> Optional[Packet]:
     next monotonic packet id; it is only invoked when a packet is actually
     produced, so skipped packets never consume an id.
 
-    Block packets are intentionally NOT handled here — the BlockStart /
-    BlockEnd pair is emitted by the walker (or, for the live parser, around
-    the recursion into block children). Use :func:`make_block_start` /
-    :func:`make_block_end` for those.
+    Block and SubSpell packets are intentionally NOT handled here — the
+    BlockStart / BlockEnd pair is emitted by the walker (or, for the live
+    parser, around the recursion into block children), and a SubSpell's
+    children are walked in place. Use :func:`make_block_start` /
+    :func:`make_block_end` and :func:`is_sub_spell` for those.
     """
     if isinstance(hp, hslog_packets.CreateGame):
         players = tuple(
@@ -159,6 +164,16 @@ def translate_packet(hp: Any, next_id: Callable[[], int]) -> Optional[Packet]:
         )
     # MetaData, Choices, ResetGame — not consumed by engine in v1
     return None
+
+
+def is_sub_spell(hp: Any) -> TypeGuard[hslog_packets.SubSpell]:
+    """True for an hslog SubSpell: a visual-effect wrapper, not a game block.
+
+    Its children (reveals, draws, zone and tag changes) belong to the
+    enclosing block, so walkers emit them in place with no block boundary
+    of their own.
+    """
+    return isinstance(hp, hslog_packets.SubSpell)
 
 
 def make_block_start(hp: Any, packet_id: int) -> BlockStartPacket:

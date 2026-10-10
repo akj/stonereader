@@ -6,13 +6,16 @@ from typing import TypeAlias
 
 from stonereader.models.card import Card
 from stonereader.models.game_state import GameEntity, Hero, PlayedCard
+from stonereader.spoken import card_label, count
 
 
 CardItem: TypeAlias = GameEntity | PlayedCard | None
 
 
 def card_title(item: CardItem, *, with_turn: bool = False) -> str:
-    name = card_name(item) or "Unknown card"
+    if item is None:
+        return card_label("")
+    name = card_label(card_name(item), item.card_id, item.base_card)
     if with_turn and isinstance(item, PlayedCard):
         return f"{name}, turn {item.turn}"
     return name
@@ -30,8 +33,13 @@ def card_detail_lines(item: CardItem) -> list[str]:
     if item is None:
         return []
     card = _base_card(item)
-    cost = item.cost if isinstance(item, GameEntity) else (card.cost if card else 0)
-    lines = [f"{cost} mana"]
+    if card is None and item.card_id:
+        # The game revealed this card but StoneReader's card data lacks it,
+        # so its cost and text are unknown rather than zero and empty.
+        lines = ["Not in StoneReader's card data yet"]
+    else:
+        cost = item.cost if isinstance(item, GameEntity) else (card.cost if card else 0)
+        lines = [f"{cost} mana"]
     card_type = (
         item.card_type
         if isinstance(item, GameEntity)
@@ -74,8 +82,8 @@ def hero_detail_lines(
     # The engine does not currently populate Hero.hero_power, so retain the
     # explicit fallback until that data gap is closed.
     power = hero.hero_power or "No hero power"
-    weapon_name = card_name(weapon) if weapon is not None else "No weapon"
-    return [power, weapon_name or "Unknown card", f"{secrets} secrets"]
+    weapon_name = card_title(weapon) if weapon is not None else "No weapon"
+    return [power, weapon_name, count(secrets, "secret")]
 
 
 def _base_card(item: CardItem) -> Card | None:

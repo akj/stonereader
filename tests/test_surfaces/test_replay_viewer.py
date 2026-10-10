@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime, timezone
+from pathlib import Path
 
-from stonereader.models.card import Card
+from hslog import LogParser
+from hsreplay.document import HSReplayDocument
+
+from stonereader.models.card import Card, CardDatabase
 from stonereader.models.game_state import GameEntity, GameState, Hero, PlayedCard
 from stonereader.models.replay import ReplayState
 from stonereader.services._audio_index import CardClip
@@ -16,6 +21,7 @@ from stonereader.services._events import (
     SecretRevealed,
     TurnChanged,
 )
+from stonereader.services._replay_loader import load_replay
 from stonereader.surfaces.sounds_menu import SoundsMenuHolder
 from stonereader.surfaces.replay_viewer import (
     CurrentReplay,
@@ -25,6 +31,8 @@ from stonereader.surfaces.replay_viewer import (
 from stonereader.ui.chords import Chord
 
 from .conftest import Harness, make_harness, placeholder_surface
+
+_LOG_FIXTURES = Path(__file__).parent.parent / "fixtures" / "log"
 
 
 def _card(
@@ -386,13 +394,13 @@ def test_card_hidden_status_hero_and_event_rows_follow_the_spec() -> None:
     assert harness.horizontal.items_snapshot() == (
         ["Jaina, 30 health"],
         0,
-        ["No hero power", "No weapon", "1 secrets"],
+        ["No hero power", "No weapon", "1 secret"],
     )
     harness.press(Chord("f"))
     assert harness.horizontal.items_snapshot() == (
         ["Garrosh, 30 health, 5 armor"],
         0,
-        ["Armor Up!", "Fiery Axe", "1 secrets"],
+        ["Armor Up!", "Fiery Axe", "1 secret"],
     )
 
     harness.press(Chord("y"))
@@ -1009,3 +1017,67 @@ def test_enter_on_a_replayed_card_finds_its_own_play() -> None:
     assert first.startswith("Your turn 1, Events, You played Boar, ")
     assert second.startswith("Your turn 1, Events, You played Boar, ")
     assert first != second
+
+
+def _recorded_replay(tmp_path: Path, log_name: str) -> Path:
+    """Write a Power.log fixture as the .hsreplay file the recorder saves."""
+    parser = LogParser()
+    parser._current_date = datetime(2026, 6, 20, tzinfo=timezone.utc)
+    with open(_LOG_FIXTURES / log_name, encoding="utf-8") as log:
+        parser.read(log)
+    path = tmp_path / "replay.hsreplay"
+    path.write_text(
+        HSReplayDocument.from_packet_tree(parser.games[:1]).to_xml(),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_a_recorded_game_speaks_each_card_once_and_never_its_card_id(
+    tmp_path: Path,
+) -> None:
+    """From Power.log lines through the saved file to what the viewer speaks.
+
+    The fixture draws two cards inside a SUB_SPELL, one of them (ZZZ_001) a card
+    the card data lacks; your draw and the opponent's play arrive face up, and
+    a later effect turns the opponent's Fireball face up in hand.
+    """
+    card_db = CardDatabase()
+    for card in (
+        replace(_card("HERO_08", "Jaina", card_type="HERO"), card_class="MAGE"),
+        replace(_card("HERO_01", "Garrosh", card_type="HERO"), card_class="WARRIOR"),
+        _card("CS2_182", "Chillwind Yeti"),
+        _card("EX1_015", "Novice Engineer"),
+        _card("CS2_029", "Fireball", card_type="SPELL"),
+    ):
+        card_db.cards_by_id[card.id] = card
+    replay = load_replay(
+        _recorded_replay(tmp_path, "reveals_and_new_cards.log"), card_db
+    )
+    harness = _harness(replay)
+
+    assert harness.horizontal.items_snapshot()[0] == [
+        "Game started, Mage versus Warrior",
+        "You drew Chillwind Yeti",
+        "Opponent drew a card",
+        "Opponent drew a card",
+        "You drew Novice Engineer",
+        "You drew Unrecognized card",
+        "You played Unrecognized card",
+    ]
+    harness.press(Chord("end"))
+    harness.press(Chord("p"))
+    harness.press(Chord("down"))
+    assert harness.speech.calls[-2:] == [
+        ("Your played, Unrecognized card, turn 1, 1 of 1", True),
+        ("Not in StoneReader's card data yet", True),
+    ]
+    harness.press(Chord("pagedown"))
+    harness.press(Chord("y"))
+    # The enchantment ZZZ_001e wearing off at the turn start is not spoken.
+    assert harness.horizontal.items_snapshot()[0] == [
+        "Start of turn",
+        "Opponent played Chillwind Yeti",
+        "Fireball revealed",
+        "Game over, lost",
+    ]
