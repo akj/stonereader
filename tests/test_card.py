@@ -127,7 +127,9 @@ def test_no_card_in_the_database_speaks_markup(card_db: CardDatabase) -> None:
         ("EXPERT1", "Classic"),
         ("ISLAND_VACATION", "Perils in Paradise"),
         ("RETURN_OF_THE_LICH_KING", "March of the Lich King"),
-        ("CATACLYSM", "CATACLYSM"),
+        ("CATACLYSM", "Cataclysm"),
+        ("TITANS", "Titans"),
+        ("LOOTAPALOOZA", "Kobolds & Catacombs"),
         ("HERO_SKINS", ""),
         ("PLACEHOLDER_202204", ""),
         ("TEST", ""),
@@ -144,12 +146,9 @@ def test_every_deck_card_set_line_is_a_spoken_name(card_db: CardDatabase) -> Non
     assert sorted(key for key, name in names.items() if not name) == [
         "PLACEHOLDER_202204"
     ]
-    # The game itself styles these two set names in capitals.
-    assert sorted(key for key, name in names.items() if name == key) == [
-        "CATACLYSM",
-        "TITANS",
-    ]
-    assert [name for name in names.values() if "_" in name] == []
+    assert [
+        name for name in names.values() if "_" in name or name.isupper()
+    ] == []
 
 
 def test_deckable_keeps_playable_heroes_and_drops_hero_skins(

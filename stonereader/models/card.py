@@ -1,6 +1,7 @@
 import re
 from dataclasses import dataclass, field
 from functools import cache
+from string import capwords
 from typing import Any, Dict, List, Optional, Sequence
 
 from hearthstone.cardxml import load
@@ -100,8 +101,8 @@ def _agree(match: re.Match[str], text: str) -> str:
 
 
 @cache
-def _set_names() -> dict[str, str]:
-    """Return spoken card-set names keyed by global string ID (GLOBAL.txt)."""
+def _global_strings() -> dict[str, str]:
+    """Return Hearthstone's English global strings by ID (GLOBAL.txt)."""
     with get_strings_file("enUS", "GLOBAL.txt").open(encoding="utf-8-sig") as strings:
         rows = load_txt(strings)
     return {key: row["TEXT"] for key, row in rows.items() if row.get("TEXT")}
@@ -135,7 +136,10 @@ def set_name(card_set: str) -> str:
     key = _SET_NAME_KEYS.get(card_set)
     if key is None and card_set in CardSet.__members__:
         key = CardSet[card_set].name_global
-    return _set_names().get(key or "", "")
+    name = _global_strings().get(key or "", "")
+    # The game styles a few names in capitals ("TITANS"); screen readers would
+    # treat them as shouting or acronyms.
+    return capwords(name) if name.isupper() else name
 
 
 _DECK_CARD_TYPES = frozenset({"HERO", "LOCATION", "MINION", "SPELL", "WEAPON"})
@@ -330,12 +334,29 @@ class CardDatabase:
     def get_card_by_name(self, name: str) -> Optional[Card]:
         return self.cards_by_name.get(name.lower())
 
+    def deck_cards(self) -> List[Card]:
+        """Return the cards a deck can hold, one printing per name.
+
+        A printing from a named set beats one from an unnamed placeholder set,
+        a current printing beats the Classic format's copy, and then the newest
+        printing wins.
+        """
+        printings: Dict[str, Card] = {}
+        for card in self.collectible_cards:
+            if not card.deckable:
+                continue
+            name = card.name.casefold()
+            kept = printings.get(name)
+            if kept is None or _printing_rank(card) > _printing_rank(kept):
+                printings[name] = card
+        return list(printings.values())
+
     def search_cards(
         self, query: str = "", filters: Optional[Dict[str, Any]] = None
     ) -> List[Card]:
         if filters is None:
             filters = {}
-        candidates = [c for c in self.collectible_cards if c.deckable]
+        candidates = self.deck_cards()
         if "card_class" in filters:
             candidates = [c for c in candidates if c.card_class == filters["card_class"]]
         if "card_type" in filters:
@@ -376,6 +397,13 @@ class CardDatabase:
 
     def total_collectible_cards(self) -> int:
         return len(self.collectible_cards)
+
+
+def _printing_rank(card: Card) -> tuple[bool, bool, int]:
+    """Rank printings of one name: named set, then not Classic format, then DBF ID."""
+    # VANILLA reprints the 2014 cards for the Classic format; its DBF IDs are
+    # newer than the current printings whose text and cost it predates.
+    return bool(set_name(card.card_set)), card.card_set != "VANILLA", card.dbf_id
 
 
 def card_sort_key(card: Card) -> tuple[int, str, int]:
