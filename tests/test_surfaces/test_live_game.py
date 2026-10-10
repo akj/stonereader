@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from stonereader.app import _switch_live_zone
 from stonereader.models.card import Card
 from stonereader.models.game_state import GameEntity, GameState, Hero, PlayedCard
 from stonereader.surfaces.live_game import CurrentGame, build_live_game
@@ -196,23 +197,52 @@ def test_all_fourteen_zone_providers_and_shared_formats() -> None:
     ]
 
 
-def test_no_game_entry_all_queries_and_state_updates_are_lane_one_silent() -> None:
+def test_no_game_landing_says_live_game_is_waiting() -> None:
     harness = _harness()
-    assert harness.speech.calls[-1] == ("Remaining Deck: empty", True)
+    assert harness.speech.calls[-1] == ("Live Game, waiting for a game", True)
     surface = harness.active_surface
     for zone in surface.spec.zones:
         assert list(zone.items()) == []
 
-    for chord in (
+    harness.press(Chord("up", shift=True))
+    assert harness.speech.calls[-1] == ("Live Game, waiting for a game", True)
+
+
+def test_no_game_every_zone_query_and_navigation_key_says_waiting() -> None:
+    harness = _harness()
+    letters = [Chord(key) for key in "bgcsvfwdpn"] + [
+        Chord(key, shift=True) for key in "cswpn"
+    ]
+    queries = [
         Chord("a"),
         Chord("a", shift=True),
         Chord("d", shift=True),
         Chord("r"),
         Chord("r", shift=True),
-    ):
-        harness.press(chord)
-        assert harness.speech.calls[-1] == ("No game in progress", True)
+    ]
+    navigation = [
+        Chord(key)
+        for key in (
+            "left", "right", "up", "down", "home", "end",
+            *"1234567890",
+            "pageup", "pagedown", "y", "f5", "f6", "enter",
+        )
+    ] + [Chord("down", shift=True)]
 
+    for chord in (*letters, *queries, *navigation):
+        harness.speech.calls.clear()
+        assert harness.press(chord) is True
+        assert harness.speech.calls == [("Waiting for a game", True)], chord
+    assert harness.horizontal.current_zone().zone_id == "remaining_deck"
+
+    harness.press(Chord("l"))
+    assert harness.speech.calls[-1] == ("No game audio during a live game", True)
+    harness.press(Chord("escape"))
+    assert harness.nav.stack == ("Home",)
+
+
+def test_a_starting_game_brings_back_the_zone_landing() -> None:
+    harness = _harness()
     harness.speech.calls.clear()
     changes: list[None] = []
     harness.horizontal.subscribe(lambda: changes.append(None))
@@ -220,10 +250,38 @@ def test_no_game_entry_all_queries_and_state_updates_are_lane_one_silent() -> No
     assert harness.speech.calls == []
     assert changes == [None]
 
+    harness.press(Chord("up", shift=True))
+    harness.press(Chord("b"))
+    assert harness.speech.calls == [
+        ("Remaining Deck, Boar, 1 copy, 1 of 2", True),
+        ("Your board, Boar, 1 of 1", True),
+    ]
+
+    surface = harness.active_surface
+    harness.speech.calls.clear()
     harness.context.on_state(
         _rich_state(), replace(_rich_state(), game_state="COMPLETE")
     )
+    assert harness.speech.calls == []
     assert all(not zone.items() for zone in surface.spec.zones)
+    harness.press(Chord("right"))
+    assert harness.speech.calls == [("Waiting for a game", True)]
+
+
+def test_empty_zone_during_a_game_is_a_place_without_a_turn_prefix() -> None:
+    harness = _harness(_empty_state())
+    assert harness.speech.calls[-1] == ("Remaining Deck: empty", True)
+
+    harness.press(Chord("b"))
+    harness.press(Chord("right"))
+    harness.press(Chord("3"))
+    assert harness.horizontal.current_zone().zone_id == "your_board"
+    assert harness.speech.calls[-3:] == [("Your board: empty", True)] * 3
+    harness.press(Chord("v"))
+    assert harness.speech.calls[-1] == (
+        "Your hero, Jaina, 27 health, 2 armor, 1 of 1",
+        True,
+    )
 
 
 def test_queries_digits_y_slots_and_unbound_keys_match_live_contract() -> None:
@@ -260,7 +318,7 @@ def test_queries_digits_y_slots_and_unbound_keys_match_live_contract() -> None:
     assert harness.speech.calls == before
 
 
-def test_event_step_keys_announce_no_events_in_a_live_game() -> None:
+def test_no_op_keys_carry_help_phrases() -> None:
     harness = _harness(_rich_state())
     help_by_chord = {
         str(chord): command.help_phrase
@@ -273,6 +331,10 @@ def test_event_step_keys_announce_no_events_in_a_live_game() -> None:
 
     assert help_by_chord["f5"] == "F5: no events in a live game"
     assert help_by_chord["f6"] == "F6: no events in a live game"
+    assert help_by_chord["enter"] == "Enter: nothing to do here"
+    assert help_by_chord["pageup"] == (
+        "Page Up and Page Down: no turns to step in a live game"
+    )
 
 
 def test_compound_hotkey_lands_then_switches_to_the_requested_zone() -> None:
@@ -282,9 +344,24 @@ def test_compound_hotkey_lands_then_switches_to_the_requested_zone() -> None:
 
     harness.nav.jump(
         "Live Game",
-        then=lambda _active: harness.horizontal.switch_zone("remaining_deck"),
+        then=lambda surface: _switch_live_zone(
+            surface, harness.context, "remaining_deck"
+        ),
     )
     assert harness.speech.calls[-1] == (
         "Remaining Deck, Boar, 1 copy, 1 of 2",
         True,
     )
+
+
+def test_compound_hotkey_with_no_game_keeps_the_waiting_landing() -> None:
+    harness = _harness()
+    harness.speech.calls.clear()
+
+    harness.nav.jump(
+        "Live Game",
+        then=lambda surface: _switch_live_zone(
+            surface, harness.context, "remaining_deck"
+        ),
+    )
+    assert harness.speech.calls == [("Live Game, waiting for a game", True)]

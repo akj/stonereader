@@ -67,6 +67,20 @@ class Announcer:
     def context_empty(self, label: str, *, continues: bool = False) -> None:
         self._utter(Lane.USER, f"{label}: empty", continues=continues)
 
+    def context_waiting(
+        self,
+        label: str,
+        subject: str,
+        *,
+        continues: bool = False,
+    ) -> None:
+        """Land on a Surface that has nothing to browse yet (ADR-0017)."""
+        self._utter(Lane.USER, f"{label}, waiting for {subject}", continues=continues)
+
+    def waiting(self, subject: str) -> None:
+        """Answer a key on a Surface that has nothing to browse yet."""
+        self._utter(Lane.USER, f"Waiting for {subject}")
+
     def moved(self, text: str) -> None:
         self._utter(Lane.USER, text)
 
@@ -121,10 +135,6 @@ class Announcer:
     def slot_noop(self, slot: Slot) -> None:
         """Announce an unfilled universal slot's default no-op (ADR-0010)."""
         self._utter(Lane.USER, SLOT_NOOP_PHRASES[slot])
-
-    def empty_zone(self, zone_label: str) -> None:
-        """Announce a zone-switch no-op for a zone with nothing in it."""
-        self._utter(Lane.USER, f"No {zone_label} on this screen")
 
     def already_home(self, home_title: str) -> None:
         """Announce back's no-op at the root of the stack (ADR-0006)."""

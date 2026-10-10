@@ -75,6 +75,10 @@ def test_phrases_every_existing_event_type() -> None:
             GameStarted(0, 0, "DEATHKNIGHT", "DEMONHUNTER", "RANKED", "STANDARD"),
             "Game started, Death Knight versus Demon Hunter",
         ),
+        (
+            GameStarted(0, 0, "DEATHKNIGHT", "ROGUE", "RANKED", "STANDARD"),
+            "Game started, Death Knight versus Rogue",
+        ),
         (GameEnded(0, 4, "WON", "LOST"), "Game over, lost"),
         (TurnChanged(0, 4, 1), "Turn 4, yours"),
         (TurnChanged(0, 4, 2), "Turn 4, opponent's"),

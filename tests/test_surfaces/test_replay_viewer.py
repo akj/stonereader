@@ -282,27 +282,25 @@ def _harness(
     return harness
 
 
-def test_entry_zone_switch_orientation_and_turn_step_share_one_template() -> None:
+def test_turn_prefix_leads_landings_rereads_and_turn_steps_but_not_zone_switches() -> None:
     harness = _harness()
     assert harness.speech.calls[-1] == (
-        "Turn 1, yours, Your board: empty",
+        "Your turn 1, Events, Game started, Mage versus Warrior, 1 of 11",
         True,
     )
 
     harness.press(Chord("f6"))
+    assert harness.speech.calls[-1] == ("Turn 1, yours", True)
     harness.press(Chord("g"))
-    assert harness.speech.calls[-1] == (
-        "Turn 1, yours, Opponent board, Enemy, 1 of 1",
-        True,
-    )
+    assert harness.speech.calls[-1] == ("Opponent board, Enemy, 1 of 1", True)
     harness.press(Chord("up", shift=True))
     assert harness.speech.calls[-1] == (
-        "Turn 1, yours, Opponent board, Enemy, 1 of 1",
+        "Your turn 1, Opponent board, Enemy, 1 of 1",
         True,
     )
     harness.press(Chord("pagedown"))
     assert harness.speech.calls[-1] == (
-        "Turn 2, opponent's, Opponent board, Enemy on turn two, 1 of 1",
+        "Opponent's turn 2, Opponent board, Enemy on turn two, 1 of 1",
         True,
     )
     assert harness.horizontal.current_zone().zone_id == "opponent_board"
@@ -311,14 +309,21 @@ def test_entry_zone_switch_orientation_and_turn_step_share_one_template() -> Non
 def test_clamped_turn_step_repeats_only_the_bare_title() -> None:
     harness = _harness()
     harness.press(Chord("f6"))
+    harness.press(Chord("b"))
     harness.speech.calls.clear()
 
     harness.press(Chord("pageup"))
+    harness.press(Chord("w"))
+    harness.press(Chord("pageup"))
 
-    assert harness.speech.calls == [("Boar", True)]
+    assert harness.speech.calls == [
+        ("Boar", True),
+        ("Your weapon: empty", True),
+        ("Your weapon: empty", True),
+    ]
 
 
-def test_all_zone_letters_shift_pairs_and_empty_weapon_phrase() -> None:
+def test_all_zone_letters_shift_pairs_and_empty_zones_are_places() -> None:
     harness = _harness()
     harness.press(Chord("f6"))
     cases = [
@@ -342,10 +347,12 @@ def test_all_zone_letters_shift_pairs_and_empty_weapon_phrase() -> None:
         harness.press(chord)
         assert harness.horizontal.current_zone().zone_id == zone_id
 
-    active_before = harness.horizontal.current_zone().zone_id
+    harness.speech.calls.clear()
     harness.press(Chord("w"))
-    assert harness.horizontal.current_zone().zone_id == active_before
-    assert harness.speech.calls[-1] == ("No Your weapon on this screen", True)
+    assert harness.horizontal.current_zone().zone_id == "your_weapon"
+    for chord in (Chord("right"), Chord("end"), Chord("3")):
+        harness.press(chord)
+    assert harness.speech.calls == [("Your weapon: empty", True)] * 4
 
 
 def test_card_hidden_status_hero_and_event_rows_follow_the_spec() -> None:
@@ -416,6 +423,8 @@ def test_event_scrubbing_renders_the_selected_moment_and_end_restores_turn_final
 
 def test_event_steps_from_board_speak_move_world_and_preserve_board_position() -> None:
     harness = _harness()
+    harness.press(Chord("b"))
+    assert harness.speech.calls[-1] == ("Your board: empty", True)
     rendered_titles: list[list[str]] = []
     harness.horizontal.subscribe(
         lambda: rendered_titles.append(harness.horizontal.items_snapshot()[0])
@@ -473,24 +482,22 @@ def test_speak_only_queries_are_subject_first_and_never_change_zone() -> None:
     for chord, utterance in expected:
         harness.press(chord)
         assert harness.speech.calls[-1] == (utterance, True)
-        assert harness.horizontal.current_zone().zone_id == "your_board"
+        assert harness.horizontal.current_zone().zone_id == "events"
 
 
 def test_digits_cursor_persistence_and_empty_snapshot_clamping_across_turns() -> None:
     harness = _harness()
     harness.press(Chord("f6"))
+    harness.press(Chord("b"))
     harness.press(Chord("2"))
     assert harness.speech.calls[-1] == ("Yeti", True)
     harness.press(Chord("c"))
     harness.press(Chord("b"))
-    assert harness.speech.calls[-1] == (
-        "Turn 1, yours, Your board, Yeti, 2 of 2",
-        True,
-    )
+    assert harness.speech.calls[-1] == ("Your board, Yeti, 2 of 2", True)
 
     harness.press(Chord("pagedown"))
     assert harness.speech.calls[-1] == (
-        "Turn 2, opponent's, Your board, Second on turn two, 2 of 2",
+        "Opponent's turn 2, Your board, Second on turn two, 2 of 2",
         True,
     )
     harness.press(Chord("pageup"))
@@ -534,20 +541,55 @@ def test_events_cursor_persists_across_zone_switch_and_back_reveal() -> None:
     assert harness.horizontal.items_snapshot()[1] == expected_cursor
 
 
-def test_second_replay_resets_turn_but_back_reveal_does_not() -> None:
-    harness = _harness()
+def test_every_open_starts_at_the_first_event_but_back_reveal_keeps_the_viewer() -> None:
+    replay = _replay()
+    harness = _harness(replay)
+    harness.press(Chord("f6"))
+    harness.press(Chord("b"))
+    harness.press(Chord("2"))
     harness.press(Chord("pagedown"))
-    harness.nav.drill_down("Child")
+    harness.nav.drill_down("Sounds menu")
     harness.speech.calls.clear()
 
     harness.nav.back()
 
-    assert harness.speech.calls[-1][0].startswith("Turn 2, opponent's, Your board")
+    assert harness.speech.calls == [
+        ("Opponent's turn 2, Your board, Second on turn two, 2 of 2", True)
+    ]
 
-    harness.context.set(_replay())
+    # Reopening the same replay from Replays is an open, not a revisit.
+    harness.nav.back()
+    harness.context.set(replay)
     harness.speech.calls.clear()
-    harness.list_engine("Replay Viewer").on_landing()
-    assert harness.speech.calls[-1][0].startswith("Turn 1, yours, Your board")
+    harness.nav.drill_down("Replay Viewer")
+
+    assert harness.speech.calls == [
+        ("Your turn 1, Events, Game started, Mage versus Warrior, 1 of 11", True)
+    ]
+    harness.press(Chord("f6"))
+    harness.press(Chord("b"))
+    assert harness.speech.calls[-1] == ("Your board, Boar, 1 of 2", True)
+
+
+def test_viewer_builds_before_any_replay_is_chosen() -> None:
+    current = CurrentReplay()
+    harness = make_harness(current)
+    harness.nav.register(
+        "Replay Viewer",
+        lambda: build_replay_viewer(harness.announcer, [], harness.nav, current),
+    )
+    harness.nav.register("Replays", lambda: placeholder_surface("Replays"))
+
+    # Command reference and hotkey capture peek every Surface up front.
+    harness.nav.peek("Replay Viewer")
+    current.set(_replay())
+    harness.nav.jump("Replays")
+    harness.speech.calls.clear()
+    harness.nav.drill_down("Replay Viewer")
+
+    assert harness.speech.calls == [
+        ("Your turn 1, Events, Game started, Mage versus Warrior, 1 of 11", True)
+    ]
 
 
 def test_slots_and_unbound_keys_match_replay_viewer_contract() -> None:
@@ -561,6 +603,9 @@ def test_slots_and_unbound_keys_match_replay_viewer_contract() -> None:
     assert help_by_chord["pagedown"] == "Page Down: go to the next turn"
     assert help_by_chord["f5"] == "F5: go to the previous event"
     assert help_by_chord["f6"] == "F6: go to the next event"
+    assert help_by_chord["enter"] == (
+        "Enter: go to the event where this card was played or drawn"
+    )
 
     cases = [
         (Chord("enter"), "Nothing to do here"),
@@ -587,6 +632,7 @@ def test_listen_handles_card_event_source_and_all_no_push_cases() -> None:
         sounds=sounds,
     )
     harness.press(Chord("f6"))
+    harness.press(Chord("b"))
     harness.press(Chord("l"))
     assert harness.nav.stack[-1] == "Sounds menu"
     assert sounds.get().card_name == "Boar"
@@ -598,6 +644,7 @@ def test_listen_handles_card_event_source_and_all_no_push_cases() -> None:
         sounds=SoundsMenuHolder(),
     )
     harness.press(Chord("f6"))
+    harness.press(Chord("b"))
     harness.press(Chord("l"))
     assert harness.nav.stack[-1] == "Replay Viewer"
     assert harness.speech.calls[-1] == ("Game audio is not ready yet", True)
@@ -609,6 +656,7 @@ def test_listen_handles_card_event_source_and_all_no_push_cases() -> None:
         sounds=SoundsMenuHolder(),
     )
     harness.press(Chord("f6"))
+    harness.press(Chord("b"))
     harness.press(Chord("l"))
     assert harness.nav.stack[-1] == "Replay Viewer"
     assert harness.speech.calls[-1] == ("Boar: no sounds", True)
@@ -765,23 +813,147 @@ def test_events_autoplay_on_event_item_landing_transitions() -> None:
     assert player.played == []
 
 
-def test_event_autoplay_coverage_is_play_attack_and_death_only() -> None:
+def test_event_autoplay_coverage_is_play_attack_death_and_outcome_jingles() -> None:
     card = _card("BOAR", "Boar")
     supported = [
         (CardPlayed(0, 1, 1, "BOAR", card, "Boar", 1), "play"),
         (AttackStarted(0, 1, 1, 2, 1), "attack"),
         (MinionDied(0, 1, 1, "BOAR", "Boar", 1), "minion_death"),
+        (GameEnded(0, 1, "WON", "LOST"), "victory"),
+        (GameEnded(0, 1, "LOST", "WON"), "defeat"),
     ]
     unsupported = [
         CardDrawn(0, 1, 1, "BOAR", card, "Boar", 1),
         TurnChanged(0, 1, 1),
         SecretPlayed(0, 1, 1),
         SecretRevealed(0, 1, "Counterspell", 1),
-        GameEnded(0, 1, "WON", "LOST"),
-        GameEnded(0, 1, "LOST", "WON"),
+        GameEnded(0, 1, "TIED", "TIED"),
     ]
 
     assert [(_event_audio_kind(event), kind) for event, kind in supported] == [
         (kind, kind) for _event, kind in supported
     ]
     assert all(_event_audio_kind(event) is None for event in unsupported)
+
+
+def _replay_ending(player_playstate: str) -> ReplayState:
+    replay = _replay()
+    final = replace(
+        replay.states[-1],
+        game_state="COMPLETE",
+        player_playstate=player_playstate,
+        opponent_playstate="WON" if player_playstate == "LOST" else "LOST",
+    )
+    return replace(replay, states=(*replay.states, final))
+
+
+def test_game_over_event_plays_the_outcome_jingle_under_replay_autoplay() -> None:
+    for playstate, jingle in (("WON", b"wav:victory-key"), ("LOST", b"wav:defeat-key")):
+        audio_index = FakeAudioIndex()
+        player = FakePlayer()
+        harness = _harness(
+            _replay_ending(playstate),
+            audio_index=audio_index,
+            player=player,
+            sounds=SoundsMenuHolder(),
+        )
+        harness.press(Chord("pagedown"))
+        assert player.played == []
+
+        harness.press(Chord("f6"))
+
+        assert harness.speech.calls[-1][0].startswith("Game over, ")
+        assert audio_index.event_requests[-1][0] is None
+        assert player.played == [jingle]
+
+    muted_player = FakePlayer()
+    muted = _harness(
+        _replay_ending("WON"),
+        audio_index=FakeAudioIndex(),
+        player=muted_player,
+        autoplay=False,
+        sounds=SoundsMenuHolder(),
+    )
+    muted.press(Chord("pagedown"))
+    muted.press(Chord("y"))
+    muted.press(Chord("end"))
+    assert muted.speech.calls[-1] == ("Game over, won", True)
+    assert muted_player.played == []
+
+
+def test_enter_in_played_and_drawn_zones_follows_the_fact_to_its_event() -> None:
+    cases = [
+        (Chord("p"), "Your turn 1, Events, You played Boar, 4 of 11"),
+        (Chord("p", shift=True), "Your turn 1, Events, Opponent played Enemy, 6 of 11"),
+        (Chord("n"), "Your turn 1, Events, You drew Fireball, 7 of 11"),
+        (Chord("n", shift=True), "Your turn 1, Events, Opponent drew a card, 8 of 11"),
+    ]
+    for zone_key, utterance in cases:
+        harness = _harness()
+        # From turn 2, following a turn-1 fact steps the replay back a turn.
+        harness.press(Chord("pagedown"))
+        harness.press(zone_key)
+        harness.speech.calls.clear()
+
+        assert harness.press(Chord("enter")) is True
+
+        assert harness.speech.calls == [(utterance, True)]
+        assert harness.horizontal.current_zone().zone_id == "events"
+        harness.press(Chord("right"))
+        assert harness.speech.calls[-1][1] is True
+        harness.press(Chord("pagedown"))
+        assert harness.speech.calls[-1] == (
+            "Opponent's turn 2, Events, Turn 2, opponent's, 1 of 1",
+            True,
+        )
+
+
+def test_following_a_played_card_autoplays_its_event() -> None:
+    audio_index = FakeAudioIndex()
+    player = FakePlayer()
+    harness = _harness(audio_index=audio_index, player=player, sounds=SoundsMenuHolder())
+    harness.press(Chord("pagedown"))
+    harness.press(Chord("p"))
+
+    harness.press(Chord("enter"))
+
+    assert audio_index.event_requests[-1] == ("BOAR", "play")
+    assert player.played == [b"wav:play-key"]
+
+
+def test_enter_elsewhere_stays_the_announced_noop() -> None:
+    harness = _harness()
+    harness.speech.calls.clear()
+    for key in ("enter", "f6", "b", "enter", "f5", "p", "enter"):
+        harness.press(Chord(key))
+
+    # Events, a board, and an empty played zone have no fact to follow.
+    assert harness.speech.calls == [
+        ("Nothing to do here", True),
+        ("Turn 1, yours", True),
+        ("Your board, Boar, 1 of 2", True),
+        ("Nothing to do here", True),
+        ("Game started, Mage versus Warrior", True),
+        ("Your played: empty", True),
+        ("Nothing to do here", True),
+    ]
+    assert harness.horizontal.current_zone().zone_id == "your_played"
+
+
+def test_enter_on_a_card_with_no_matching_event_says_so() -> None:
+    replay = _replay()
+    fireball = replay.states[1].player_drawn[0]
+    states = tuple(
+        replace(state, player_drawn=(*state.player_drawn, replace(fireball, entity_id=99)))
+        for state in replay.states
+    )
+    harness = _harness(replace(replay, states=states))
+    harness.press(Chord("pagedown"))
+    harness.press(Chord("n"))
+    harness.press(Chord("right"))
+    harness.speech.calls.clear()
+
+    harness.press(Chord("enter"))
+
+    assert harness.speech.calls == [("No event for this card", True)]
+    assert harness.horizontal.current_zone().zone_id == "your_drawn"

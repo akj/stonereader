@@ -28,10 +28,13 @@ from stonereader.services._events import (
 
 def phrase(event: GameEvent, state: GameState) -> str | None:
     """Return the shared subject-first phrase, or ``None`` for filtered noise."""
+    # Imported here because the surfaces package imports this module.
+    from stonereader.surfaces._spoken import class_name
+
     if isinstance(event, GameStarted):
         return (
-            f"Game started, {_spoken_enum(event.player_class)} versus "
-            f"{_spoken_enum(event.opponent_class)}"
+            f"Game started, {class_name(event.player_class)} versus "
+            f"{class_name(event.opponent_class)}"
         )
     if isinstance(event, GameEnded):
         playstate = state.player_playstate or event.player_playstate
@@ -73,15 +76,6 @@ def phrase(event: GameEvent, state: GameState) -> str | None:
         # DAMAGE is a cumulative tag value, not a trustworthy per-hit amount.
         return None
     return None
-
-
-def _spoken_enum(value: str) -> str:
-    if not value:
-        return "Unknown"
-    return {
-        "DEATHKNIGHT": "Death Knight",
-        "DEMONHUNTER": "Demon Hunter",
-    }.get(value.upper(), value.replace("_", " ").title())
 
 
 def _event_name(value: str) -> str:
