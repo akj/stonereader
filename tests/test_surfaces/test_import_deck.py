@@ -22,7 +22,8 @@ def make_navigation(
     conn: sqlite3.Connection,
 ) -> Harness[ImportDeckContext]:
     hero = make_card(274, "Malfurion", card_class="DRUID", card_type="HERO")
-    card_db = make_card_db(hero)
+    knight = make_card(78065, "Arthas", card_class="DEATHKNIGHT", card_type="HERO")
+    card_db = make_card_db(hero, knight)
     code = make_deckstring([])
     field = ImportDeckField()
     harness = make_harness(ImportDeckContext(field, code))
@@ -58,6 +59,7 @@ def make_navigation(
 
 def enter_import_from_empty_decks(harness: Harness[ImportDeckContext]) -> None:
     harness.nav.jump("Decks")
+    harness.press(Chord("end"))
     harness.press(Chord("enter"))
 
 
@@ -92,7 +94,7 @@ def test_text_mode_commit_abandon_and_successful_import_queues_back_entry(
     assert harness.nav.stack == ("Home", "Decks")
     assert harness.speech.calls[-2:] == [
         ("Druid deck imported", True),
-        ("Decks, Druid deck, 1 of 3", False),
+        ("Decks, Druid deck, 0 cards, no games yet", False),
     ]
 
 
@@ -120,6 +122,21 @@ def test_derived_name_uses_next_available_suffix(db_conn: sqlite3.Connection) ->
     harness.press(Chord("enter"))
 
     assert get_all_decks(db_conn)[0].name == "Druid deck 3"
+
+
+def test_derived_name_speaks_the_class_name(db_conn: sqlite3.Connection) -> None:
+    harness = make_navigation(db_conn)
+    harness.nav.jump_path(["Home", "Decks", "Import Deck"])
+    harness.context.field.set(make_deckstring([], hero=78065))
+
+    harness.press(Chord("down"))
+    harness.press(Chord("enter"))
+
+    assert [deck.name for deck in get_all_decks(db_conn)] == ["Death Knight deck"]
+    assert harness.speech.calls[-2:] == [
+        ("Death Knight deck imported", True),
+        ("Decks, All decks, no games yet", False),
+    ]
 
 
 def test_offer_accept_sets_field_and_resets_exact_stack(

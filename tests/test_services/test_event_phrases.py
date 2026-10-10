@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from stonereader.models.card import Card
 from stonereader.models.game_state import GameEntity, GameState, Hero
 from stonereader.services._event_phrases import phrase
@@ -75,9 +77,13 @@ def test_phrases_every_existing_event_type() -> None:
             GameStarted(0, 0, "DEATHKNIGHT", "DEMONHUNTER", "RANKED", "STANDARD"),
             "Game started, Death Knight versus Demon Hunter",
         ),
+        (
+            GameStarted(0, 0, "DEATHKNIGHT", "ROGUE", "RANKED", "STANDARD"),
+            "Game started, Death Knight versus Rogue",
+        ),
         (GameEnded(0, 4, "WON", "LOST"), "Game over, lost"),
-        (TurnChanged(0, 4, 1), "Turn 4, yours"),
-        (TurnChanged(0, 4, 2), "Turn 4, opponent's"),
+        (TurnChanged(0, 4, 1), "Start of turn"),
+        (TurnChanged(0, 4, 2), "Start of turn"),
         (MulliganDone(0, 1), "Mulligan complete"),
         (CardDrawn(0, 4, 30, fireball.id, fireball, "Fireball", 1), "You drew Fireball"),
         (CardDrawn(0, 4, 31, "", None, "Secret", 2), "Opponent drew a card"),
@@ -94,6 +100,44 @@ def test_phrases_every_existing_event_type() -> None:
     ]
     for event, expected in cases:
         assert phrase(event, state) == expected
+
+
+def test_a_card_missing_from_card_data_is_unrecognized_never_its_id() -> None:
+    newer = GameEntity(70, "ZZZ_001", None, "", 0, 5, 3, "MINION", "PLAY", 1, 1)
+    hidden = GameEntity(71, "", None, "", 0, 0, 0, "", "GRAVEYARD", 0, 2)
+    state = _state()
+    state = replace(
+        state, player_board=(*state.player_board, newer), graveyard=(hidden,)
+    )
+    cases = [
+        (CardDrawn(0, 4, 70, "ZZZ_001", None, "", 1), "You drew Unrecognized card"),
+        (
+            CardPlayed(0, 4, 70, "ZZZ_001", None, "", 2),
+            "Opponent played Unrecognized card",
+        ),
+        (CardRevealed(0, 4, 70, "ZZZ_001", None, "", 2), "Unrecognized card revealed"),
+        (MinionDied(0, 4, 70, "ZZZ_001", "", 1), "Unrecognized card died"),
+        (
+            SecretRevealed(0, 4, "", 2, "ZZZ_002"),
+            "Secret revealed, Unrecognized card",
+        ),
+        (CardRemoved(0, 4, 70, "ZZZ_001", 1), "Unrecognized card removed"),
+        (AttackStarted(0, 4, 70, 20, 1), "Unrecognized card attacks Yeti"),
+        # A card the game kept hidden is a different fact.
+        (CardRemoved(0, 4, 71, "", 2), "Unknown card removed"),
+    ]
+    for event, expected in cases:
+        assert phrase(event, state) == expected
+
+
+def test_a_weapon_sent_to_the_graveyard_is_destroyed() -> None:
+    axe = _card("AXE", "Fiery War Axe")
+    broken = replace(_entity(30, axe, 1), card_type="WEAPON", zone="GRAVEYARD")
+    exiled = replace(broken, entity_id=31, zone="REMOVEDFROMGAME")
+    state = replace(_state(), graveyard=(broken, exiled))
+
+    assert phrase(CardRemoved(0, 4, 30, "AXE", 1), state) == "Fiery War Axe destroyed"
+    assert phrase(CardRemoved(0, 4, 31, "AXE", 1), state) == "Fiery War Axe removed"
 
 
 def test_damage_is_filtered_as_cumulative_value_noise() -> None:

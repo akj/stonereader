@@ -106,6 +106,7 @@ def make_harness[T](context: T) -> Harness[T]:
 
     nav = NavigationController(
         titles.append,
+        lambda _heading: None,
         announcer,
         lambda: events.append("stop"),
         activate,

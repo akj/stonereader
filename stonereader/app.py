@@ -18,13 +18,15 @@ from hearthstone.deckstrings import parse_deckstring
 
 import stonereader
 from stonereader.db import get_connection, init_db
-from stonereader.models.game_state import GameState
 from stonereader.services._audio_player import AudioPlayer
 from stonereader.speech_service import SpeechService
-from stonereader.surfaces._deck_data import CurrentDeck, DeckData
+from stonereader.spoken import count
+from stonereader.surfaces._deck_data import CurrentDeck, CurrentGames, DeckData
 from stonereader.surfaces.cards import CardsState, build_card_browser, build_cards
 from stonereader.surfaces.deck_detail import build_deck_detail
+from stonereader.surfaces.deck_page import build_deck_page
 from stonereader.surfaces.decks import build_decks
+from stonereader.surfaces.games import build_games
 from stonereader.surfaces.help import HelpOrigin, build_help, open_help
 from stonereader.surfaces.help_all import build_help_all
 from stonereader.surfaces.help_reference import (
@@ -35,14 +37,17 @@ from stonereader.surfaces.help_universal import build_help_universal
 from stonereader.surfaces.home import build_home
 from stonereader.surfaces.import_deck import ImportDeckField, build_import_deck
 from stonereader.surfaces.import_replays import build_import_replays
-from stonereader.surfaces.live_game import CurrentGame, build_live_game
+from stonereader.surfaces.live_game import (
+    CurrentGame,
+    build_live_game,
+    speak_game_query,
+)
 from stonereader.surfaces.global_hotkeys import build_global_hotkeys
 from stonereader.surfaces.picker import PickerHolder, build_picker
 from stonereader.surfaces.replays import build_replays
 from stonereader.surfaces.replay_viewer import CurrentReplay, build_replay_viewer
 from stonereader.surfaces.settings import build_settings
 from stonereader.surfaces.sounds_menu import SoundsMenuHolder, build_sounds_menu
-from stonereader.surfaces.statistics import build_statistics
 from stonereader.ui import (
     ActiveSurface,
     Announcer,
@@ -73,8 +78,20 @@ class MainWindow(wx.Frame):
         self._speech = SpeechService()
         self._announcer = Announcer(self._speech)
 
+        # A bare frame's default background is darker than the panels it hosts.
+        self.SetBackgroundColour(wx.SystemSettings.GetColour(wx.SYS_COLOUR_BTNFACE))
         self._sizer = wx.BoxSizer(wx.VERTICAL)
         self.SetSizer(self._sizer)
+        # ADR-0017: the heading shows the navigation path. When it is too long
+        # for the window, the start gives way so the current Surface stays.
+        self._heading = wx.StaticText(
+            self,
+            style=wx.ST_NO_AUTORESIZE | wx.ST_ELLIPSIZE_START,
+        )
+        self._heading.SetFont(self._heading.GetFont().Bold().Scaled(1.25))
+        self._heading.SetInitialSize()
+        self._sizer.Add(self._heading, 0, wx.EXPAND | wx.ALL, self.FromDIP(8))
+        self._sizer.Add(wx.StaticLine(self), 0, wx.EXPAND)
         self._panels: dict[str, SurfacePanel] = {}
         self._current_panel: SurfacePanel | None = None
         self._current_surface: ActiveSurface | None = None
@@ -86,6 +103,7 @@ class MainWindow(wx.Frame):
         self._sink = InputSink(self, self._announcer, stop_audio=audio_player.stop)
         self._nav = NavigationController(
             set_title=self.SetTitle,
+            set_heading=self._heading.SetLabelText,
             announcer=self._announcer,
             stop_audio=audio_player.stop,
             activate=self._activate_surface,
@@ -311,6 +329,7 @@ class StoneReaderApp(wx.App):
         card_db = CardDatabase.load()
 
         current_deck = CurrentDeck()
+        current_games = CurrentGames()
         current_game = CurrentGame()
         current_replay = CurrentReplay()
         deck_data = DeckData(db_conn, card_db)
@@ -389,6 +408,7 @@ class StoneReaderApp(wx.App):
                 self._frame.universal_bindings,
                 nav,
                 targets,
+                current_game,
             )
 
         def decks_factory() -> ActiveSurface:
@@ -401,6 +421,31 @@ class StoneReaderApp(wx.App):
                 current_deck,
                 self._frame._sink,
                 _copy_to_clipboard,
+            )
+
+        def deck_page_factory() -> ActiveSurface:
+            return build_deck_page(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                db_conn,
+                deck_data,
+                current_deck,
+                current_games,
+                self._frame._sink,
+                _copy_to_clipboard,
+            )
+
+        def games_factory() -> ActiveSurface:
+            return build_games(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                db_conn,
+                replay_store,
+                card_db,
+                current_games,
+                current_replay,
             )
 
         cards_state = CardsState()
@@ -463,6 +508,8 @@ class StoneReaderApp(wx.App):
                 replay_store,
                 card_db,
                 current_replay,
+                deck_data,
+                current_deck,
             )
 
         def replay_viewer_factory() -> ActiveSurface:
@@ -484,14 +531,6 @@ class StoneReaderApp(wx.App):
                 nav,
                 replay_store,
                 _choose_replay_files,
-            )
-
-        def statistics_factory() -> ActiveSurface:
-            return build_statistics(
-                announcer,
-                self._frame.universal_bindings,
-                nav,
-                db_conn,
             )
 
         def settings_factory() -> ActiveSurface:
@@ -571,12 +610,13 @@ class StoneReaderApp(wx.App):
         nav.register("Cards", cards_factory)
         nav.register("Card Browser", card_browser_factory)
         nav.register("Decks", decks_factory)
+        nav.register("Deck", deck_page_factory)
         nav.register("Deck detail", deck_detail_factory)
+        nav.register("Games", games_factory)
         nav.register("Import Deck", import_deck_factory)
         nav.register("Replays", replays_factory)
         nav.register("Replay Viewer", replay_viewer_factory)
         nav.register("Import Replays", import_replays_factory)
-        nav.register("Statistics", statistics_factory)
         nav.register("Settings", settings_factory)
         nav.register("Sounds menu", sounds_menu_factory)
         nav.register("Picker", picker_factory)
@@ -606,16 +646,16 @@ class StoneReaderApp(wx.App):
                 "jump_live_game": lambda: nav.jump(
                     "Live Game",
                     then=lambda surface: _switch_live_zone(
-                        surface, "remaining_deck"
+                        surface, current_game, "remaining_deck"
                     ),
                 ),
                 "jump_cards": lambda: nav.jump("Cards"),
                 "jump_replays": lambda: nav.jump("Replays"),
-                "speak_deck_counts": lambda: _query_current_game(
+                "speak_deck_counts": lambda: speak_game_query(
                     announcer,
                     current_game,
                     "Your deck",
-                    lambda state: f"{state.player_deck_count} cards",
+                    lambda state: count(state.player_deck_count, "card"),
                 ),
             },
         )
@@ -688,24 +728,18 @@ def _is_deckstring(text: str) -> bool:
     return True
 
 
-def _switch_live_zone(surface: ActiveSurface, zone_id: str) -> None:
+def _switch_live_zone(
+    surface: ActiveSurface,
+    current_game: CurrentGame,
+    zone_id: str,
+) -> None:
     engine = surface.engine
     if not isinstance(engine, HorizontalListEngine):
         raise TypeError("Live Game requires a horizontal-list engine")
-    engine.switch_zone(zone_id)
-
-
-def _query_current_game(
-    announcer: Announcer,
-    current_game: CurrentGame,
-    subject: str,
-    value: Callable[[GameState], str],
-) -> None:
-    state = current_game.get()
-    if state is None:
-        announcer.noop("No game in progress")
-        return
-    announcer.query(subject, value(state))
+    # With no game the landing already said Live Game is waiting; the zone
+    # key would only cut that short with "Waiting for a game" (ADR-0017).
+    if current_game.get() is not None:
+        engine.switch_zone(zone_id)
 
 
 def _ignore_raw_lines(lines: list[str]) -> None:

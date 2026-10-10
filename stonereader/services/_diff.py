@@ -15,8 +15,11 @@ Output ordering (deterministic):
   5. Per-entity transitions, ordered by ascending entity_id. For each entity,
      at most one zone-class event (CardDrawn | CardPlayed | SecretPlayed |
      SecretRevealed | MinionDied | CardRemoved), followed when applicable by
-     CardRevealed (if card_id became visible outside a secret reveal) and
-     DamageDealt (if DAMAGE tag changed under an open ATTACK or POWER block).
+     CardRevealed (if card_id became visible and no zone-class event already
+     names the card) and DamageDealt (if DAMAGE tag changed under an open
+     ATTACK or POWER block). Enchantments are attached effects, not cards,
+     and produce no events. A spell enters PLAY when cast (CardPlayed, like
+     any card played from hand) and leaves it silently as it resolves.
 
 Pure timestamps: every emitted event carries timestamp=0.0 — diff has no
 clock. Consumers that want wall-clock should associate timestamps at the
@@ -68,6 +71,9 @@ def _iter_entities(state: GameState) -> Iterable[GameEntity]:
     # PLAY→GRAVEYARD death or a *→terminal removal is never visited below, so
     # MinionDied / CardRemoved would be silently dropped from the event stream.
     yield from state.graveyard
+    # Spells resolving in PLAY — without these a spell cast from hand never
+    # reaches PLAY in the diff's eyes, so it gets no CardPlayed.
+    yield from state.spells_in_play
     # Hero entities — without these a DAMAGE change on a hero under an ATTACK/
     # POWER block (face damage) is never visited, so DamageDealt to face would
     # be dropped from the event stream.
@@ -142,8 +148,14 @@ def diff(prev: Optional[GameState], curr: GameState) -> Sequence[GameEvent]:
     curr_entities = _index_entities(curr)
     for eid in sorted(curr_entities):
         curr_ent = curr_entities[eid]
+        if curr_ent.card_type == "ENCHANTMENT":
+            # Enchantments reach the diff only through the terminal-zone
+            # projection, and an effect wearing off is not a card leaving play.
+            continue
         prev_ent = prev_entities.get(eid)
         prev_zone = prev_ent.zone if prev_ent is not None else ""
+        # Set when the zone-class event below already speaks the card's name.
+        named = False
         secret_revealed = (
             prev_zone == "SECRET"
             and curr_ent.zone == "GRAVEYARD"
@@ -163,6 +175,7 @@ def diff(prev: Optional[GameState], curr: GameState) -> Sequence[GameEvent]:
                         else ""
                     ),
                     controller=curr_ent.controller,
+                    card_id=curr_ent.card_id,
                 )
             )
         elif secret_played:
@@ -185,6 +198,9 @@ def diff(prev: Optional[GameState], curr: GameState) -> Sequence[GameEvent]:
                     controller=curr_ent.controller,
                 )
             )
+            # The server reveals your own draw to you, so its reveal is only
+            # the draw again; an opponent's draw is face down unless revealed.
+            named = curr_ent.controller == 1
         elif (
             curr_ent.zone == "PLAY"
             and prev_zone != "PLAY"
@@ -202,8 +218,13 @@ def diff(prev: Optional[GameState], curr: GameState) -> Sequence[GameEvent]:
                     controller=curr_ent.controller,
                 )
             )
+            # A played card enters face up; its reveal is the play itself.
+            named = True
         elif prev_zone == "PLAY" and curr_ent.zone in _TERMINAL_ENTITY_ZONES:
-            if curr_ent.zone == "GRAVEYARD" and curr_ent.card_type == "MINION":
+            if curr_ent.card_type == "SPELL":
+                # A cast spell resolving; casting it was the news (CardPlayed).
+                pass
+            elif curr_ent.zone == "GRAVEYARD" and curr_ent.card_type == "MINION":
                 events.append(
                     MinionDied(
                         timestamp=0.0,
@@ -249,6 +270,7 @@ def diff(prev: Optional[GameState], curr: GameState) -> Sequence[GameEvent]:
         if (
             not secret_revealed
             and not secret_played
+            and not named
             and prev_ent is not None
             and not prev_ent.card_id
             and curr_ent.card_id

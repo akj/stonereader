@@ -25,13 +25,16 @@ def build_deck_detail(
     audio_index: CardAudioIndex | None = None,
     sounds: SoundsMenuHolder | None = None,
 ) -> ActiveSurface:
-    """Build the lazy singleton that reads the app's current deck."""
+    """Build the lazy singleton that reads the Deck page's saved deck."""
     engine: HorizontalListEngine | None = None
+
+    def label() -> str:
+        return f"{current_deck.saved().name} cards"
 
     def items() -> tuple[tuple[Card, int], ...]:
         return tuple(
             sorted(
-                data.resolve(current_deck.get()).cards,
+                data.resolve(current_deck.saved()).cards,
                 key=lambda item: card_sort_key(item[0]),
             )
         )
@@ -71,7 +74,7 @@ def build_deck_detail(
     spec = SurfaceSpec(
         "Deck detail",
         WidgetType.HORIZONTAL_LIST,
-        context_label=lambda: current_deck.get().name,
+        context_label=label,
         zones=[
             ZoneSpec(
                 "cards",
@@ -97,7 +100,7 @@ def build_deck_detail(
             if audio_index is not None and sounds is not None
             else {}
         ),
-        display_name=lambda: current_deck.get().name,
+        display_name=label,
     )
     surface = build_active_surface(spec, announcer, universal_bindings, nav)
     if not isinstance(surface.engine, HorizontalListEngine):

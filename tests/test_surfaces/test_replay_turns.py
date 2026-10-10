@@ -48,15 +48,17 @@ def _state(turn: int, active: int, **overrides) -> GameState:
 
 def test_groups_turn_zero_as_turn_one_prelude_and_uses_last_state() -> None:
     opening = _state(0, 1, player_hand=(_entity("HAND"),))
-    turn_one_start = replace(opening, turn=1, active_player_id=2)
+    turn_one_start = replace(opening, turn=1, active_player_id=1)
     turn_one_end = replace(
         turn_one_start,
         player_hand=(),
         player_board=(_entity("PLAY"),),
         block_stack=("PLAY",),
     )
-    turn_two = replace(turn_one_end, turn=2, active_player_id=1, block_stack=())
+    turn_two = replace(turn_one_end, turn=2, active_player_id=2, block_stack=())
 
+    # active_player_id 1 is the friendly side even when the friendly player
+    # was the server's Player 2.
     result = turns(
         ReplayState(
             states=(opening, turn_one_start, turn_one_end, turn_two),

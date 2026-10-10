@@ -8,6 +8,21 @@ ADR-0010 (seams). Implementation lands via PRDs opened against the final UI
 spec (wayfinder map #17); nothing here ships code by itself. Decided in
 ticket #33.
 
+Amended 2026-10-10 by ADR-0017: the Statistics surface is retired. Its
+records live on Deck pages, where every record row — the deck's games, the
+last 20, each opponent class — opens the games it counts, and the win rate
+rides in the Games row. Other games now holds every corpus game no saved deck
+counts — unattributed games, deleted decks' games, arena and Battlegrounds —
+so All decks equals the saved decks plus Other games. Stats membership moves
+from a Replays detail line into the title ("not counted"). The corpus,
+attribution, and win-rate rules are unchanged.
+
+Amended 2026-10-10: schema v4 re-derives every stored replay's turn count,
+game type, and format from its file in the background on first launch,
+repairing live-recorded rows that took a player's own turn counter for the
+game turn and never learned the game type or format.
+Attribution, membership, result, and classes are untouched.
+
 ## Context
 
 The replay store (PR #16) records every finished live game: result

@@ -38,7 +38,7 @@ class GameEntity:
     card_type: str
     zone: str
     zone_position: int
-    controller: int
+    controller: int  # 1 = friendly, 2 = opponent (not the server PlayerID)
     exhausted: bool = False
     enchantment_names: Tuple[str, ...] = ()
     tags: Dict[str, Any] = field(default_factory=dict)
@@ -73,7 +73,7 @@ class PlayedCard:
     base_card: Optional[Card]  # resolved Card (None if hidden at play time)
     name: str  # convenience for speech
     turn: int  # the turn the play happened (0 = mulligan-into-hand)
-    controller: int  # 1 = friendly, 2 = opponent (matches PlayerID semantics)
+    controller: int  # 1 = friendly, 2 = opponent (not the server PlayerID)
 
 
 @dataclass(frozen=True)
@@ -161,6 +161,11 @@ class GameState:
     # replay event drilldown silently drops MinionDied / CardRemoved. Not
     # rendered by the live UI — a pure diff-seam input.
     graveyard: Tuple[GameEntity, ...] = ()
+
+    # Spells in PLAY while they resolve, projected so the diff seam sees a
+    # spell cast from hand enter PLAY under its PLAY block (CardPlayed), as a
+    # minion does, and leave it again. A pure diff-seam input, not rendered.
+    spells_in_play: Tuple[GameEntity, ...] = ()
 
     # PRD #7: GameEntity views of the two hero entities (CARDTYPE==HERO in PLAY),
     # separate from the display-oriented player_hero / opponent_hero Hero models.

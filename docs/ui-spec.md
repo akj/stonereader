@@ -3,7 +3,7 @@
 ## Purpose
 
 This is the per-surface specification implementation PRDs open against. It folds
-every decision locked in ADR-0003 through ADR-0014 into one document: the
+every decision locked in ADR-0003 through ADR-0017 into one document: the
 cross-cutting contracts every **Surface** obeys, and then, for each Surface, its
 **Widget type**, its stack behavior, its window title and **Context-entry
 utterance**, its rows or **zones** and their detail lines, its complete key
@@ -15,9 +15,11 @@ document should have nothing left to decide except code.
 **Status:** Final, assembled 2026-08-15 against ADR-0003…0012, amended
 2026-08-16 for ADR-0013 and ADR-0014 (wayfinder map
 [#17](https://github.com/akj/stonereader/issues/17), tickets #28, #34, and
-[#35](https://github.com/akj/stonereader/issues/35)). No open questions
-remain: every section is normative and PRD-ready. Nothing here ships code by
-itself.
+[#35](https://github.com/akj/stonereader/issues/35)), amended for ADR-0015 and
+ADR-0016 as they landed, and amended 2026-10-10 for ADR-0017 (cards sideways,
+records up and down; the Deck and Games Surfaces; the window heading and
+detail pane). No open questions remain: every section is normative and
+PRD-ready. Nothing here ships code by itself.
 
 Where an ADR left a detail to the per-surface spec, or where two ADRs could be
 read against each other, this document rules and says so inline ("this spec's
@@ -36,9 +38,12 @@ ruling"). A ruling is as binding as an ADR citation.
 | [0009](adr/0009-help-model-self-documenting-keymap.md) | **Help menu**: generated from the command registry, key-first ordering, Enter-executes, DL-008 retirement |
 | [0010](adr/0010-module-seams-declarative-surfaces.md) | Seams: declarative surfaces, two widget-type engines, command registry with layers and slots, one input sink, Announcer and Narrator, navigation controller |
 | [0011](adr/0011-settings-surface.md) | Settings surface, **Narration preset**, **Picker** idiom, **Capture mode**, global-hotkey rebinding, persistence and defaults |
-| [0012](adr/0012-deck-replay-statistics-surface.md) | **Stats corpus** membership, deck attribution, win-rate formula, the Statistics surface |
+| [0012](adr/0012-deck-replay-statistics-surface.md) | **Stats corpus** membership, deck attribution, win-rate formula (its Statistics surface is retired by ADR-0017) |
 | [0013](adr/0013-live-game-current-state-full-dialect.md) | Live Game: full replay dialect current-state only, no **Live game timeline**, draw-chance line, bare labels |
 | [0014](adr/0014-how-stonereader-asks.md) | Asking: the closed idiom inventory, the **Offer** and Ctrl+Enter, OS-dialog delegation, replay import |
+| [0015](adr/0015-replay-event-scrubbing.md) | Replay event scrubbing: the events zone as the fine axis, F5/F6 from any zone, turns read forward |
+| [0016](adr/0016-distribution-and-auto-update.md) | Distribution: the per-user installer, GitHub Releases as the update feed, updates that prompt and never happen silently |
+| [0017](adr/0017-cards-sideways-records-up-and-down.md) | The axis rule, **Records** and the Deck and Games Surfaces, Enter follows the fact, empty zones as places, the surface-wide context prefix, Live Game's waiting state, help order, data hygiene, the window heading and detail pane |
 
 ADR-0001 (Power.log over memory reading) and ADR-0002 (state-only prev/curr
 dispatch) govern the data pipeline below this spec and are not restated here.
@@ -57,6 +62,15 @@ Every Surface presents exactly one **Widget type**; there is no third
 (ADR-0004). Two widget-type engines interpret surface declarations and own
 cursor movement, key dispatch, boundary behavior, and announcement triggers
 (ADR-0010).
+
+**The axis rule: cards and game state move sideways; everything else moves
+up and down** (ADR-0017). The horizontal lists are exactly Card Browser, Deck
+detail, Live Game, and the Replay Viewer. Every other Surface — Home, Decks,
+Deck, Games, Replays, Cards, Settings, every form, Picker, help Surface, and
+the Sounds menu — is a vertical menu. The User can tell the axis from what is
+under the cursor. A **Record** row carries what tells it apart in its option
+title, most important first, and omits the usual case; records have no detail
+lines (ADR-0017).
 
 **Vertical menu** — a cursor over options.
 
@@ -81,9 +95,14 @@ cursor movement, key dispatch, boundary behavior, and announcement triggers
 
 Forms are vertical menus whose options are fields and actions (ADR-0004). A
 horizontal-list Surface may declare **zones**; the engine owns per-zone cursors,
-their persistence across switches, zone-switch context-entry utterances, and the
-constant "No {zone} on this screen" announced no-op for a bound-but-inapplicable
-zone key (ADR-0010, ADR-0009). Vertical menus have no zone concept (ADR-0010).
+their persistence across switches, and zone-switch context-entry utterances
+(ADR-0010). **Empty zones are places** (ADR-0017): a zone letter for an empty
+zone switches to it and speaks `"{Zone label}: empty"`, and arrows, Home/End,
+Shift+Down, and digits there repeat that utterance. The "No {zone} on this
+screen" template is retired (ADR-0017, retiring ADR-0009's phrase). A
+horizontal list may also declare a surface-wide context prefix and a waiting
+state (see [Announcement grammar](#announcement-grammar)). Vertical menus have
+no zones, no prefix, and no waiting state (ADR-0010, ADR-0017).
 
 ## Universal keys
 
@@ -139,10 +158,14 @@ focus; views are render-only subscribers (ADR-0010).
 ### Enter in v1
 
 ADR-0004 requires every Surface to assign Enter an action or an announced no-op.
-*This spec's ruling:* on **Card Browser**, **Deck detail**, **Live Game**, and the
-**Replay Viewer**'s zones, Enter is an announced no-op in v1 — the same call
-ADR-0012 made explicitly for Statistics. Nothing on those Surfaces is acted on;
-they are places to read.
+**Enter follows the fact** (ADR-0017): on a record it opens the games behind
+it, on a game it opens the replay, and on a card in the Replay Viewer's played
+and drawn zones it moves the replay to the event where that card was played or
+drawn. On **Card Browser**, **Deck detail**, **Live Game** during a game, and
+every other **Replay Viewer** zone, Enter is the announced no-op "Nothing to do
+here": those are places to read (ADR-0017, superseding this spec's earlier
+ruling, which also covered Statistics and every Replay Viewer zone). With no
+game in progress, Live Game's Enter says "Waiting for a game" (ADR-0017).
 
 **Future — not in scope for implementation PRDs:** a card-detail drill-down
 behind Enter, HSA's Collection Manager idiom ("Enter: select item for more
@@ -223,14 +246,25 @@ except by returning data (ADR-0010). The Surface's one text hook is its
 
 **Context-entry utterance** — fires identically on every landing route: screen
 jump, drill-down, back-reveal, zone switch, in-place rebuild (filter or search
-change, and — by this spec's extension — a Replay Viewer turn step), and
-orientation reread. No route-specific phrasing exists anywhere (ADR-0007).
+change, and a Replay Viewer turn step or event jump), and orientation reread.
+No route-specific phrasing exists beyond the context-prefix rule below
+(ADR-0007, ADR-0017).
 
 | Context | Utterance |
 |---|---|
 | Horizontal list or zone | `"{Context label}, {title}, {position} of {count}"` |
 | Vertical menu | `"{Context label}, {current option}"` — no position |
-| Empty context | `"{Context label}: empty"` — always the user-facing label, never an internal id |
+| Empty context | `"{Context label}: empty"` — always the user-facing label, never an internal id; an emptied menu says the same ("Odd Hunter versus Warrior: empty") |
+| Waiting | `"{Surface name}, waiting for {subject}"` — a horizontal list with nothing to browse yet ("Live Game, waiting for a game"); its browsing, zone, and query keys say `"Waiting for {subject}"` (ADR-0017) |
+
+**What changed comes first** (ADR-0017). A horizontal list may declare a
+**surface-wide context prefix** — the Replay Viewer's turn. The prefix leads
+the utterance on landing, orientation reread, and in-place rebuild, which are
+the routes where it may have changed: `"Opponent's turn 3, Events, Threads of
+Despair revealed, 2 of 20"`. A zone switch and an empty zone's repeats omit
+it, because the turn did not change: `"Your board, Bloodmage Thalnos, 1 of
+3"`. Every other route to the same place still sounds the same; the zone
+switch is the one route that says only what changed.
 
 **Title lines.** Every item has exactly one Title line — the shortest string
 that distinguishes it from its neighbors in that list. One formatter produces
@@ -238,7 +272,21 @@ it, used verbatim in three places: the displayed row, the movement utterance,
 and detail line 0. It is written for the ear ("3 attack, 2 health", never "3/2")
 and the display shows exactly that string (ADR-0007). Title content per Surface
 is this spec's decision under ADR-0007's distinguishability test; ADR-0007
-delegates the order of detail lines 1+ to this spec as well.
+delegates the order of detail lines 1+ to this spec as well. A record's Title
+line carries what tells it apart, most important first, and omits the usual
+case (ADR-0017).
+
+**Data hygiene** (ADR-0017). Counts agree with their nouns everywhere ("1
+win", "2 losses", "1 turn", "1 secret", "1 file chosen",
+"Opponent deck, 1 card"). Class keys are spoken through one formatter
+("Death Knight", never "Deathknight"). Card text is the text the collection
+shows, with no markup: no "[x]", "@", "$", "#", "{n}" placeholders, or tags,
+numbers the card data supplies filled in, a slot that names a minion type
+spoken as the type ("get 2 random Naga"), and in-play variants left out. Set
+names are the game's own names, never internal keys ("HERO_SKINS"). A card's
+name is never its card id: a card missing from StoneReader's card data reads
+"Unrecognized card", with the detail line "Not in StoneReader's card data
+yet" in place of its cost, and a card the game hid stays "Unknown card".
 
 **Movement and boundaries.** Moving the cursor speaks the bare title, option, or
 detail line — no position appended. Shift+Up is the orientation key: it re-fires
@@ -255,10 +303,13 @@ the revealed Surface exactly as left; zone cursors persist across zone switches;
 a screen jump to a previously visited Surface also finds it as left — jumps
 reset the stack, not the target's innards (ADR-0007). Surfaces are lazy
 singletons, created on first visit and alive for the app's lifetime, so
-persistence is structural (ADR-0010). **This spec takes none of ADR-0007's
-permitted transient opt-outs**: nothing is reset on leaving a Surface, and in
-particular Card Browser's mana filter and committed search survive
-leaving and re-entering. Fresh state is what app restart is for (ADR-0007).
+persistence is structural (ADR-0010). Nothing is reset on leaving a Surface;
+in particular Card Browser's mana filter and committed search survive leaving
+and re-entering (ADR-0007). **A fresh open is new content** (ADR-0017):
+opening a Deck page or a Games list starts at its first option, opening a
+replay starts at the game's first event, and F1 opens the Help menu on its
+widget-type sentence with no search. Back-reveal still finds each of them as
+left.
 
 **Two speech lanes.** Lane 1 (movement, entry, drive-by queries, confirmations)
 always interrupts instantly. Lane 2 (auto-narration of **Game events**) queues in
@@ -278,8 +329,16 @@ cards, 3 mana, Fireball, 1 of 12" (ADR-0007); the composition rule for a label
 carrying several constraints is specced on [Cards](#cards).
 
 **Naming.** Cards is the class menu. Card Browser is its collection
-Drill-down. Decks holds saved decks, and Deck detail opens one deck's contents.
-Generated help uses each Surface's registered name and widget type.
+Drill-down. Decks is the record menu: All decks, each saved deck, and Other
+games. Deck is one subject's page of records and actions. Games lists the
+games behind one record. Deck detail lists one saved deck's cards. A
+Surface's display name — its window title and heading entry — is its
+registered name unless it names its subject: a Deck page says the subject
+("Odd Hunter"), Deck detail says "{Deck name} cards", Card Browser says the
+class choice ("Hunter cards"), Games says its context label, and the Sounds
+menu says "{Card name} sounds" (ADR-0006, ADR-0017). Help takes the display
+name of the Surface it was opened from ("Odd Hunter help", "Hunter cards
+help"); All commands lists Surfaces by registered name ("Deck commands").
 
 ## Navigation stack, window title, topology
 
@@ -290,12 +349,28 @@ Generated help uses each Surface's registered name and widget type.
 - A **Drill-down** pushes one level; back pops exactly one (ADR-0006).
 - Back is an announced no-op at Home (ADR-0004, ADR-0006).
 - On every landing, by any route, the navigation controller fires the
-  window-title update, the context-entry utterance via the Announcer, and the
-  game-audio stop (ADR-0010).
-- Window title is `"{Surface name} — StoneReader"`, updated on every stack
-  change. There is no status bar and no `wx.MenuBar` (ADR-0006).
+  game-audio stop, the window-title and heading update, and the context-entry
+  utterance via the Announcer (ADR-0010, ADR-0017).
+- Window title is `"{display name} — StoneReader"`, updated on every stack
+  change (ADR-0006; display names under [Naming](#announcement-grammar)).
 - The User always chose to be here: no Surface change happens without a keypress
   (ADR-0006).
+
+**The window** (ADR-0006, ADR-0017). The window shows where the User is: a
+heading with the stack path, the current Surface's list, and, on a horizontal
+list, the current item's detail lines in a pane beside the list. The heading
+names every Surface on the stack below Home by its display name, joined by
+" › ", and reads "Home" at Home. A name that repeats its parent's name after
+a space or ", " drops it — "Decks › Odd Hunter › Cards",
+"Decks › Odd Hunter › Versus Mage", "Replays › Replay Viewer › Help" — while
+the window title keeps the full display name. When the heading is too long
+for the window, its start gives way so the current Surface stays visible.
+The list shows the rows that fit, scrolled the least distance that keeps the
+current row in view, with the current row highlighted, and redraws on every
+landing, so a deletion or a new subject never leaves stale rows on screen. A
+vertical menu has no detail pane. The window is render-only: no part of it
+takes keyboard focus, and speech never reads from it (ADR-0010).
+There is no status bar and no `wx.MenuBar` (ADR-0006).
 
 **System-wide hotkeys** (native OS registration, ADR-0005; rebindable in
 Settings, ADR-0011). These dispatch through the same command registry as any
@@ -303,10 +378,10 @@ other input route, so none can die silently (ADR-0010).
 
 | Hotkey | Command | Effect |
 |---|---|---|
-| Ctrl+Shift+L | Jump to Live Game | Screen jump to Live Game, landing on Remaining Deck (ADR-0006) |
+| Ctrl+Shift+L | Jump to Live Game | Screen jump to Live Game, landing on Remaining Deck (ADR-0006); with no game in progress it lands on the waiting utterance and switches no zone (ADR-0017) |
 | Ctrl+Shift+C | Jump to Cards | Screen jump to Cards (ADR-0006) |
 | Ctrl+Shift+R | Jump to Replays | Screen jump to Replays (ADR-0006) |
-| Ctrl+Shift+D | Speak deck counts | Speak-only: "Your deck, {n} cards" — navigates nowhere (ADR-0006, ADR-0007) |
+| Ctrl+Shift+D | Speak deck counts | Speak-only: "Your deck, {n} cards" ("Your deck, 1 card"), or "Waiting for a game" with no game in progress — navigates nowhere (ADR-0006, ADR-0007, ADR-0017) |
 
 (ADR-0006's table also carried Ctrl+Shift+O, jump to the live Opponent hand,
 and Ctrl+Shift+H, speak opponent hand count; *this spec's amendment* retired
@@ -331,9 +406,10 @@ the same place, and back pops to Decks, where the imported deck will be
 (ADR-0014, ADR-0006). This preserves the invariant that the User always chose
 to be here. The Offer's unique subject is the clipboard content (the shipped
 same-content guard is kept), and **StoneReader's own copies write that
-guard** — C on Decks never leads to an offer to import the code the app just
-handed you (ADR-0014). The shipped `wx.MessageDialog` clipboard modal is
-retired, along with the `restore_focus` hack's motivating case (ADR-0014).
+guard** — C on Decks or a Deck page never leads to an offer to import the code
+the app just handed you (ADR-0014). The shipped `wx.MessageDialog` clipboard
+modal is retired, along with the `restore_focus` hack's motivating case
+(ADR-0014).
 
 ## Game audio channel
 
@@ -376,9 +452,30 @@ column in every keymap table below is the registry entry for that binding, and
 the registry — not this document — is the runtime source of truth, which matters
 for the six rebindable chords (ADR-0011).
 
-Bound-but-inapplicable keys speak one constant short announced no-op ("No
-{zone} on this screen") every time. DL-008's diminishing-verbosity behavior is
-retired: no press counting, no adaptive verbosity, never silence (ADR-0009).
+A key that cannot apply speaks one constant short announced no-op every time
+("Nothing to do here", "No events in a live game"). DL-008's
+diminishing-verbosity behavior is retired: no press counting, no adaptive
+verbosity, never silence (ADR-0009). An empty zone is not such a case: it is a
+place, and its key lands there (ADR-0017).
+
+**Order** (ADR-0017). A Surface's screen-specific help options come in this
+order: Enter's phrase first, then the Surface's keys in the order its keymap
+table below lists them. Where that order differs from the order the Surface
+registers its keys, the Surface declares which keys follow Enter. Universal
+keys and All commands come last.
+
+**Ranges** (ADR-0017). Bindings that share one help phrase are one option:
+"1 to 9: jump to that position in the list", "0 to 8: show only cards of that
+mana cost". Enter on such an option says "Press one of these keys to use
+this". Slot no-ops — universal slots a Surface leaves at their default or
+answers with a constant phrase, such as Live Game's Enter and PageUp/PageDown
+— are not options. A surface-layer key that only explains itself, such as
+Live Game's Y, is an option.
+
+**Keymap tables.** Every keymap table below lists the help options first, in
+help order. Rows marked "Widget-type layer", "Universal layer", or "Slot
+default" follow them as reminders; help does not list them among the
+screen-specific options.
 
 ---
 
@@ -397,20 +494,26 @@ reminder.
 top-level Surface. Back at Home is an announced no-op: "Home — already at the
 top" (ADR-0004, ADR-0006).
 
-**Window title:** `Home — StoneReader` (ADR-0006).
-**Entry utterance:** `"Home, {current option}"` (ADR-0007).
+**Window title:** `Home — StoneReader` (ADR-0006). Heading: "Home"
+(ADR-0017).
+**Entry utterance:** `"Home, {current option}"` (ADR-0007) — "Home, Live
+Game, waiting for a game".
 
 **Options,** in order, each carrying a Home-scoped jump-and-activate letter
 (ADR-0006). Enter or the letter performs a **Screen jump** — the stack resets to
 `[Home, target]`.
 
-| Order | Option | Letter |
+| Order | Option title | Letter |
 |---|---|---|
-| 1 | Live Game | L |
-| 2 | Decks | D |
-| 3 | Cards | C |
-| 4 | Replays | R |
-| 5 | Settings | S |
+| 1 | "Live Game, waiting for a game", or "Live Game, turn {t} versus {Class}" during a game (ADR-0017) | L |
+| 2 | "Decks" | D |
+| 3 | "Cards" | C |
+| 4 | "Replays" | R |
+| 5 | "Settings" | S |
+
+The Live Game option says what Live Game holds right now; its title follows
+the game silently, and the next movement or reread speaks the new title
+(ADR-0017). The turn counts the mulligan as turn 1.
 
 `B` and `O` are **reserved**, not bound: HSA binds B = Battlegrounds and
 O = Open Packs (ADR-0006). Letters are Home-scoped; on other Surfaces bare
@@ -420,13 +523,13 @@ letters belong to that Surface's own keymap (ADR-0006).
 
 | Key | Command | Spoken help phrase |
 |---|---|---|
-| Up / Down | Previous / next option | Widget-type layer (ADR-0004) |
 | Enter | Open the current option | "Enter: open the selected screen" |
 | L | Jump to Live Game | "L: go to Live Game" |
 | D | Jump to Decks | "D: go to Decks" |
 | C | Jump to Cards | "C: go to Cards" |
 | R | Jump to Replays | "R: go to Replays" |
 | S | Jump to Settings | "S: go to Settings" |
+| Up / Down | Previous / next option | Widget-type layer (ADR-0004) |
 | Home / End | First / last option | Universal layer (ADR-0004) |
 | Escape / Backspace | Back | Announced no-op at the root (ADR-0004) |
 | PageUp / PageDown, Tab / Shift+Tab, Ctrl+F | Announced no-op | Slot defaults (ADR-0010) |
@@ -448,20 +551,29 @@ but it is not a Home behavior — it is app-wide (see
 
 ## Live Game
 
-**Widget type:** Horizontal list with zones (ADR-0004, ADR-0010).
+**Widget type:** Horizontal list with zones — game state moves sideways
+(ADR-0004, ADR-0010, ADR-0017).
 
 **Reached and left:** Screen jump from Home (`L`, or Enter on option 1), or the
-system-wide hotkey Ctrl+Shift+L (landing on Remaining Deck). Back goes Home
-(ADR-0006).
+system-wide hotkey Ctrl+Shift+L (landing on Remaining Deck during a game).
+Back goes Home (ADR-0006). Remaining Deck is the first zone, so the first
+visit lands there; later visits find the zone as left (ADR-0007).
 
-**Window title:** `Live Game — StoneReader` (ADR-0006).
-**Entry utterance:** the zone's context-entry utterance —
-`"{Zone label}, {title}, {position} of {count}"`, degrading to
-`"{Zone label}: empty"` when the zone holds nothing, which is also what a Live
-Game with no game in progress sounds like (ADR-0007). Labels carry **no turn
-prefix**: live, the turn is ambient — the client announces it — and the Replay
-Viewer's turn-carrying label exists only because turn stepping changes what
-every zone means (ADR-0013).
+**Window title:** `Live Game — StoneReader` (ADR-0006). Heading: "Live Game"
+(ADR-0017).
+**Entry utterance:**
+
+- **No game in progress:** `"Live Game, waiting for a game"` (ADR-0017).
+  Live Game says what it is waiting for instead of landing on an empty zone.
+- **During a game:** the zone's context-entry utterance —
+  `"{Zone label}, {title}, {position} of {count}"`, or `"{Zone label}: empty"`
+  for an empty zone (ADR-0007, ADR-0017). Labels carry **no turn prefix**:
+  live, the turn is ambient — the client announces it — and the Replay
+  Viewer's turn prefix exists only because turn stepping changes what every
+  zone means (ADR-0013).
+
+When a game starts or ends, the zones fill or empty silently; the next key
+reads the new state (ADR-0017).
 
 **Zones.** Live Game speaks the Replay Viewer's full dialect — ADR-0004's "one
 dialect, live or replayed", completed by ADR-0013: the same fourteen navigable
@@ -509,27 +621,23 @@ one-item list zones (ADR-0003). Every zone follows the Replay Viewer's
 card-zone and hero-zone formats, with these live divergences (line 0 is the
 title verbatim, ADR-0007):
 
-*Remaining Deck* — title `"{Card name}, {n} copy"` / `"…, {n} copies"`
-(ADR-0007's worked example). Lines: 1 `"{p} percent to draw"` — nearest whole
-percent, copies remaining over cards remaining (ADR-0013); 2 `"{cost} mana"`;
-3 `"{Type}"`; 4 `"{Attack} attack, {Health} health"` for minions and weapons;
-5 card text.
+*Remaining Deck* — cards in printed-mana order, then name. Title
+`"{Card name}, {n} copy"` / `"…, {n} copies"` (ADR-0007's worked example).
+Lines: 1 `"{p} percent to draw"` — nearest whole percent, copies remaining
+over cards remaining (ADR-0013); 2 `"{cost} mana"`; 3 `"{Type}"`;
+4 `"{Attack} attack, {Health} health"` for minions and weapons; 5 card text.
 
 **Keys**
 
 | Key | Command | Spoken help phrase |
 |---|---|---|
-| Left / Right | Previous / next item in the zone | Widget-type layer (ADR-0004) |
-| Up / Down | Previous / next detail line | Widget-type layer (ADR-0004) |
-| Shift+Up / Shift+Down | Repeat line / read to last line | Widget-type layer (ADR-0004, ADR-0007) |
-| Home / End | First / last item in the zone | Universal layer (ADR-0004) |
 | B / G | Jump to your board / opponent board | "B: your minions" / "G: opponent minions" (ADR-0003) |
 | C | Jump to your hand | "C: your hand" (ADR-0003) |
 | Shift+C | Announced no-op — "The game announces the opponent's hand" | "Shift+C: the game announces the opponent's hand" — *this spec's amendment*: live opponent-hand information is the client's |
+| D | Jump to Remaining Deck | "D: jump to Remaining Deck" (ADR-0009's worked example) |
 | S / Shift+S | Jump to your secrets / opponent secrets | "S: your secrets" / "Shift+S: opponent secrets" |
 | V / F | Jump to your hero / opponent hero | "V: your hero" / "F: opponent hero" |
 | W / Shift+W | Jump to your weapon / opponent weapon | "W: your weapon" / "Shift+W: opponent weapon" |
-| D | Jump to Remaining Deck | "D: jump to Remaining Deck" (ADR-0009's worked example) |
 | P / Shift+P | Jump to your played / opponent played | "P: cards you played" / "Shift+P: cards your opponent played" |
 | N / Shift+N | Jump to your drawn / opponent drawn | "N: cards you drew" / "Shift+N: cards your opponent drew" |
 | A | Speak your mana | "A: how much mana you have" — speak-only, never changes the zone (ADR-0003, ADR-0007) |
@@ -539,22 +647,33 @@ percent, copies remaining over cards remaining (ADR-0013); 2 `"{cost} mana"`;
 | Shift+R | Speak opponent hero power | "Shift+R: your opponent's hero power" — speak-only |
 | 1–9 | Jump to position 1–9 in the current zone | "1 to 9: jump to that position in the list" (ADR-0003, ADR-0004) |
 | 0 | Jump to position 10 | "0: jump to the tenth item" (ADR-0004) |
-| Y | Announced no-op — "No events in a live game" | ADR-0013: play history is the client's feature; HSA's in-game `y` speaks it there |
-| F5 / F6 | Announced no-op — "No events in a live game" | ADR-0015: event stepping is replay-only; the phrase is Y's |
-| PageUp / PageDown | Announced no-op — "No turns to step in a live game" | ADR-0013: there is no **Live game timeline** |
-| Enter | Announced no-op | *This spec's ruling* under ADR-0004's requirement that every Surface assign Enter an action or an announced no-op; matches ADR-0012's Statistics precedent |
-| L | Announced no-op — "No game audio during a live game" | *This spec's ruling*: ADR-0008's listen-key surface enumeration (Cards, deck contents, replay zones) deliberately excludes Live Game, where the real client is already producing its own audio; the phrase satisfies ADR-0004's no-silent-universal-key rule |
+| Y | Announced no-op — "No events in a live game" | "Y: no events in a live game" — ADR-0013: play history is the client's feature; HSA's in-game `y` speaks it there |
+| F5 / F6 | Announced no-op — "No events in a live game" | "F5: no events in a live game" / "F6: no events in a live game" — ADR-0015: event stepping is replay-only |
+| Left / Right | Previous / next item in the zone | Widget-type layer (ADR-0004) |
+| Up / Down | Previous / next detail line | Widget-type layer (ADR-0004) |
+| Shift+Up / Shift+Down | Repeat line / read to last line | Widget-type layer (ADR-0004, ADR-0007) |
+| Home / End | First / last item in the zone | Universal layer (ADR-0004) |
+| Enter | Announced no-op — "Nothing to do here" | Slot no-op, not a help option — see [Enter in v1](#enter-in-v1) (ADR-0017) |
+| PageUp / PageDown | Announced no-op — "No turns to step in a live game" | Slot no-op, not a help option — ADR-0013: there is no **Live game timeline** |
+| L | Announced no-op — "No game audio during a live game" | Slot no-op — *this spec's ruling*: ADR-0008's listen-key surface enumeration (Cards, deck contents, replay zones) deliberately excludes Live Game, where the real client is already producing its own audio |
 | Tab / Shift+Tab, Ctrl+F | Announced no-op | Slot defaults (ADR-0010) |
 
-Pressing a zone letter for a zone currently holding nothing speaks the
-constant "No {zone} on this screen" — every time, no press counting, never
-silence (ADR-0009). Speak-only queries follow the `"{Subject}, {value}"`
-shape — "Your mana, 4 of 10" (ADR-0007); with no game in progress they speak
-the constant "No game in progress" (*this spec's ruling*, same
-constant-no-op construct). Letters HSA binds in-game that have no StoneReader
-meaning here are not registered and therefore stay silent (ADR-0004: unbound
-non-universal keys stay silent). Delete and Space are unbound here and
-likewise silent.
+**During a game,** an empty zone is a place: its letter switches to it and
+speaks `"{Zone label}: empty"`, and arrows, Home/End, and digits there repeat
+it (ADR-0017). Speak-only queries follow the `"{Subject}, {value}"` shape —
+"Your mana, 4 of 10", "Opponent deck, 22 cards", "Your hero power, Fireblast"
+(ADR-0007).
+
+**With no game in progress** (ADR-0017), every zone letter, speak-only query,
+Shift+C, Y, F5, F6, digit, Enter, PageUp/PageDown, arrow, Home/End, and
+Shift+Down speaks "Waiting for a game", and the zone does not change.
+Shift+Up rereads "Live Game, waiting for a game". L, Tab, and Ctrl+F keep
+their usual responses ("No game audio during a live game", "No groups on this
+screen", "No search on this screen").
+
+Letters HSA binds in-game that have no StoneReader meaning here are not
+registered and therefore stay silent (ADR-0004: unbound non-universal keys
+stay silent). Delete and Space are unbound here and likewise silent.
 
 **Speech:** Zone switches fire the same context-entry utterance as any other
 landing (ADR-0007). Lane-2 narration of the game arrives from the Narrator, not
@@ -571,80 +690,172 @@ Hearthstone log path (ADR-0011).
 
 ## Decks
 
-**Widget type:** Horizontal list, single zone. *This spec's ruling:* ADR-0007's
-worked utterance for this Surface — "Aggro Shaman deleted. …, Burn Mage, 2 of 3"
-— carries a position, and vertical menus get no position ("menus are small and
-stable", ADR-0007), so the utterance is determinative. "Option row" in ADR-0006
-and ADR-0012 is informal vocabulary, not a widget-type claim — ADR-0012
-describes the Statistics rows the same way and Statistics is a horizontal list.
-The two action rows are therefore ordinary items whose Enter acts, which is
-exactly what Enter does on the current item (ADR-0004). (The Surface is named
+**Widget type:** Vertical menu — records move up and down (ADR-0017,
+superseding this spec's earlier horizontal-list ruling). (The Surface is named
 Decks; see [Naming](#announcement-grammar).)
 
 **Reached and left:** Screen jump from Home (`D`, or Enter on option 2); no
 system-wide hotkey — Decks is not a mid-game surface and Home reaches it in two
-keys (ADR-0006). Back goes Home.
+keys (ADR-0006). Back goes Home. Back from a Deck page or Import Deck reveals
+Decks as left (ADR-0007).
 
 **Window title:** `Decks — StoneReader` (ADR-0006, using the Home option's
-name).
-**Entry utterance:** `"Decks, {title}, {position} of {count}"`, or
-`"Decks: empty"` (ADR-0007).
+name). Heading: "Decks" (ADR-0017).
+**Entry utterance:** `"Decks, {current option}"` (ADR-0007) — "Decks, All
+decks, 3 wins, 3 losses, 1 tie". Decks is never empty: All decks and Import
+deck… are always present.
 
-**Rows,** in order: every saved deck, then the two action rows **"Import
-deck…"** and **"Statistics…"** last (ADR-0006 places Import Deck inside Decks;
-ADR-0012 places Statistics beside it).
+**Options,** in order (ADR-0017):
 
-*Deck rows* — title `"{Deck name}"` (ADR-0007: the shortest distinguishing
-string; ADR-0007's example utterance uses the bare name). Lines: 1
-`"{Class}, {Format}"`; 2 `"{n} cards"`; 3 `"Last played {date}"` or `"Never
-played"`.
+| Order | Option title | Shown | Enter |
+|---|---|---|---|
+| 1 | `"All decks, {record}"` | Always | Opens the All decks [Deck](#deck) page — the whole **Stats corpus** |
+| 2 | `"{Deck name}[, {Class}][, Wild][, {n} cards], {record}"` | One per saved deck, newest first | Opens that deck's Deck page |
+| 3 | `"Other games, {record}"` | Only when the corpus holds games no saved deck counts | Opens the Other games Deck page |
+| 4 | `"Import deck…"` | Always | Drills into [Import Deck](#import-deck) (ADR-0006) |
 
-*Action rows* — title is the row label; no detail lines. Enter drills down.
+A saved deck's title says the class only when the name does not already
+contain it, "Wild" only for Wild decks, and the card count only when the deck
+does not hold 30 — "Blood Control, Death Knight, Wild, 29 cards, 2 wins, 0
+losses, 1 tie"; "Odd Hunter, 1 win, 1 loss"; "Empty Mage, no games yet"
+(ADR-0017).
+
+**Records** (ADR-0012, ADR-0017). A record reads `"{W} wins, {L} losses"`,
+appending `", {T} ties"` only when nonzero, with counts agreeing with their
+nouns ("1 win, 1 loss, 1 tie"); a record with no games reads `"no games yet"`.
+Records are computed from the replay store on every view — no caching, no
+persisted aggregates. They count the **Stats corpus**: live-recorded games are
+members by default, imported **Replays** are not but can join, and Space on
+Replays or Import Replays' toggle sets membership (ADR-0012, ADR-0014). A game
+counts under a saved deck when it is a constructed game attributed to that
+deck's `deck_id`; the deck name is snapshotted at save time, so editing a deck
+keeps its history (ADR-0012). Every other corpus game is in **Other games**:
+unattributed games, games whose saved deck was deleted, and arena and
+Battlegrounds games, which play no saved deck. All decks always equals the
+saved decks plus Other games (ADR-0017). An imported replay is counted from
+its own recorded perspective — a replay recorded from the opponent's side
+attributes the wrong side's result; the toggle is the remedy, not detection
+(ADR-0012, documented not solved).
 
 **Keys**
 
 | Key | Command | Spoken help phrase |
 |---|---|---|
-| Left / Right | Previous / next deck | Widget-type layer (ADR-0004) |
-| Up / Down | Previous / next detail line | Widget-type layer (ADR-0004) |
-| Home / End | First / last row | Universal layer (ADR-0004) |
-| Enter | Open the deck's contents; on an action row, drill into it | "Enter: open the selected deck" |
+| Enter | Open the current option | "Enter: open the selected deck" |
+| C | Copy the focused deck's code to the clipboard | "C: copy this deck's code" |
 | Delete | Arm delete, then delete on the second press | "Delete: delete this deck, press twice" (ADR-0004) |
 | Shift+Delete | Delete without confirmation | "Shift+Delete: delete this deck without asking" (ADR-0004) |
-| C | Copy the deck code to the clipboard | "C: copy this deck's code" |
+| Up / Down | Previous / next option | Widget-type layer (ADR-0004) |
+| Home / End | First / last option | Universal layer (ADR-0004) |
 | PageUp / PageDown, Tab / Shift+Tab, Ctrl+F, L | Announced no-op | Slot defaults (ADR-0010) |
 
-*This spec's ruling on surface letters:* surface-layer letter bindings are
-available on any Surface, not only on vertical menus, subject to ADR-0003's
-standing obligation to check the letter against HSA first — the Replay Viewer's
-own speak-only queries (A, R, Shift+A, …) are ADR-0003's precedent for non-zone
-letters on a horizontal list. `C` is assigned here because HSA's in-game
-`c` ("look at your hand") has no meaning on a deck-management Surface, and HSA's
-Collection Manager `C` ("jump to add cards screen") belongs to deck editing,
-which does not exist in v1 (checked against
-[the HSA command reference](research/hsa-commands-reference.md)). Space is
-unbound here and therefore silent.
+On All decks, Other games, and Import deck…, C says "Nothing to copy here"
+and Delete and Shift+Delete say "Nothing to delete here" (ADR-0017).
 
-**Speech:** Delete confirms as `"{Deck name} deleted"` followed by a re-fired
-context-entry utterance, because the cursor's content changed. Copy is
+*This spec's ruling on surface letters:* surface-layer letter bindings are
+available on any Surface, subject to ADR-0003's standing obligation to check
+the letter against HSA first — the Replay Viewer's own speak-only queries (A,
+R, Shift+A, …) are ADR-0003's precedent for non-zone letters. `C` is assigned
+here and on the [Deck](#deck) page because HSA's in-game `c` ("look at your
+hand") has no meaning on a deck-management Surface, and HSA's Collection
+Manager `C` ("jump to add cards screen") belongs to deck editing, which does
+not exist in v1 (checked against
+[the HSA command reference](research/hsa-commands-reference.md)). Left/Right
+and Space are unbound here and therefore silent.
+
+**Speech:** Delete arms with "Press Delete again to delete {Deck name}" and
+confirms as `"{Deck name} deleted"` followed by a re-fired context-entry
+utterance, because the option under the cursor changed (ADR-0007). Copy is
 cursor-neutral, so it gets the confirmation alone: `"Deck code copied"`
 (ADR-0007).
 
 **Audio:** None on the Surface itself; L is an announced no-op here because the
-rows are decks, not cards (ADR-0008, ADR-0010).
+options are records, not cards (ADR-0008, ADR-0010).
 
-**Settings that affect it:** None.
+**Settings that affect it:** Replay retention prunes the store the records are
+computed over (ADR-0011, ADR-0012).
+
+### Deck
+
+**Widget type:** Vertical menu — the deck page (ADR-0017).
+
+**Reached and left:** Drill-down from Decks (Enter on All decks, a saved deck,
+or Other games) or from [Replays](#replays) (D on a game played with a saved
+deck). Back pops one level to whichever Surface opened it (ADR-0006). Every
+open starts at the first option, unarmed; back from Deck detail or Games finds
+the page as left (ADR-0017).
+
+**Window title:** `{Subject} — StoneReader`, where the subject is the saved
+deck's name, "All decks", or "Other games" — `Odd Hunter — StoneReader`.
+Heading: "Decks › Odd Hunter", or "Replays › Odd Hunter" when opened with D
+(ADR-0017).
+**Entry utterance:** `"{Subject}, {current option}"` — "Odd Hunter, Cards,
+30"; "All decks, Games, 1 win, 0 losses, 100 percent" (ADR-0007, ADR-0017).
+
+**Options,** in order (ADR-0017):
+
+| Option title | Shown | Enter |
+|---|---|---|
+| `"Cards, {n}"` | Saved decks only | Drills into [Deck detail](#deck-detail-deck-contents) |
+| `"Games, {record}, {p} percent"`, or `"Games, none yet"` with no games | Always | Opens [Games](#games) for every game the record counts; with no games, announces "No games yet" and stays |
+| `"Last 20 games, {record}"` | Only when the record holds more than 20 games | Opens Games for the newest 20 |
+| `"Versus {Class}, {record}"` | One per opponent class with a game, most games first | Opens Games for the games against that class |
+| `"Copy deck code"` | Saved decks only | Copies the deck code: "Deck code copied" |
+| `"Delete deck"` | Saved decks only | Arms: "Press Enter again to delete {Deck name}"; the second Enter deletes |
+
+**Every record row opens the games behind it** (ADR-0017): the Games list it
+opens holds exactly the games its record counts. The win rate is wins over
+wins plus losses, in whole percent with halves rounding up; ties and unknown
+results count as games but stay out of the rate, and the percent is said only
+when some game was decided — "Games, 2 wins, 1 loss, 1 tie, 67 percent";
+"Games, 0 wins, 0 losses" when every result is unknown (ADR-0012, ADR-0017).
+The last-20 window is fixed (ADR-0012). The All decks and Other games pages
+have no Cards, Copy deck code, or Delete deck options.
+
+**Keys**
+
+| Key | Command | Spoken help phrase |
+|---|---|---|
+| Enter | Open or act on the current option | "Enter: open the selected option" |
+| Delete | Arm delete of the page's deck, then delete on the second press | "Delete: delete this deck, press twice" (ADR-0004) |
+| Shift+Delete | Delete the page's deck without confirmation | "Shift+Delete: delete this deck without asking" (ADR-0004) |
+| C | Copy the page's deck code | "C: copy this deck's code" |
+| Up / Down | Previous / next option | Widget-type layer (ADR-0004) |
+| Home / End | First / last option | Universal layer (ADR-0004) |
+| PageUp / PageDown, Tab / Shift+Tab, Ctrl+F, L | Announced no-op | Slot defaults (ADR-0010) |
+
+Delete, Shift+Delete, and C act on the page's deck from any option. On the
+All decks and Other games pages they say "Nothing to delete here" and
+"Nothing to copy here" (ADR-0017). Left/Right and Space are unbound and
+silent.
+
+**Speech:** Delete arms with "Press Delete again to delete {Deck name}"; Enter
+on Delete deck arms with "Press Enter again to delete {Deck name}"; each needs
+the same key again, and any cursor movement disarms (ADR-0004). Deleting
+confirms `"{Deck name} deleted"` and pops one level — to Decks, or to Replays
+when the page was opened with D — followed by that Surface's context-entry
+utterance as a continuation: "Odd Hunter deleted", then "Decks, Other games,
+2 wins, 1 loss, 1 tie" (ADR-0007, ADR-0017). The deleted deck's games move to
+Other games. Copy is cursor-neutral: "Deck code copied" alone (ADR-0007).
+
+**Audio:** None.
+
+**Settings that affect it:** Replay retention prunes the store the records are
+computed over (ADR-0011, ADR-0012).
 
 ### Deck detail (deck contents)
 
-**Widget type:** Horizontal list, single zone.
+**Widget type:** Horizontal list, single zone — cards move sideways
+(ADR-0017).
 
-**Reached and left:** Drill-down from Decks (Enter on a deck row); back pops one
-level to Decks (ADR-0006).
+**Reached and left:** Drill-down from a saved deck's [Deck](#deck) page (Enter
+on "Cards, {n}"); back pops one level to that page (ADR-0006, ADR-0017).
 
-**Window title:** `{Deck name} — StoneReader` (ADR-0006).
-**Entry utterance:** `"{Deck name}, {title}, {position} of {count}"`, or
-`"{Deck name}: empty"` (ADR-0007).
+**Window title:** `{Deck name} cards — StoneReader` (ADR-0006, ADR-0017).
+Heading: "Decks › Odd Hunter › Cards".
+**Entry utterance:** `"{Deck name} cards, {title}, {position} of {count}"`, or
+`"{Deck name} cards: empty"` (ADR-0007, ADR-0017) — "Odd Hunter cards, Arcane
+Shot x2, 1 of 15".
 
 **Rows:** the deck's cards, sorted by printed mana cost ascending, then name
 without case distinctions. Copy counts stay together on one row. Sorting is a
@@ -662,20 +873,80 @@ text.
 
 | Key | Command | Spoken help phrase |
 |---|---|---|
+| L | Open the **Sounds menu** for this card | "L: listen to this card's sounds" (ADR-0008) |
 | Left / Right | Previous / next card | Widget-type layer (ADR-0004) |
 | Up / Down | Previous / next detail line | Widget-type layer (ADR-0004) |
 | Home / End | First / last card | Universal layer (ADR-0004) |
-| L | Open the **Sounds menu** for this card | "L: listen to this card's sounds" (ADR-0008) |
-| Enter | Announced no-op | *This spec's ruling* — see [Enter in v1](#enter-in-v1) |
+| Enter | Announced no-op — "Nothing to do here" | Slot default — see [Enter in v1](#enter-in-v1) (ADR-0017) |
 | PageUp / PageDown, Tab / Shift+Tab, Ctrl+F | Announced no-op | Slot defaults (ADR-0010) |
 
 **Deck detail is read-only in v1.** *This spec's ruling:* there is no card
 add, remove, or reorder, and Delete is unbound here (and therefore silent).
 ADR-0012's "editing a saved deck keeps its history" is a robustness statement
 about attribution surviving a future editing capability, not evidence that one
-exists; decks enter the app by import and leave it by delete.
+exists; decks enter the app by import and leave it by delete. Copying and
+deleting a deck happen on its Deck page.
 
 **Audio:** L only, per the universal listen key (ADR-0008).
+
+### Games
+
+**Widget type:** Vertical menu (ADR-0017).
+
+**Reached and left:** Drill-down from a [Deck](#deck) page record row (Games,
+Last 20 games, or Versus {Class}); back pops one level to that page, found as
+left (ADR-0006, ADR-0017). Every open starts at the newest game, unarmed; back
+from the Replay Viewer finds the list as left (ADR-0017).
+
+**Window title:** `{Context label} — StoneReader` — `Odd Hunter games —
+StoneReader`. Heading: "Decks › Odd Hunter › Games" (ADR-0017).
+**Context label** — names the selection (ADR-0017):
+
+| Record row | Saved deck page | All decks page | Other games page |
+|---|---|---|---|
+| Games | "{Deck name} games" | "All games" | "Other games" |
+| Last 20 games | "{Deck name}, last 20 games" | "All games, last 20 games" | "Other games, last 20 games" |
+| Versus {Class} | "{Deck name} versus {Class}" | "All games versus {Class}" | "Other games versus {Class}" |
+
+**Entry utterance:** `"{Context label}, {current option}"` — "Odd Hunter
+games, Won against Mage in 8 turns, today 3:36 PM". A list emptied by deletion
+says `"{Context label}: empty"` — "Odd Hunter versus Warrior: empty"
+(ADR-0007, ADR-0017).
+
+**Options:** the games the record counts, newest first. Each title is the
+[Replays](#replays) row title, without the deck name when the list is one
+saved deck's — "Won against Warrior in 8 turns, Wednesday"; on All decks and
+Other games lists the deck name stays — "Won against Mage in 8 turns, today
+3:36 PM, Odd Hunter" (ADR-0017). A Versus {Class} list already names the
+class, so its rows leave it out, and the outcome reads "Won", "Lost",
+"Tied", or "Result unknown" — "Won in 8 turns, Wednesday" (ADR-0017). There
+is no import option.
+
+**Keys**
+
+| Key | Command | Spoken help phrase |
+|---|---|---|
+| Enter | Open this replay in the Replay Viewer | "Enter: open this replay" |
+| Delete | Arm delete, then delete on the second press | "Delete: delete this replay, press twice" (ADR-0004) |
+| Shift+Delete | Delete without confirmation | "Shift+Delete: delete this replay without asking" (ADR-0004) |
+| Up / Down | Previous / next game | Widget-type layer (ADR-0004) |
+| Home / End | First / last game | Universal layer (ADR-0004) |
+| PageUp / PageDown, Tab / Shift+Tab, Ctrl+F, L | Announced no-op | Slot defaults (ADR-0010) |
+
+Space and D are unbound here and therefore silent (ADR-0017): a stats toggle
+would remove the row from under the cursor, and the Deck Surface is already
+beneath this list on the stack, where ADR-0006 forbids a Surface appearing
+twice. Left/Right are silent.
+
+**Speech:** As on Replays: Delete arms with "Press Delete again to delete
+this replay" and confirms "Replay deleted" followed by the re-fired
+context-entry utterance (ADR-0007). The Deck page's records follow the
+deletion. A replay that cannot load says "Could not open replay; the file may
+be invalid" and stays.
+
+**Audio:** None.
+
+**Settings that affect it:** Replay retention (ADR-0011).
 
 ### Import Deck
 
@@ -687,31 +958,37 @@ the clipboard **Offer**, which resets the stack to `[Home, Decks, Import
 Deck]` with the code pre-filled (ADR-0014). Either way back pops one level to
 Decks; so does a completed import, where the new deck is (ADR-0006).
 
-**Window title:** `Import Deck — StoneReader` (ADR-0006).
+**Window title:** `Import Deck — StoneReader` (ADR-0006). Heading: "Decks ›
+Import Deck" (ADR-0017).
 **Entry utterance:** `"Import Deck, {current option}"` (ADR-0007). The Surface
 never lands the User in Text mode on entry (ADR-0004).
 
 **Options,** in order (ADR-0004's worked example gives exactly these two):
 
-1. `"Deck code, edit text"` — Enter enters Text mode on the field.
+1. `"Deck code, edit text"` — Enter enters Text mode on the field. Committing
+   or abandoning the field re-lands on Import Deck.
 2. `"Import"` — Enter imports the code in the field.
 
 **Keys**
 
 | Key | Command | Spoken help phrase |
 |---|---|---|
-| Up / Down | Previous / next option | Widget-type layer (ADR-0004) |
 | Enter | On the field, start typing; on Import, import the code | "Enter: edit this field, or run this action" |
+| Up / Down | Previous / next option | Widget-type layer (ADR-0004) |
 | Escape | Leave Text mode without committing, or back | Universal layer; Escape is never dead (ADR-0004) |
 | Home / End | First / last option | Universal layer (ADR-0004); in Text mode, the ends of the field (ADR-0011) |
 | F1 | Help — in Text mode, the rescue phrase | "F1: help for this screen" (ADR-0009) |
 | Left / Right | Unbound in navigation; caret movement with spoken characters in Text mode | ADR-0004, ADR-0011 |
 | PageUp / PageDown, Tab / Shift+Tab, Ctrl+F, L | Announced no-op | Slot defaults (ADR-0010) |
 
-**Speech:** Import confirms as `"{Deck name} imported"` (ADR-0007's worked
-example). *This spec's decision:* a failed import announces the failure and
-keeps the field's contents, patterned on the refused-commit shape ADR-0011
-specced for an invalid path.
+**Speech:** The form has no name field, so an imported deck is named for its
+class — "{Class} deck", numbered "{Class} deck 2" when that name is taken.
+Import confirms as `"{Deck name} imported"` (ADR-0007's worked example) —
+"Death Knight deck imported" — and pops to Decks, whose context-entry
+utterance follows as a continuation. *This spec's decision:* a code that is
+not a deck code is refused with "Deck code not recognized", and the field
+keeps its contents, patterned on the refused-commit shape ADR-0011 specced
+for an invalid path.
 
 **Audio:** None.
 
@@ -731,9 +1008,17 @@ Ctrl+Shift+C. Back goes Home. The menu keeps its cursor when revealed again.
 
 ### Card browser
 
-**Widget type:** Horizontal list, single zone. Cards are ordered by printed
-mana cost ascending, then name without case distinctions. Equal-cost copies
-with identical names use DBF ID as a stable final ordering.
+**Widget type:** Horizontal list, single zone — cards move sideways
+(ADR-0017). Cards are ordered by printed mana cost ascending, then name
+without case distinctions.
+
+**Which cards** (ADR-0017). Card Browser lists the cards a deck can hold:
+collectible heroes, locations, minions, spells, and weapons. Hero skins,
+other cosmetics, and internal cards whose names are bracketed tags
+("[CORE 2024] …") are excluded. Each card name appears once: a printing
+from a named set beats one from an unnamed placeholder set, a current
+printing beats its Classic-format copy, and otherwise the newest printing
+wins.
 
 **Reached and left:** Enter on a class, Neutral, or All cards in Cards. Back
 returns to Cards at the previous menu position. Tab and Shift+Tab cycle the
@@ -741,7 +1026,10 @@ same order as the class menu. Mana and search filters persist across classes.
 Choosing a menu option or changing a filter resets the card and detail cursors.
 Abandoning search or returning from help or Sounds menu keeps the current card.
 
-**Window title:** `Card Browser — StoneReader`.
+**Window title:** the class choice, without the mana or search filter —
+`Hunter cards — StoneReader`, `All cards — StoneReader`. Heading:
+"Cards › Hunter cards". Tab and Shift+Tab retitle the window and heading in
+place (ADR-0017).
 **Entry utterance:** `"{Context label}, {title}, {position} of {count}"`, where
 the context label carries the active filter and search state (ADR-0007). Empty
 results degrade to `"{Context label}: empty"`, which dissolves a separate "No
@@ -767,24 +1055,27 @@ around it.
 
 **Rows:** cards. Title `"{Card name}"` — the name suffices here (ADR-0007's own
 example). Lines: 1 `"{cost} mana"`; 2 `"{Type}"`; 3 `"{Attack} attack,
-{Health} health"` for minions and weapons, `"{Durability} durability"` for
-weapons' second stat; 4 card text; 5 `"{Class}"`; 6 `"{Rarity}"`; 7 `"{Set}"`.
+{Health} health"` for minions, `"{Attack} attack, {Durability} durability"`
+for weapons; 4 card text, as the collection shows it; 5 `"{Class}"`;
+6 `"{Rarity}"`; 7 `"{Set}"` — the game's own set name ("The Grand
+Tournament", "Cataclysm"), in title case where the game styles it in capitals
+("Titans"), and no line at all for a set the game does not name (ADR-0017).
 One fact per line, spoken text equal to displayed text (ADR-0007).
 
 **Keys**
 
 | Key | Command | Spoken help phrase |
 |---|---|---|
-| Left / Right | Previous / next card | Widget-type layer (ADR-0004) |
-| Up / Down | Previous / next detail line | Widget-type layer (ADR-0004) |
-| Home / End | First / last card in the whole filtered list | Universal layer (ADR-0004) — list-scoped, not page-scoped; see the ruling below the table |
-| Tab / Shift+Tab | Next / previous class filter | "Tab: jump to the next class" (ADR-0004, mirroring HSA's Collection Manager — [command reference](research/hsa-commands-reference.md)) |
+| Tab / Shift+Tab | Next / previous class filter | "Tab: jump to the next class" / "Shift+Tab: jump to the previous class" (ADR-0004, mirroring HSA's Collection Manager — [command reference](research/hsa-commands-reference.md)) |
 | Ctrl+F | Search cards | "Ctrl+F: search for a card" (ADR-0004) |
 | 0–8 | Filter by that exact mana cost; re-press clears | "0 to 8: show only cards of that mana cost" (ADR-0003, ADR-0004) |
 | 9 | Filter to 9 mana or more; re-press clears | "9: show only cards costing 9 or more" (ADR-0004) |
-| PageUp / PageDown | Move ten cards back / forward, clamped at the ends | "Page Down: jump ten cards forward" (ADR-0004's paging slot) |
+| PageUp / PageDown | Move ten cards back / forward, clamped at the ends | "Page Up: jump ten cards back" / "Page Down: jump ten cards forward" (ADR-0004's paging slot) |
 | L | Open the **Sounds menu** for this card | "L: listen to this card's sounds" (ADR-0008) |
-| Enter | Announced no-op | *This spec's ruling* — see [Enter in v1](#enter-in-v1) |
+| Left / Right | Previous / next card | Widget-type layer (ADR-0004) |
+| Up / Down | Previous / next detail line | Widget-type layer (ADR-0004) |
+| Home / End | First / last card in the whole filtered list | Universal layer (ADR-0004) — list-scoped, not page-scoped; see the ruling below the table |
+| Enter | Announced no-op — "Nothing to do here" | Slot default — see [Enter in v1](#enter-in-v1) (ADR-0017) |
 
 *This spec's rulings on the two collection-paging keys.* **Home/End are
 list-scoped** — first and last of the whole filtered list — per ADR-0004's
@@ -809,49 +1100,75 @@ via the Sounds menu, ADR-0011).
 
 ## Replays
 
-**Widget type:** Horizontal list, single zone.
+**Widget type:** Vertical menu — records move up and down (ADR-0017,
+superseding this spec's earlier horizontal-list ruling).
 
 **Reached and left:** Screen jump from Home (`R`, or Enter on option 4) or the
-system-wide hotkey Ctrl+Shift+R. Back goes Home (ADR-0006).
+system-wide hotkey Ctrl+Shift+R. Back goes Home (ADR-0006). Back from the
+Replay Viewer, Import Replays, or a Deck page opened with D reveals Replays as
+left (ADR-0007).
 
-**Window title:** `Replays — StoneReader` (ADR-0006).
-**Entry utterance:** `"Replays, {title}, {position} of {count}"`, or
-`"Replays: empty"` (ADR-0007).
+**Window title:** `Replays — StoneReader` (ADR-0006). Heading: "Replays"
+(ADR-0017).
+**Entry utterance:** `"Replays, {current option}"` (ADR-0007) — "Replays, Won
+against Mage in 8 turns, today 3:36 PM, Odd Hunter". Replays is never empty:
+"Import replays…" is always present.
 
-**Rows:** finished games, **most recent first** — *this spec's decision*; row
-order is per-surface spec territory, and ADR-0012's most-recently-played
-ordering on Statistics is the precedent — then the action row **"Import
-replays…"** last, the Decks action-row idiom: the flow ends where its results
-appear (ADR-0014).
+**Options:** stored games, **newest first**, then **"Import replays…"** last —
+the flow ends where its results appear (ADR-0014, ADR-0017).
 
-*Replay rows* — title
-`"{Result} versus {Opponent class}, {n} turns"` — ADR-0007 names this Surface as
-the case where "a replay row needs opponent/result/turn because bare names would
-all sound alike". Lines: 1 `"{Date}, {time}"`; 2 `"Played {Deck name}"` or
-`"Deck not detected"` (ADR-0012's attribution); 3 `"{Game type}, {Format}"`;
-4 `"Counted in stats"` / `"Not counted"` — membership shows as a detail line,
-never in the title (ADR-0012); 5 `"Live recorded"` / `"Imported"`.
+*Game options* — title (ADR-0017):
 
-*Action row* — title is the row label; no detail lines. Enter drills down.
+`"{Outcome} {Class} in {n} turns, {when}[, {deck}][, {game type}][, {format}][, imported][, not counted]"`
+
+Each part after the first is said only when it applies, so the usual case is
+short and the unusual is heard first (ADR-0007's distinguishability test,
+ADR-0017):
+
+| Part | Spoken |
+|---|---|
+| Outcome | "Won against", "Lost to", "Tied with", or "Result unknown against", then the opponent's class and the turn count — "Lost to Death Knight in 1 turn" |
+| when | Local time: "today 3:36 PM", "yesterday 9:10 PM", the bare weekday for two to six days ago ("Wednesday"), otherwise "August 9", with the year when it is not this year ("December 31, 2025"). Omitted when the time cannot be read |
+| deck | The deck name snapshotted when the game was saved, when the game is attributed to a deck (ADR-0012) |
+| game type | Only when not Ranked, spoken by family: "Practice" (against the AI), "Friendly" (a friendly challenge), "Tavern Brawl", "Battlegrounds", "Battlegrounds Duos", "Arena", "Underground Arena", "Duels", "Heroic Duels", "Mercenaries"; any other type in title case ("Casual"). Unknown values are omitted, never spoken as "Unknown" |
+| format | Only when not Standard: "Wild", "Classic", "Twist". Unknown values are omitted |
+| imported | For a game imported rather than recorded live |
+| not counted | For a game outside the **Stats corpus**. Membership rides in the title (ADR-0017, superseding ADR-0012's detail line) |
+
+Examples: "Won against Mage in 8 turns, today 3:36 PM, Odd Hunter"; "Lost to
+Death Knight in 1 turn, yesterday 9:10 PM, Casual, Wild, imported, not
+counted"; "Result unknown against Warrior in 5 turns, August 9, Practice".
+Games have no detail lines (ADR-0017).
 
 **Keys**
 
 | Key | Command | Spoken help phrase |
 |---|---|---|
-| Left / Right | Previous / next replay | Widget-type layer (ADR-0004) |
-| Up / Down | Previous / next detail line | Widget-type layer (ADR-0004) |
-| Home / End | First / last replay | Universal layer (ADR-0004) |
-| Enter | Open this replay in the Replay Viewer; on the action row, drill into Import Replays | "Enter: open this replay" (ADR-0006's drill-down, ADR-0014) |
+| Enter | Open this replay in the Replay Viewer; on "Import replays…", drill into Import Replays | "Enter: open this replay" (ADR-0006's drill-down, ADR-0014) |
 | Space | Count this game in your stats, or stop counting it | "Space: count this game in your stats" (ADR-0012) |
 | Delete | Arm delete, then delete on the second press | "Delete: delete this replay, press twice" (ADR-0004) |
 | Shift+Delete | Delete without confirmation | "Shift+Delete: delete this replay without asking" (ADR-0004) |
+| D | Open the [Deck](#deck) page of the saved deck this game was played with | "D: open this game's deck" (ADR-0017) |
+| Up / Down | Previous / next option | Widget-type layer (ADR-0004) |
+| Home / End | First / last option | Universal layer (ADR-0004) |
 | Ctrl+F | Announced no-op — "No search on this screen" | Slot default (ADR-0004); no ADR gives Replays a search |
 | PageUp / PageDown, Tab / Shift+Tab, L | Announced no-op | Slot defaults (ADR-0010) |
 
+**D follows the game to its deck** (ADR-0017): it drills into the Deck page
+of the saved deck the game is attributed to, or announces "No saved deck for
+this game" when the game is unattributed or its deck was deleted. On "Import
+replays…", Space says "Nothing to count here", Delete and Shift+Delete say
+"Nothing to delete here", and D says "Nothing to open here". Left/Right are
+silent.
+
 **Speech:** The Space toggle confirms verb-past and cursor-neutral —
 `"Included in stats"` / `"Excluded from stats"`, with no re-entry utterance
-(ADR-0012). Delete changes what is under the cursor, so its confirmation is
-followed by a re-fired context-entry utterance (ADR-0007).
+(ADR-0012); the title's "not counted" changes with it and is heard on the next
+arrival. Delete arms with "Press Delete again to delete this replay" and
+confirms "Replay deleted" — a replay title is too long to be a confirmation's
+object — followed by a re-fired context-entry utterance, because the option
+under the cursor changed (ADR-0007). A replay that cannot load says "Could
+not open replay; the file may be invalid" and stays.
 
 **Audio:** None on this Surface (ADR-0008 places audio in the Replay Viewer's
 events zone and on the listen key).
@@ -869,13 +1186,15 @@ one level to Replays. So does a completed import, where the imported replays
 are (ADR-0014).
 
 **Window title:** `Import Replays — StoneReader` (ADR-0006's template).
+Heading: "Replays › Import Replays" (ADR-0017).
 **Entry utterance:** `"Import Replays, {current option}"` (ADR-0007). The
 Surface never lands the User in Text mode on entry (ADR-0004).
 
 **Options,** in order (ADR-0014):
 
 1. `"Choose files, none chosen"`, becoming `"Choose files, {n} files chosen"`
-   — Enter opens the OS-native file dialog, multi-select, filtered to
+   ("1 file chosen", ADR-0017's count agreement) — Enter opens the
+   OS-native file dialog, multi-select, filtered to
    `.hsreplay`/`.xml`; the dialog's Cancel is the idiom's no-commit exit. The
    file field is ADR-0011's fifth value type: its editor is a delegated OS
    dialog (ADR-0014).
@@ -890,8 +1209,8 @@ Surface never lands the User in Text mode on entry (ADR-0004).
 
 | Key | Command | Spoken help phrase |
 |---|---|---|
-| Up / Down | Previous / next option | Widget-type layer (ADR-0004) |
 | Enter | On Choose files, open the file dialog; on the toggle, flip it; on Import, import the chosen files | "Enter: edit this field, or run this action" |
+| Up / Down | Previous / next option | Widget-type layer (ADR-0004) |
 | Escape / Backspace | Back | Universal layer (ADR-0004); the OS dialog's own Escape belongs to the OS dialog |
 | Home / End | First / last option | Universal layer (ADR-0004) |
 | PageUp / PageDown, Tab / Shift+Tab, Ctrl+F, L | Announced no-op | Slot defaults (ADR-0010) |
@@ -908,31 +1227,37 @@ only-when-nonzero economy).
 
 ## Replay Viewer
 
-**Widget type:** Horizontal list with zones (ADR-0003, ADR-0004, ADR-0010).
+**Widget type:** Horizontal list with zones — game state moves sideways
+(ADR-0003, ADR-0004, ADR-0010, ADR-0017).
 
-**Reached and left:** Drill-down from Replays (Enter on a replay row); back pops
-one level to Replays (ADR-0006).
+**Reached and left:** Drill-down from Replays or [Games](#games) (Enter on a
+game); back pops one level to whichever opened it (ADR-0006, ADR-0017).
+**Every open starts at the beginning:** the Events zone at the game's first
+event, with every other zone cursor reset. Back-reveal, from help or the
+Sounds menu, still finds the Replay Viewer as left (ADR-0017).
 
-**Window title:** `Replay Viewer — StoneReader` (ADR-0006).
+**Window title:** `Replay Viewer — StoneReader` (ADR-0006). Heading: the path
+that opened it — "Replays › Replay Viewer", or
+"Decks › Odd Hunter › Games › Replay Viewer" (ADR-0017).
 
-**Entry utterance:** *this spec's ruling* — the Replay Viewer's context label
-carries the turn the way Cards' label carries its filters:
-`"Turn {t}, {yours | opponent's}, {Zone label}"`. The full utterance is
-therefore
-`"Turn {t}, {yours | opponent's}, {Zone label}, {title}, {position} of {count}"`
-— "Turn 5, yours, Your board, Fireball, 1 of 3" — degrading to
-`"Turn {t}, {yours | opponent's}, {Zone label}: empty"`. It fires identically on
-every landing: drill-down from Replays, back-reveal, zone switch, orientation
-reread, **and turn step**. A turn step is an in-place rebuild — this spec
-extends ADR-0007's landing-route list with it, since a turn step changes what
-every zone holds exactly the way a filter change does on Cards — so route
-invariance holds: the same turn in the same zone always sounds the same. The
-shipped bespoke turn utterance ("Turn 5, your turn, 3 events.") is replaced.
+**Entry utterance:** the Replay Viewer's surface-wide context prefix is the
+turn, `"Your turn {t}"` or `"Opponent's turn {t}"`, and the context label is
+the zone label (ADR-0017). Landing, orientation reread, and in-place rebuilds
+— a turn step or Enter's event jump — speak
+`"{Prefix}, {Zone label}, {title}, {position} of {count}"`, or
+`"{Prefix}, {Zone label}: empty"`. A zone switch omits the prefix, because the
+turn did not change: `"{Zone label}, {title}, {position} of {count}"`.
+Opening a replay says "Your turn 1, Events, Game started, Mage versus
+Warrior, 1 of 11"; a landing mid-game says "Opponent's turn 3, Events,
+Threads of Despair revealed, 2 of 20"; pressing B then says "Your board,
+Bloodmage Thalnos, 1 of 3" (ADR-0017, superseding this spec's earlier
+`"Turn {t}, {yours | opponent's}, {Zone label}"` label).
 
 Zone cursors persist across switches, across turn steps, and across back-reveal
 (ADR-0007, ADR-0010) — with one amendment: the **events cursor is the replay
 position**, so a turn step repositions it to the new turn's first event
-(ADR-0015). Every other cursor keeps the unamended rule.
+(ADR-0015). Every other cursor keeps the unamended rule. Opening a replay
+resets them all (ADR-0017).
 
 **Zones.** The letters mirror HSA exactly, inconsistencies included: distinct
 letters for boards and heroes, a Shift modifier for hand/deck/weapon/secrets
@@ -984,12 +1309,22 @@ zones where turn is what distinguishes neighbors. Lines: 1 `"{cost} mana"`;
 (taunt, divine shield, frozen, damaged); 4 card text; 5 `"Created by {source}"`
 when a creation lineage exists.
 
+*Your deck* — cards in printed-mana order, then name, unknown cards last.
+
 *Hero zones* — title `"{Hero name}, {Health} health"`, plus `", {Armor} armor"`
-when nonzero. Lines: hero power, weapon, secrets count.
+when nonzero. Lines: hero power, weapon, and `"{n} secrets"` ("1 secret").
 
 *Events zone* — title is the Narrator's phrase for that **Game event**
-(ADR-0010 owns the phrasing seam). Lines: 1 `"Turn {t}"`; 2 the source card's
-title where the event has one.
+(ADR-0010 owns the phrasing seam): "You played Boar", "Opponent drew a card",
+"Game over, won". A turn change reads "Start of turn": the context prefix
+already names the side and number — "Opponent's turn 2, Events, Start of
+turn, 1 of 1" (ADR-0017). A reveal that only restates a draw or play at the
+same moment is not a separate event, and an enchantment wearing off is not
+an event. A spell cast from hand is played like a minion ("Opponent played
+Fireball"); a weapon that breaks reads "{Weapon} destroyed". A card created
+straight into a hand (The Coin) is drawn, in the events and the drawn zones
+alike. Lines: 1 `"Turn {t}"`; 2 the source card's title where the event has
+one.
 
 **Event scrubbing** (ADR-0015). The events zone is the Surface's **fine
 axis**: the selected event renders every other zone at the game just after
@@ -999,17 +1334,27 @@ board and watch it change event by event. A turn step lands the events
 cursor on the turn's **first** event, so a turn reads forward; the turn's
 last event carries the turn's final state, so stepping to it (or End in the
 events zone) reads the turn as it ended. At the turn's edges F5/F6 clamp
-and repeat the current title — turn boundaries are PageUp/PageDown's job.
+and repeat the current title — turn boundaries are PageUp/PageDown's job. In
+a turn with no events, F5/F6 say "Events: empty".
+
+**Enter follows the fact** (ADR-0017). In the Your played, Opponent played,
+Your drawn, and Opponent drawn zones, Enter moves the replay position to the
+event where the focused card was played or drawn — that event's turn, and
+that event in the events cursor — and lands in the Events zone on it, prefix
+first: "Your turn 1, Events, You played Boar, 4 of 11". The landing plays the
+event's sound like any event landing. A card played or drawn more than once
+(returned to hand and replayed) goes to the event on the turn its row names;
+twice in one turn, each row goes to its own event, the second row to the
+second play or draw. With no matching event, Enter says "No event for this
+card" and stays. In every other zone, and in an empty played or drawn zone,
+Enter is the announced no-op "Nothing to do here".
 
 **Keys**
 
 | Key | Command | Spoken help phrase |
 |---|---|---|
-| Left / Right | Previous / next item in the zone | Widget-type layer (ADR-0004) |
-| Up / Down | Previous / next detail line | Widget-type layer (ADR-0004) |
-| Shift+Up / Shift+Down | Repeat line / read to last line | Widget-type layer (ADR-0004, ADR-0007) |
-| Home / End | First / last item in the zone | Universal layer (ADR-0004) |
-| PageUp / PageDown | Previous / next turn | "Page Down: go to the next turn" — turn stepping is this Surface's coarse axis (ADR-0004) |
+| Enter | Go to the event where this card was played or drawn | "Enter: go to the event where this card was played or drawn" (ADR-0017) |
+| PageUp / PageDown | Previous / next turn | "Page Up: go to the previous turn" / "Page Down: go to the next turn" — turn stepping is this Surface's coarse axis (ADR-0004) |
 | F5 / F6 | Previous / next event, from any zone | "F5: go to the previous event" / "F6: go to the next event" — the fine axis without leaving the zone; speaks the event's title and fires its auto-play; clamps at the turn's edges (ADR-0015) |
 | B / G | Jump to your board / opponent board | "B: your minions" / "G: opponent minions" (ADR-0003) |
 | C / Shift+C | Jump to your hand / opponent hand | "C: your hand" / "Shift+C: opponent hand" (ADR-0003) |
@@ -1027,116 +1372,52 @@ and repeat the current title — turn boundaries are PageUp/PageDown's job.
 | Shift+R | Speak opponent hero power | "Shift+R: your opponent's hero power" — speak-only |
 | 1–9 | Jump to position 1–9 in the current zone | "1 to 9: jump to that position in the list" (ADR-0003, ADR-0004) |
 | 0 | Jump to position 10 | "0: jump to the tenth item" (ADR-0004) |
-| L | Open the **Sounds menu** for the focused card | "L: listen to this card's sounds" (ADR-0008) |
-| Enter | Announced no-op | *This spec's ruling* — see [Enter in v1](#enter-in-v1) |
+| L | Open the **Sounds menu** for the focused card, or for an event's source card | "L: listen to this card's sounds" (ADR-0008) |
+| Left / Right | Previous / next item in the zone | Widget-type layer (ADR-0004) |
+| Up / Down | Previous / next detail line | Widget-type layer (ADR-0004) |
+| Shift+Up / Shift+Down | Repeat line / read to last line | Widget-type layer (ADR-0004, ADR-0007) |
+| Home / End | First / last item in the zone | Universal layer (ADR-0004) |
 | Tab / Shift+Tab, Ctrl+F | Announced no-op | Slot defaults (ADR-0010) |
 
-Pressing a zone letter for a zone this replay has nothing in speaks the constant
-"No {zone} on this screen" — every time, no press counting, never silence
-(ADR-0009). Speak-only queries follow the `"{Subject}, {value}"` shape — "Your
-mana, 4 of 10" (ADR-0007). Delete and Space are unbound here and therefore
+An empty zone is a place: its letter switches to it and speaks
+`"{Zone label}: empty"`, and arrows, Home/End, Shift+Down, and digits there
+repeat that, without the prefix (ADR-0017). Shift+Up there rereads with the
+prefix: "Your turn 1, Your weapon: empty". Speak-only queries follow the
+`"{Subject}, {value}"` shape — "Your mana, 4 of 10", "Opponent hero power,
+Armor Up!" (ADR-0007). Delete and Space are unbound here and therefore
 silent.
 
-**Speech:** Turn stepping is speech-only (ADR-0008) and speaks the context-entry
-utterance above — turn, side, zone, title, position — so a turn step and a zone
-switch are the same announcement with a different part changed. There is no
-separate turn announcement and no event count in it; the events zone is where
-events are counted, browsed, and scrubbed. Scrubbing adds no utterance of its
-own: an event landing — Left/Right in the zone or F5/F6 from anywhere —
-speaks the event's title as always, and the zones simply read as of that
-event when visited — no "after {event}" prefix anywhere (ADR-0015, ADR-0007's
-route invariance).
+**Speech:** Turn stepping is speech-only (ADR-0008) and speaks the prefixed
+context-entry utterance above — turn, zone, title, position. A turn step at
+the first or last turn is a boundary: it repeats the current bare title, or
+`"{Zone label}: empty"` (ADR-0007). There is no separate turn announcement
+and no event count in it; the events zone is where events are counted,
+browsed, and scrubbed. Scrubbing adds no utterance of its own: an event
+landing — Left/Right in the zone or F5/F6 from anywhere — speaks the event's
+title as always, and the zones simply read as of that event when visited — no
+"after {event}" prefix anywhere (ADR-0015, ADR-0007's route invariance).
 
 **Audio:** The **events zone auto-plays**: landing on an event plays that
 event's sound — its card's Play/Attack/Death line, upgraded to card-specific
 Foley by CardID where one exists and falling back to the generic base clip for
 the common voiceless case — replacing any playing clip and mixing under the
-event's narration (ADR-0008; research fact sheet findings 11–12). Turn stepping
-is silent. Hero-power, discover, and emote-wheel events stay silent, because
-names alone cannot identify their clips (research fact sheet finding 13). The
-auto-play is always on with a Settings kill-switch (ADR-0008).
+event's narration (ADR-0008; research fact sheet findings 11–12). Opening a
+replay and turn stepping are silent. Hero-power, discover, and emote-wheel
+events stay silent, because names alone cannot identify their clips (research
+fact sheet finding 13). **The signature sound** (ADR-0017): reaching the
+game-over event plays the victory jingle for a win and the defeat jingle for
+a loss or concession; a tie plays nothing. It is the one place StoneReader
+marks a moment with sound beyond the event clips themselves. The auto-play,
+jingle included, is always on with a Settings kill-switch (ADR-0008,
+ADR-0017).
 
 **Settings that affect it:** Replay auto-play (the kill-switch); Game audio
-volume; Hearthstone install path (ADR-0011). With no install found, the events
-zone is silent and the listen key announces that game audio is unavailable
-(ADR-0008).
-
----
-
-## Statistics
-
-**Widget type:** Horizontal list, single zone (ADR-0012).
-
-**Reached and left:** Drill-down from Decks ("Statistics…") — the only door in
-v1. Back pops one level to Decks (ADR-0012, ADR-0006).
-
-**Window title:** `Statistics — StoneReader` (ADR-0006).
-**Entry utterance:** `"Statistics, {title}, {position} of {count}"` (ADR-0007).
-Statistics are computed by a stats service on Surface entry — no caching, no
-persisted aggregates (ADR-0012).
-
-**Rows,** in this order (ADR-0012):
-
-1. **All decks** — the overall record.
-2. Every attributed deck identity and saved deck, ordered by most recently
-   played. Zero-game saved decks are included, because a deck that vanished from
-   Statistics would read as an attribution bug.
-3. **Other games** — ambiguous or unattributed games, last. It still counts in
-   the overall record.
-
-**Title line:** `"{Name}, {W} wins, {L} losses"`, appending `", {T} ties"` only
-when nonzero; zero-game decks say `"{Name}, no games yet"`. The percent
-deliberately stays out of the title (ADR-0012).
-
-**Detail lines,** one fact per line (ADR-0012):
-
-1. `"Win rate, {p} percent"` — wins ÷ (wins + losses); `UNKNOWN` results are
-   excluded from the rate, and abandoned games are absent from the store
-   entirely.
-2. `"Last 20 games, {w} wins, {l} losses"` — the fixed recency window, omitted
-   when the total is 20 or fewer.
-3. One line per **Opponent** class with at least one game, ordered by games
-   played descending: `"Versus {class}, {w} wins, {l} losses"`.
-
-**Corpus and attribution.** Statistics are computed over the **Stats corpus**:
-live-recorded games are members by default, imported **Replays** are not but can
-join, and Space on the Replays surface is the toggle (ADR-0012). Deck statistics
-cover constructed games — ranked and casual, unfiltered; arena and Battlegrounds
-games are excluded because neither plays a saved deck. Games are attributed by
-`deck_id` with the deck name snapshotted at save time, so editing a deck keeps
-its history and deleting one leaves its games under the snapshotted name
-(ADR-0012). An imported replay is counted from its own recorded perspective —
-a replay recorded from the opponent's side attributes the wrong side's result;
-the toggle is the remedy, not detection (ADR-0012, documented not solved).
-
-**Keys**
-
-| Key | Command | Spoken help phrase |
-|---|---|---|
-| Left / Right | Previous / next row | Widget-type layer (ADR-0004) |
-| Up / Down | Previous / next detail line | Widget-type layer (ADR-0004) |
-| Home / End | First / last row | Universal layer (ADR-0004) |
-| Enter | Announced no-op | Explicitly a no-op in v1 (ADR-0012); the phrase is the registry's no-op default (ADR-0010) |
-| PageUp / PageDown, Tab / Shift+Tab, Ctrl+F, L | Announced no-op | Slot defaults (ADR-0010) |
-
-Delete and Space are unbound here and therefore silent — the stats-membership
-toggle lives on Replays, where the game rows are (ADR-0012).
-
-**Future — not in scope for implementation PRDs:** Enter drilling into the
-deck's games as a filtered Replays view. It is real value but specs a
-filtered-list capability this Surface does not own; the door stays marked for
-whichever effort needs filtered lists first (ADR-0012).
-
-**Data-layer work the PRDs inherit** (ADR-0012): the recorder plumbs the
-detected deck id and name at save (the columns exist and have no writer); the
-recorder writes `UNKNOWN` instead of a fabricated `TIED` when no playstate was
-observed; an `in_stats` flag with live-recorded-in / imported-out defaults; a
-one-time backfill migration on first post-upgrade launch, re-deriving
-attribution from stored XML by the same exact-unique-match rule and logged; the
-dead v1 `games` table is dropped, not revived.
-
-**Settings that affect it:** Replay retention prunes the store the corpus is
-computed over (ADR-0011; ADR-0012).
+volume; Hearthstone install path (ADR-0011). Until game audio is ready, the
+events zone is silent and the listen key says why: "Game audio is still
+preparing" while its index builds, "Game audio is unavailable — no
+Hearthstone install found" with no install, and "Game audio is unavailable —
+couldn't read Hearthstone's audio files" when the install's audio cannot be
+read (ADR-0008).
 
 ---
 
@@ -1148,7 +1429,8 @@ levels deep, and only individual chord rows sit at two (ADR-0011).
 **Reached and left:** Screen jump from Home (`S`, or Enter on option 5); no
 system-wide hotkey (ADR-0006). Back goes Home.
 
-**Window title:** `Settings — StoneReader` (ADR-0006).
+**Window title:** `Settings — StoneReader` (ADR-0006). Heading: "Settings"
+(ADR-0017).
 **Entry utterance:** `"Settings, {current option}"` (ADR-0007).
 
 **Rows** — nine (seven value rows plus the Global-hotkeys drill-down and two
@@ -1195,10 +1477,10 @@ hatch; nothing on this Surface has hidden staged state.
 
 | Key | Command | Spoken help phrase |
 |---|---|---|
-| Up / Down | Previous / next setting | Widget-type layer (ADR-0004) |
 | Enter | Change this setting | "Enter: change this setting" |
 | Delete | Arm reset, then reset on the second press — "Press Delete again to reset {label} to {default}" | "Delete: reset this setting, press twice" (ADR-0011 on ADR-0004's idiom) |
 | Shift+Delete | Reset this setting to its default without arming; on Restore all defaults, restore everything without arming | "Shift+Delete: reset this setting without asking" — *this spec's ruling*, ADR-0004's Shift-skips-confirmation composed with ADR-0011's Delete-as-reset |
+| Up / Down | Previous / next setting | Widget-type layer (ADR-0004) |
 | Home / End | First / last setting | Universal layer (ADR-0004) |
 | Ctrl+F | Announced no-op — "No search on this screen" | Nine rows need no search; the announced no-op is the spec (ADR-0011) |
 | Left / Right | Unbound and silent | Deliberately dead in vertical menus (ADR-0004, ADR-0011) |
@@ -1233,14 +1515,20 @@ missing key means default, unknown keys ignored, no schema versioning until a
 real migration exists. First run means no settings file means all defaults;
 there is no setup wizard (ADR-0011).
 
-**Unavailable rows explain, never hide.** With no Hearthstone install found, the
-game-audio rows stay visible and announce their reason — "Game audio volume,
-unavailable — no Hearthstone install found" (ADR-0011).
+**Unavailable rows explain, never hide.** When game audio is unavailable, the
+volume row stays visible and says why — "Game audio volume, unavailable — no
+Hearthstone install found" with no install, or "Game audio volume,
+unavailable — couldn't read Hearthstone's audio files" when the install's
+audio cannot be read — and Enter there repeats the row instead of opening
+the Picker (ADR-0011). While game audio is still preparing, the row shows
+its value and stays editable.
 
 **Deliberate exclusions from this Surface** (ADR-0011): no speech
 rate/voice/synth settings (speech exits via the User's screen reader and was
 never ours to mix); no HSA-letter rebinding (the letter keymap is the app's
-identity); no visual or theme settings (no sighted chrome remains).
+identity); no visual or theme settings — the window's heading, list, and
+detail pane draw with the system's own colours and fonts (ADR-0011,
+ADR-0017).
 
 ### Global hotkeys (drill-down)
 
@@ -1249,7 +1537,8 @@ identity); no visual or theme settings (no sighted chrome remains).
 **Reached and left:** Drill-down from the Settings "Global hotkeys" row; back
 pops one level to Settings (ADR-0011, ADR-0006).
 
-**Window title:** `Global hotkeys — StoneReader` (ADR-0006).
+**Window title:** `Global hotkeys — StoneReader` (ADR-0006). Heading:
+"Settings › Global hotkeys" (ADR-0017).
 **Entry utterance:** `"Global hotkeys, {current option}"` (ADR-0007).
 
 **Rows:** four chord rows, titled `"{Label}, {chord}"` with the chord spoken as
@@ -1279,12 +1568,12 @@ Accept offer" (ADR-0014).
 
 | Key | Command | Spoken help phrase |
 |---|---|---|
-| Up / Down | Previous / next hotkey | Widget-type layer (ADR-0004) |
 | Enter | Record a new shortcut for this command | "Enter: record a new shortcut" (ADR-0011) |
-| Escape | Cancel capture, or back | Universal layer (ADR-0004, ADR-0011) |
-| Home / End | First / last hotkey | Universal layer (ADR-0004) |
 | Delete | Arm reset to the default chord, then reset | "Delete: reset this shortcut, press twice" (ADR-0011) |
 | Shift+Delete | Reset this shortcut to its default without arming | "Shift+Delete: reset this shortcut without asking" (ADR-0004, ADR-0011) |
+| Up / Down | Previous / next hotkey | Widget-type layer (ADR-0004) |
+| Escape | Cancel capture, or back | Universal layer (ADR-0004, ADR-0011) |
+| Home / End | First / last hotkey | Universal layer (ADR-0004) |
 | PageUp / PageDown, Tab / Shift+Tab, Ctrl+F, L | Announced no-op | Slot defaults (ADR-0010) |
 
 ---
@@ -1295,51 +1584,74 @@ Accept offer" (ADR-0014).
 ADR-0009).
 
 **Reached and left:** F1 from any Surface — a **Drill-down** that pushes one
-level. Backspace/Escape returns. F1 inside help is an announced no-op ("Already
-in help") — help never stacks on help (ADR-0009).
+level. Backspace/Escape returns. **F1 always opens help fresh**, on the
+widget-type sentence with no search (ADR-0017); back from Universal keys or
+All commands finds help as left. F1 inside any help Surface — the Help menu,
+Universal keys, All commands, or a command reference — is an announced no-op
+("Already in help"): help never stacks on help (ADR-0009).
 
-**Window title:** `{Surface} help — StoneReader`, e.g. `Cards help —
-StoneReader`. *This spec's ruling, compositionally:* the Help menu's surface
-name is "{Surface} help" (ADR-0009) and ADR-0006's template wraps every surface
-name.
+**Window title:** `{Surface} help — StoneReader`, using the display name of
+the Surface help was opened from — `Cards help — StoneReader`,
+`Odd Hunter help — StoneReader` on the Odd Hunter Deck page,
+`Hunter cards help — StoneReader` from Card Browser (ADR-0017). *This spec's
+ruling, compositionally:* the Help menu's surface name is "{Surface} help"
+(ADR-0009) and ADR-0006's template wraps every surface name. Heading: the
+origin's path plus the help name, trimmed like every crumb —
+"Decks › Odd Hunter › Help" (ADR-0017).
 **Entry utterance:** `"{Surface} help, {current option}"` — the vertical-menu
 form, with the widget-type sentence as the current option on entry (ADR-0007,
-ADR-0009).
+ADR-0009, ADR-0017).
 
-**Options,** in order (ADR-0009):
+**Options,** in order (ADR-0009, ADR-0017):
 
-1. **The widget-type sentence**, generated from the Surface's declared type —
-   "Card Browser is a horizontal list: Left and Right move between cards, Up and Down
-   read details."
-2. **Screen-specific bindings**, one option per binding, **key-first**:
-   `"{Key}: {action phrase}"` — "D: jump to Remaining Deck". Title-line rules
-   apply; these are the phrases in every keymap table above.
-3. **"Universal keys"** — a drill-down listing the app-wide layer (Enter,
-   Escape/Backspace, Home/End, PageUp/PageDown, Tab/Shift+Tab, Ctrl+F, F1, L,
-   bare Ctrl, Ctrl+Q). The structure carries the universal/screen-specific
-   distinction; options are never individually labeled with it. Delete,
-   Shift+Delete, and Space are surface-layer bindings and therefore appear in
-   option group 2 on the Surfaces that bind them, not here.
-4. **"All commands"** — a drill-down of per-surface sections in Home order, each
-   a nested vertical menu of that Surface's bindings: the in-app command
-   reference, generated from the same registry.
+1. **The widget-type sentence**, generated from the Surface's declared type
+   and naming only the type, since help's own name already names the
+   Surface — "Horizontal list: Left and Right move between items, Up and
+   Down read details." or "Menu: Up and Down move between options, Enter
+   acts on the current one." (ADR-0017).
+2. **Screen-specific options**, **key-first**: `"{Key}: {action phrase}"` —
+   "D: jump to Remaining Deck". Enter's phrase comes first, then the Surface's
+   keys in the order its keymap table above lists them; bindings that share
+   one phrase are one option, and slot no-ops are not listed (see
+   [Help generation](#help-generation)). Title-line rules apply.
+3. **"Universal keys"** — a drill-down listing the app-wide layer: "Enter: act
+   on the current item", "Escape or Backspace: go back", "Home and End: jump
+   to the ends", "Page Up and Page Down: pages or turns where the screen has
+   them", "Tab and Shift+Tab: jump between groups where the screen has them",
+   "Ctrl+F: search where the screen has it", "F1: help for this screen", "L:
+   listen to a card's sounds", "Ctrl: stop game audio", "Ctrl+Q or Alt+F4:
+   quit StoneReader". The list is read-only. The structure carries the
+   universal/screen-specific distinction; options are never individually
+   labeled with it. Delete, Shift+Delete, and Space are surface-layer bindings
+   and therefore appear in option group 2 on the Surfaces that bind them, not
+   here.
+4. **"All commands"** — a drill-down of per-surface sections in Home order,
+   each Surface followed by its drill-downs: Home, Live Game, Decks, Deck,
+   Deck detail, Games, Import Deck, Cards, Card Browser, Sounds menu, Replays,
+   Replay Viewer, Import Replays, Settings, Global hotkeys. Each section, "{Surface}
+   commands", lists that Surface's widget-type sentence and screen-specific
+   options: the in-app command reference, generated from the same registry.
 
 **Keys**
 
 | Key | Command | Spoken help phrase |
 |---|---|---|
-| Up / Down | Previous / next help option | Widget-type layer (ADR-0004) |
-| Enter | Do this command | Pops help and performs that binding on the underlying Surface — help doubles as a command palette (ADR-0009) |
+| Enter | Do this command | "Enter: act on the current option" — pops help and performs that binding on the underlying Surface: help doubles as a command palette (ADR-0009) |
 | Ctrl+F | Search help | "Ctrl+F: search help" (ADR-0009) |
+| Up / Down | Previous / next help option | Widget-type layer (ADR-0004) |
 | F1 | Announced no-op — "Already in help" | ADR-0009 |
 | Escape / Backspace | Back | Universal layer (ADR-0004) |
 | Home / End | First / last help option | Universal layer (ADR-0004) |
 | PageUp / PageDown, Tab / Shift+Tab, L | Announced no-op | Slot defaults (ADR-0010) |
 
-Options that cannot sensibly execute — Enter itself, Text-mode keys, All-commands
-entries ("Only available on {surface}") — are announced no-ops (ADR-0009,
-ADR-0004). Destructive safety is unchanged: a delete executed from help still
-only arms and asks for its second press (ADR-0009).
+Options that cannot sensibly execute are announced no-ops (ADR-0009,
+ADR-0004): the widget-type sentence, Enter's own option, Ctrl+F's option, and
+Universal keys entries say "Nothing to do here"; an option shared by several
+keys says "Press one of these keys to use this" (ADR-0017); All-commands
+entries say "Only available on {Surface}". Destructive safety is unchanged: a
+delete executed from help still only arms and asks for its second press
+(ADR-0009). Ctrl+F filters the options by a case-insensitive match on their
+text and re-lands on the first match.
 
 **Speech:** Nothing bespoke — the vertical-menu grammar throughout (ADR-0007).
 
@@ -1369,8 +1681,8 @@ carry the card-id→event mapping (ADR-0008; research fact sheet finding 7).
 
 | Key | Command | Spoken help phrase |
 |---|---|---|
-| Up / Down | Previous / next sound | Widget-type layer (ADR-0004) |
 | Enter | Play this sound | "Enter: play this sound" (ADR-0008) |
+| Up / Down | Previous / next sound | Widget-type layer (ADR-0004) |
 | Escape / Backspace | Back | Universal layer (ADR-0004) |
 | Home / End | First / last sound | Universal layer (ADR-0004) |
 | L | Announced no-op | Already in the Sounds menu; slot default (ADR-0010) |
@@ -1383,8 +1695,11 @@ arrowing would stutter through replaced clips (ADR-0008).
 
 - Card with no clips: L announces `"{title}: no sounds"` and does **not** push
   the Surface.
-- No Hearthstone install found: L announces that game audio is unavailable and
-  does not push.
+- Game audio not ready: L says why and does not push — "Game audio is still
+  preparing" while its index builds, "Game audio is unavailable — no
+  Hearthstone install found" with no install, or "Game audio is unavailable —
+  couldn't read Hearthstone's audio files" when the install's audio cannot be
+  read.
 
 **Audio:** Enter starts a clip, replacing any clip already playing. Backing out
 of the Sounds menu is a surface transition and therefore stops it; ordinary
@@ -1403,7 +1718,7 @@ arrowing inside the menu does not (ADR-0008).
 | Collection / pack tracking | Known fog on map #17; Home letter **O is reserved**, not bound, because HSA binds O = Open Packs (ADR-0006). |
 | Mulligan helper | Not on this map. Named in ADR-0012 as one of the efforts that might need a filtered-list capability first; no key, letter, or topology slot is reserved for it. |
 | Secrets helper (which secrets are still possible) | Known fog on map #17 (ADR-0013): the strongest remaining tracker-overlay idea, but it needs per-format secret-pool data — a research effort, not a spec ruling. No key is reserved; S/Shift+S are the secrets zones themselves. |
-| Arena assist / drafting | Not on this map. ADR-0003 notes only the standing obligation that a future arena-drafting surface check HSA's vocabulary before picking keys. Arena games are excluded from deck statistics because they play no saved deck (ADR-0012). |
+| Arena assist / drafting | Not on this map. ADR-0003 notes only the standing obligation that a future arena-drafting surface check HSA's vocabulary before picking keys. Arena games count in no saved deck's record, because they play no saved deck; they count in Other games and All decks (ADR-0012, ADR-0017). |
 | Onboarding / installer | Explicitly out of scope on this map: first run means no settings file means all defaults, and there is no setup wizard — Settings is for divergence (ADR-0011). ADR-0008's required "not affiliated with Blizzard Entertainment / assets © Blizzard" notices land with this effort; no v1 Surface carries them. |
 
 ---

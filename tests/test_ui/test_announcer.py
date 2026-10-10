@@ -22,7 +22,8 @@ def test_every_template_and_lane() -> None:
     announcer.query("Your deck", "23 cards")
     announcer.noop("No search on this screen")
     announcer.slot_noop(Slot.LISTEN)
-    announcer.empty_zone("Opponent hand")
+    announcer.context_waiting("Live Game", "a game")
+    announcer.waiting("a game")
     announcer.already_home("Home")
     announcer.game_logging_enabled()
     announcer.hotkeys_unavailable(["Ctrl+Shift+H", "Ctrl+Shift+C"])
@@ -30,6 +31,7 @@ def test_every_template_and_lane() -> None:
     announcer.context_entry("Cards", "Frostbolt", 2, 12, continues=True)
     announcer.context_empty("Cards", continues=True)
     announcer.context_entry_menu("Home", "Cards", continues=True)
+    announcer.context_waiting("Live Game", "a game", continues=True)
 
     assert speech.calls == [
         ("Cards, Fireball, 1 of 12", True),
@@ -42,7 +44,8 @@ def test_every_template_and_lane() -> None:
         ("Your deck, 23 cards", True),
         ("No search on this screen", True),
         ("No card focused", True),
-        ("No Opponent hand on this screen", True),
+        ("Live Game, waiting for a game", True),
+        ("Waiting for a game", True),
         ("Home — already at the top", True),
         ("Hearthstone logging enabled", True),
         ("Could not register hotkeys: Ctrl+Shift+H, Ctrl+Shift+C.", True),
@@ -50,6 +53,7 @@ def test_every_template_and_lane() -> None:
         ("Cards, Frostbolt, 2 of 12", False),
         ("Cards: empty", False),
         ("Home, Cards", False),
+        ("Live Game, waiting for a game", False),
     ]
 
 

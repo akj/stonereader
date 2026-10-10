@@ -1,236 +1,318 @@
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
-from stonereader.db import get_connection, init_db
-from stonereader.services._replay_store import ReplayStore
-from stonereader.surfaces.replay_viewer import CurrentReplay
-from stonereader.surfaces.replays import build_replays
+import pytest
+
+from stonereader.db import delete_deck, get_all_decks
+from stonereader.services._replay_loader import ReplayLoadError
+from stonereader.services._replay_store import ReplayMeta
+from stonereader.surfaces._replay_rows import replay_title
 from stonereader.ui.chords import Chord
-from stonereader.ui.engines import HorizontalListEngine
 
-from .conftest import Harness, make_card_db, make_harness, placeholder_surface
+from .conftest import Harness
+from .records_harness import (
+    RecordsContext,
+    make_records_harness,
+    option_titles,
+    save_full_deck,
+    save_game,
+)
 
 
-@dataclass
-class ReplaysContext:
-    conn: sqlite3.Connection
-    store: ReplayStore
-    current_replay: CurrentReplay
+def _replays(db_conn: sqlite3.Connection, tmp_path: Path) -> Harness[RecordsContext]:
+    return make_records_harness(db_conn, tmp_path / "replays")
 
 
-def _harness(tmp_path: Path) -> Harness[ReplaysContext]:
-    conn = get_connection(str(tmp_path / "test.db"))
-    init_db(conn)
-    store = ReplayStore(conn, tmp_path / "replays")
-    current_replay = CurrentReplay()
-    harness = make_harness(ReplaysContext(conn, store, current_replay))
-    harness.nav.register(
-        "Import Replays", lambda: placeholder_surface("Import Replays")
+def test_rows_are_newest_first_title_lines_then_import(
+    db_conn: sqlite3.Connection, tmp_path: Path
+) -> None:
+    harness = _replays(db_conn, tmp_path)
+    store = harness.context.store
+    save_game(
+        store,
+        result="WON",
+        opponent_class="MAGE",
+        deck_name="Odd Hunter",
+        played_at="2026-08-16T15:36:00",
     )
-    harness.nav.register(
-        "Replay Viewer", lambda: placeholder_surface("Replay Viewer")
-    )
-    harness.set_surface(
-        build_replays(
-            harness.announcer,
-            [],
-            harness.nav,
-            store,
-            make_card_db(),
-            current_replay,
-        )
-    )
-    return harness
-
-
-def _save(store: ReplayStore, xml: str, **overrides):
-    values = {
-        "source": "live_auto",
-        "friendly_class": "MAGE",
-        "opponent_class": "WARRIOR",
-        "result": "WON",
-        "turns": 8,
-        "game_type": "RANKED",
-        "format_type": "STANDARD",
-        "played_at": "2026-08-16T09:30:00",
-        "in_stats": True,
-    }
-    values.update(overrides)
-    return store.save_xml(xml, **values).meta
-
-
-def test_rows_are_newest_first_then_action_with_every_detail_variant(tmp_path):
-    harness = _harness(tmp_path)
-    _save(
-        harness.context.store,
-        "<old/>",
-        source="manual_import",
+    save_game(
+        store,
         result="LOST",
         opponent_class="DEATHKNIGHT",
-        turns=12,
-        deck_id=9,
-        deck_name="Control Mage",
+        turns=1,
+        game_type="CASUAL",
+        format_type="WILD",
+        source="manual_import",
         in_stats=False,
-        played_at="2026-08-15T21:05:00",
+        played_at="2026-08-15T21:10:00",
     )
-    _save(
-        harness.context.store,
-        "<new/>",
-        result="UNKNOWN",
-        opponent_class="MAGE",
-        turns=3,
+    save_game(
+        store,
+        result="TIED",
+        opponent_class="PRIEST",
+        turns=12,
         game_type="",
         format_type="",
-        deck_id=None,
-        deck_name=None,
-        played_at="2026-08-16T09:30:00",
+        played_at="2026-08-12T09:05:00",
     )
-    assert harness.horizontal.items_snapshot() == (
-        [
-            "Unknown versus Mage, 3 turns",
-            "Lost versus Death Knight, 12 turns",
-            "Import replays…",
-        ],
-        0,
-        [
-            "2026-08-16, 09:30",
-            "Deck not detected",
-            "Unknown, Unknown",
-            "Counted in stats",
-            "Live recorded",
-        ],
+    save_game(
+        store,
+        result="UNKNOWN",
+        opponent_class="WARRIOR",
+        turns=5,
+        game_type="VS_AI",
+        format_type="UNKNOWN",
+        played_at="2026-08-09T23:59:00",
     )
-    harness.horizontal.jump_to_position(2)
-    assert harness.horizontal.items_snapshot()[2] == [
-        "2026-08-15, 21:05",
-        "Played Control Mage",
-        "Ranked, Standard",
-        "Not counted",
-        "Imported",
-    ]
-    harness.horizontal.jump_to_position(3)
-    assert harness.horizontal.items_snapshot()[2] == []
-    harness.context.conn.close()
+    save_game(
+        store,
+        result="WON",
+        opponent_class="DEMONHUNTER",
+        game_type="UNKNOWN",
+        played_at="2025-12-31T08:00:00",
+    )
 
+    harness.nav.jump("Replays")
 
-def test_all_result_titles_are_spoken_in_title_case(tmp_path):
-    harness = _harness(tmp_path)
-    for index, result in enumerate(("WON", "LOST", "TIED", "UNKNOWN")):
-        _save(
-            harness.context.store,
-            f"<{result}/>",
-            result=result,
-            played_at=f"2026-08-{12 + index:02d}T09:30:00",
-        )
-
-    assert harness.horizontal.items_snapshot()[0] == [
-        "Unknown versus Warrior, 8 turns",
-        "Tied versus Warrior, 8 turns",
-        "Lost versus Warrior, 8 turns",
-        "Won versus Warrior, 8 turns",
+    assert option_titles(harness, "Replays") == [
+        "Won against Mage in 8 turns, today 3:36 PM, Odd Hunter",
+        "Lost to Death Knight in 1 turn, yesterday 9:10 PM, Casual, Wild, "
+        "imported, not counted",
+        "Tied with Priest in 12 turns, Wednesday",
+        "Result unknown against Warrior in 5 turns, August 9, Practice",
+        "Won against Demon Hunter in 8 turns, December 31, 2025",
         "Import replays…",
     ]
-    harness.context.conn.close()
+    assert harness.titles[-1] == "Replays — StoneReader"
+    assert harness.speech.calls[-1] == (
+        "Replays, Won against Mage in 8 turns, today 3:36 PM, Odd Hunter",
+        True,
+    )
 
 
-def test_space_toggles_cursor_neutrally_and_action_row_is_noop(tmp_path):
-    harness = _harness(tmp_path)
-    replay = _save(harness.context.store, "<one/>", in_stats=False)
+def test_a_utc_stamp_is_spoken_in_local_time(
+    db_conn: sqlite3.Connection, tmp_path: Path
+) -> None:
+    harness = _replays(db_conn, tmp_path)
+    # Live-recorded games are stamped in UTC; 3:36 PM here is some UTC time.
+    local = datetime(2026, 8, 16, 15, 36).astimezone()
+    save_game(
+        harness.context.store,
+        played_at=local.astimezone(timezone.utc).isoformat(),
+    )
+
+    harness.nav.jump("Replays")
+
+    assert option_titles(harness, "Replays")[0] == (
+        "Won against Mage in 8 turns, today 3:36 PM"
+    )
+
+
+def test_space_toggles_cursor_neutrally_and_import_row_is_noop(
+    db_conn: sqlite3.Connection, tmp_path: Path
+) -> None:
+    harness = _replays(db_conn, tmp_path)
+    replay = save_game(harness.context.store, in_stats=False)
+    harness.nav.jump("Replays")
+    harness.speech.calls.clear()
 
     harness.press(Chord("space"))
     assert harness.context.store.all_replays()[0].in_stats is True
-    assert harness.horizontal.items_snapshot()[1] == 0
+    assert option_titles(harness, "Replays")[0] == (
+        "Won against Mage in 8 turns, today 3:36 PM"
+    )
     assert harness.speech.calls == [("Included in stats", True)]
 
     harness.press(Chord("space"))
     assert harness.context.store.all_replays()[0].in_stats is False
+    assert option_titles(harness, "Replays")[0] == (
+        "Won against Mage in 8 turns, today 3:36 PM, not counted"
+    )
     assert harness.speech.calls[-1] == ("Excluded from stats", True)
-    assert len(harness.speech.calls) == 2
+    assert harness.menu("Replays").cursor == 0
 
-    harness.horizontal.jump_to_position(2)
+    harness.press(Chord("end"))
     harness.press(Chord("space"))
     assert harness.speech.calls[-1] == ("Nothing to count here", True)
     assert Path(replay.file_path).exists()
-    harness.context.conn.close()
 
 
-def test_armed_delete_lifecycle_and_shift_delete_queue_reentry(tmp_path):
-    harness = _harness(tmp_path)
-    first = _save(harness.context.store, "<first/>", played_at="2026-08-16T09:30:00")
-    second = _save(harness.context.store, "<second/>", played_at="2026-08-15T09:30:00")
+def test_armed_delete_lifecycle_and_shift_delete_reenter(
+    db_conn: sqlite3.Connection, tmp_path: Path
+) -> None:
+    harness = _replays(db_conn, tmp_path)
+    store = harness.context.store
+    first = save_game(store, played_at="2026-08-16T15:36:00")
+    second = save_game(store, result="LOST", played_at="2026-08-15T21:10:00")
+    harness.nav.jump("Replays")
+    harness.speech.calls.clear()
 
     harness.press(Chord("delete"))
-    harness.press(Chord("right"))
-    harness.press(Chord("left"))
+    harness.press(Chord("down"))
+    harness.press(Chord("up"))
     harness.press(Chord("delete"))
     harness.press(Chord("delete"))
 
-    assert [meta.id for meta in harness.context.store.all_replays()] == [second.id]
+    assert [meta.id for meta in store.all_replays()] == [second.id]
     assert not Path(first.file_path).exists()
     assert harness.speech.calls[-2:] == [
         ("Replay deleted", True),
-        ("Replays, Won versus Warrior, 8 turns, 1 of 2", False),
+        ("Replays, Lost to Mage in 8 turns, yesterday 9:10 PM", False),
     ]
 
     harness.press(Chord("delete", shift=True))
-    assert harness.context.store.all_replays() == []
+    assert store.all_replays() == []
     assert harness.speech.calls[-2:] == [
         ("Replay deleted", True),
-        ("Replays, Import replays…, 1 of 1", False),
+        ("Replays, Import replays…", False),
     ]
 
     harness.press(Chord("delete"))
     assert harness.speech.calls[-1] == ("Nothing to delete here", True)
-    harness.context.conn.close()
 
 
-def test_enter_loads_replay_drills_down_and_search_has_exact_noop(
-    tmp_path, monkeypatch
-):
-    harness = _harness(tmp_path)
-    _save(harness.context.store, "<one/>")
+def test_enter_opens_the_replay_or_import_and_search_is_a_noop(
+    db_conn: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    harness = _replays(db_conn, tmp_path)
+    meta = save_game(harness.context.store)
+    opened: list[Path] = []
     loaded = object()
-    monkeypatch.setattr(
-        "stonereader.surfaces.replays.load_replay",
-        lambda _path, _card_db: loaded,
-    )
+
+    def load(path: Path, _card_db: object) -> object:
+        opened.append(path)
+        return loaded
+
+    monkeypatch.setattr("stonereader.surfaces._replay_rows.load_replay", load)
+    harness.nav.jump("Replays")
 
     harness.press(Chord("enter"))
+    assert opened == [Path(meta.file_path)]
     assert harness.context.current_replay.get() is loaded
-    assert harness.nav.stack == ("Home", "Replay Viewer")
+    assert harness.nav.stack == ("Home", "Replays", "Replay Viewer")
 
-    replays = harness.surface
-    assert replays is not None
-    assert isinstance(replays.engine, HorizontalListEngine)
-    harness.sink.set_active(replays.registry)
-    replays.engine.jump_to_position(2)
+    harness.nav.back()
+    harness.press(Chord("end"))
     harness.press(Chord("enter"))
-    assert harness.nav.stack == ("Home", "Replay Viewer", "Import Replays")
+    assert harness.nav.stack == ("Home", "Replays", "Import Replays")
 
-    harness.sink.set_active(replays.registry)
+    harness.nav.back()
     harness.press(Chord("f", ctrl=True))
     assert harness.speech.calls[-1] == ("No search on this screen", True)
-    harness.context.conn.close()
 
 
-def test_invalid_replay_is_announced_without_navigation(tmp_path, monkeypatch):
-    from stonereader.services._replay_loader import ReplayLoadError
+def test_invalid_replay_is_announced_without_navigation(
+    db_conn: sqlite3.Connection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    harness = _replays(db_conn, tmp_path)
+    save_game(harness.context.store)
 
-    harness = _harness(tmp_path)
-    _save(harness.context.store, "<bad/>")
-
-    def fail(_path, _card_db):
+    def fail(_path: Path, _card_db: object) -> object:
         raise ReplayLoadError("bad replay")
 
-    monkeypatch.setattr("stonereader.surfaces.replays.load_replay", fail)
+    monkeypatch.setattr("stonereader.surfaces._replay_rows.load_replay", fail)
+    harness.nav.jump("Replays")
     harness.press(Chord("enter"))
 
-    assert harness.nav.stack == ("Home",)
+    assert harness.nav.stack == ("Home", "Replays")
     assert harness.speech.calls[-1] == (
         "Could not open replay; the file may be invalid",
         True,
     )
-    harness.context.conn.close()
+
+
+def test_d_opens_the_deck_page_of_a_saved_deck(
+    db_conn: sqlite3.Connection, tmp_path: Path
+) -> None:
+    harness = _replays(db_conn, tmp_path)
+    deck_id = save_full_deck(db_conn, "Odd Hunter", "HUNTER")
+    save_game(harness.context.store, deck_id=deck_id, deck_name="Odd Hunter")
+    harness.nav.jump("Replays")
+
+    harness.press(Chord("d"))
+
+    assert harness.nav.stack == ("Home", "Replays", "Deck")
+    assert harness.titles[-1] == "Odd Hunter — StoneReader"
+    assert harness.speech.calls[-1] == ("Odd Hunter, Cards, 30", True)
+
+    harness.press(Chord("down"))
+    harness.press(Chord("enter"))
+    assert harness.nav.stack == ("Home", "Replays", "Deck", "Games")
+
+    harness.press(Chord("escape"))
+    harness.press(Chord("delete", shift=True))
+    assert get_all_decks(db_conn) == []
+    assert harness.nav.stack == ("Home", "Replays")
+    assert harness.speech.calls[-2:] == [
+        ("Odd Hunter deleted", True),
+        ("Replays, Won against Mage in 8 turns, today 3:36 PM, Odd Hunter", False),
+    ]
+
+
+def test_d_without_a_saved_deck_announces_and_stays(
+    db_conn: sqlite3.Connection, tmp_path: Path
+) -> None:
+    harness = _replays(db_conn, tmp_path)
+    store = harness.context.store
+    gone = save_full_deck(db_conn, "Gone", "MAGE")
+    delete_deck(db_conn, gone)
+    save_game(store, deck_id=gone, deck_name="Gone", played_at="2026-08-16T15:36:00")
+    save_game(store, played_at="2026-08-16T14:00:00")
+    harness.nav.jump("Replays")
+    harness.speech.calls.clear()
+
+    harness.press(Chord("d"))
+    harness.press(Chord("down"))
+    harness.press(Chord("d"))
+    harness.press(Chord("down"))
+    harness.press(Chord("d"))
+
+    assert harness.nav.stack == ("Home", "Replays")
+    assert harness.speech.calls == [
+        ("No saved deck for this game", True),
+        ("Won against Mage in 8 turns, today 2:00 PM", True),
+        ("No saved deck for this game", True),
+        ("Import replays…", True),
+        ("Nothing to open here", True),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("game_type", "spoken"),
+    [
+        ("PVPDR", "Duels"),
+        ("PVPDR_PAID", "Heroic Duels"),
+        ("BATTLEGROUNDS_DUO_FRIENDLY", "Battlegrounds Duos"),
+        ("BATTLEGROUNDS", "Battlegrounds"),
+        ("UNDERGROUND_ARENA", "Underground Arena"),
+        ("FSG_BRAWL_VS_FRIEND", "Tavern Brawl"),
+        ("MERCENARIES_PVE", "Mercenaries"),
+        ("ACHIEVEMENT_TEST", "Achievement Test"),
+    ],
+)
+def test_game_types_are_spoken_by_family(game_type: str, spoken: str) -> None:
+    meta = ReplayMeta(
+        id=1,
+        file_path="game.hsreplay",
+        checksum="c",
+        source="live_auto",
+        friendly_class="MAGE",
+        opponent_class="ROGUE",
+        result="WON",
+        turns=9,
+        game_type=game_type,
+        format_type="STANDARD",
+        deck_name=None,
+        deck_id=None,
+        played_at="2026-08-16T18:00:00",
+        duration_seconds=None,
+        imported_at="2026-08-16T18:00:00",
+        in_stats=True,
+    )
+
+    assert replay_title(meta, datetime(2026, 8, 16, 20, 0)) == (
+        f"Won against Rogue in 9 turns, today 6:00 PM, {spoken}"
+    )

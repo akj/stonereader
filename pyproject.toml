@@ -7,9 +7,9 @@ requires-python = ">=3.14"
 dependencies = [
     "accessible-output2>=0.17",
     "fsb5>=1.0",
-    "hearthstone>=9.15.8",
-    "hearthstone-data>=221175.1",
-    "hslog>=1.18.0,<2",
+    "hearthstone>=9.21.1",
+    "hearthstone-data>=251952.1",
+    "hslog>=1.20.0,<2",
     "hsreplay>=1.16.2",
     "pip",
     "psutil>=7.0,<8",

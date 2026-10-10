@@ -60,7 +60,9 @@ CREATE TABLE IF NOT EXISTS replays (
 );
 """
 
-_SCHEMA_V3_FRESH = """
+# v4 adds no columns; it marks replay metadata as re-derived from the stored
+# files (see _rederive_replay_metadata).
+_SCHEMA_V4_FRESH = """
 CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER PRIMARY KEY
 );
@@ -126,13 +128,14 @@ def init_db(conn: sqlite3.Connection) -> None:
     """Create/migrate tables to the latest schema version. Idempotent.
 
     Fresh databases receive the current schema. Upgrades preserve decks and
-    replays, add stats membership, backfill replay deck attribution, and
-    remove the obsolete v1 ``games`` table.
+    replays, add stats membership, backfill replay deck attribution, remove
+    the obsolete v1 ``games`` table, and re-derive replay metadata (v4). The
+    backfills run in the background; v3 becomes v4 when that pass completes.
     """
     version = get_schema_version(conn)
     if version == 0:
-        conn.executescript(_SCHEMA_V3_FRESH)
-        _set_schema_version(conn, 3)
+        conn.executescript(_SCHEMA_V4_FRESH)
+        _set_schema_version(conn, 4)
         conn.commit()
     elif version < 3:
         if version < 2:
@@ -148,14 +151,22 @@ def init_db(conn: sqlite3.Connection) -> None:
         _set_schema_version(conn, 3)
         conn.commit()
 
-    if _replay_deck_backfill_needed(conn):
-        _start_replay_deck_backfill(conn)
+    if get_schema_version(conn) == 3 and not _has_replays(conn):
+        _set_schema_version(conn, 4)
+        conn.commit()
+
+    if _replay_deck_backfill_needed(conn) or get_schema_version(conn) < 4:
+        _start_replay_backfill(conn)
 
 
 def _set_schema_version(conn: sqlite3.Connection, version: int) -> None:
     """Replace the singleton schema-version row."""
     conn.execute("DELETE FROM schema_version")
     conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
+
+
+def _has_replays(conn: sqlite3.Connection) -> bool:
+    return conn.execute("SELECT 1 FROM replays LIMIT 1").fetchone() is not None
 
 
 def _replay_deck_backfill_needed(conn: sqlite3.Connection) -> bool:
@@ -168,24 +179,24 @@ def _replay_deck_backfill_needed(conn: sqlite3.Connection) -> bool:
     )
 
 
-def _start_replay_deck_backfill(conn: sqlite3.Connection) -> None:
-    """Start legacy replay attribution on a connection-local worker."""
+def _start_replay_backfill(conn: sqlite3.Connection) -> None:
+    """Start the replay backfills on a connection-local worker."""
     row = next(
         (row for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
         None,
     )
     db_path = str(row[2]) if row is not None and row[2] else None
     if db_path is None:
-        logger.warning("replay deck backfill skipped for an in-memory database")
+        logger.warning("replay backfill skipped for an in-memory database")
         return
     with _backfill_lock:
         worker = _backfill_workers.get(db_path)
         if worker is not None and worker.is_alive():
             return
         worker = threading.Thread(
-            target=_run_replay_deck_backfill,
+            target=_run_replay_backfill,
             args=(db_path,),
-            name="stonereader-replay-deck-backfill",
+            name="stonereader-replay-backfill",
             daemon=True,
         )
         _backfill_workers[db_path] = worker
@@ -193,17 +204,20 @@ def _start_replay_deck_backfill(conn: sqlite3.Connection) -> None:
     worker.join(_BACKFILL_STARTUP_GRACE_SECONDS)
 
 
-def _run_replay_deck_backfill(db_path: str) -> None:
-    """Run replay attribution on a fresh SQLite connection."""
+def _run_replay_backfill(db_path: str) -> None:
+    """Run whichever replay backfills remain on a fresh SQLite connection."""
     try:
         conn = get_connection(db_path)
         try:
-            _backfill_replay_decks(conn)
-            conn.commit()
+            if _replay_deck_backfill_needed(conn):
+                _backfill_replay_decks(conn)
+                conn.commit()
+            if get_schema_version(conn) < 4:
+                _rederive_replay_metadata(conn)
         finally:
             conn.close()
     except Exception:
-        logger.exception("replay deck backfill failed")
+        logger.exception("replay backfill failed")
     finally:
         current = threading.current_thread()
         with _backfill_lock:
@@ -211,7 +225,7 @@ def _run_replay_deck_backfill(db_path: str) -> None:
                 del _backfill_workers[db_path]
 
 
-def _wait_for_replay_deck_backfills(timeout: float | None = None) -> bool:
+def _wait_for_replay_backfills(timeout: float | None = None) -> bool:
     """Wait for current backfills; primarily useful at test/smoke seams."""
     deadline = None if timeout is None else time.monotonic() + timeout
     while True:
@@ -278,6 +292,57 @@ def _backfill_replay_decks(conn: sqlite3.Connection) -> None:
         attributed = max(cursor.rowcount, 0)
     skipped = len(rows) - attributed
     logger.info("replay deck backfill: attributed %d / skipped %d", attributed, skipped)
+
+
+def _rederive_replay_metadata(conn: sqlite3.Connection) -> None:
+    """v3 -> v4: re-derive turns, game type and format from each stored file.
+
+    Rows written before the loader fix took a player's own turn counter for the
+    game turn and never learned the game type or format. They are re-derived
+    with the same function import uses for a new row. Result and classes are
+    left alone: the engine always resolved them against the friendly player, so
+    they were never mirrored. A file that fails to load keeps its row as is.
+    Every update and the version bump commit together, so a pass that dies
+    midway leaves v3 and the next startup repeats it.
+    """
+    from stonereader.services._replay_store import derive_replay_metadata
+
+    rows = conn.execute(
+        "SELECT id, file_path, turns, game_type, format_type FROM replays"
+    ).fetchall()
+    updates: list[tuple[int, str, str, int]] = []
+    for row in rows:
+        try:
+            derived = derive_replay_metadata(Path(row["file_path"]))
+        except Exception:
+            logger.exception("replay metadata repair skipped replay %s", row["id"])
+            continue
+        # A file can omit what the row already knows (the recorder falls back
+        # to plain XML when enrichment fails), so only known values replace.
+        updates.append(
+            (
+                derived.turns or row["turns"],
+                _known(derived.game_type, row["game_type"]),
+                _known(derived.format_type, row["format_type"]),
+                row["id"],
+            )
+        )
+    conn.executemany(
+        "UPDATE replays SET turns = ?, game_type = ?, format_type = ? WHERE id = ?",
+        updates,
+    )
+    _set_schema_version(conn, 4)
+    conn.commit()
+    logger.info(
+        "replay metadata repair: re-derived %d / skipped %d",
+        len(updates),
+        len(rows) - len(updates),
+    )
+
+
+def _known(derived: str, stored: str | None) -> str:
+    """Prefer a derived enum name, falling back when the file did not say."""
+    return derived if derived and derived.upper() != "UNKNOWN" else (stored or "")
 
 
 def save_deck(

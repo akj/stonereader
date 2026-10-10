@@ -8,6 +8,12 @@ itself. Decided in ticket #22. Kills the synthetic-earcon channel ADR-0007
 anticipated — its optional boundary edge cue is dead; the boundary
 title-repeat stands alone.
 
+Amended 2026-10-10: "no Hearthstone install found" is said only when no
+install was found. While the index is being built the channel says it is
+still preparing, and an install whose audio cannot be read says so ("couldn't
+read Hearthstone's audio files"). ADR-0017 adds the victory and defeat jingles
+at a replay's game-over event.
+
 ## Context
 
 Ticket #22 was chartered to design a sound-cue channel on the strength of an

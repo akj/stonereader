@@ -8,6 +8,12 @@ example (see Decision). Implementation lands via PRDs opened against the
 final UI spec (wayfinder map #17); nothing here ships code by itself.
 Decided in ticket #21.
 
+Amended 2026-10-10 by ADR-0017: an empty zone is a place — its letter lands
+there with "{Zone label}: empty". A surface-wide context prefix (the Replay
+Viewer's turn) leads landings, rereads, and in-place rebuilds, and a zone
+switch leaves it out, so a zone switch says only what changed. Opening a Deck
+page, a Games list, or a replay starts it at the top.
+
 ## Context
 
 StoneReader's speech accreted per screen. A code inventory (ticket #21)

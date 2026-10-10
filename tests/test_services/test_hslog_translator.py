@@ -32,6 +32,7 @@ from stonereader.services._packets import (
     BlockStartPacket,
     CreateGamePacket,
     FullEntityPacket,
+    GameMetaPacket,
     Packet,
     TagChangePacket,
 )
@@ -62,19 +63,24 @@ def _normalize(p: Packet) -> tuple:
     expected behavior (see test_parser.test_translates_create_game_packet, where
     the incremental name is asserted to be ""), not a translation bug — so the
     EQUIVALENCE comparison blanks the CreateGame player names on both sides.
-    Every other field (entity ids, player ids, hi/lo, tags, packet_id, ordering)
-    must match exactly.
+    ``packet_id`` is dropped too: the live stream also numbers the game-meta
+    packets the tree does not contain. Every other field (entity ids, player
+    ids, hi/lo, tags, ordering) must match exactly.
     """
     if isinstance(p, CreateGamePacket):
         players = tuple(
             (eid, pid, "", hi, lo) for (eid, pid, _name, hi, lo) in p.players
         )
         p = dataclasses.replace(p, players=players)
-    return (type(p).__name__, dataclasses.astuple(p))
+    return (type(p).__name__, dataclasses.astuple(p)[1:])
 
 
 def _live_sequence(name: str) -> List[Packet]:
-    """Feed a fixture line-by-line through the live Parser, accumulating packets."""
+    """Feed a fixture line-by-line through the live Parser, accumulating packets.
+
+    Game-meta packets come from ``DebugPrintGame()`` lines, which are not part
+    of the packet tree, so they are left out of the comparison.
+    """
     path = FIXTURE_DIR / name
     if not path.exists():
         pytest.skip(f"fixture not yet captured: {name}")
@@ -82,7 +88,9 @@ def _live_sequence(name: str) -> List[Packet]:
     out: List[Packet] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         out.extend(parser.feed_line(line))
-    return out
+    ids = [p.packet_id for p in out]
+    assert ids == sorted(set(ids)), "live packet ids must be unique and monotonic"
+    return [p for p in out if not isinstance(p, GameMetaPacket)]
 
 
 def test_module_imports_without_wx_or_filesystem() -> None:
@@ -163,8 +171,7 @@ def test_live_parser_matches_translate_packet_tree() -> None:
     """EQUIVALENCE: live line-by-line Parser == whole-file translate_packet_tree.
 
     Accumulate the live Parser's incremental output and compare the full
-    ordered sequence (packet_id/type/fields) against translating the complete
-    tree. They must be identical modulo player-name resolution (see _normalize).
+    ordered sequence (type/fields) against translating the complete tree. They must be identical modulo player-name resolution (see _normalize).
     """
     name = "match_start.log"
     tree = _tree_from_fixture(name)
@@ -179,6 +186,34 @@ def test_live_parser_matches_translate_packet_tree() -> None:
     assert live_norm == whole_norm, (
         "live incremental sequence diverges from whole-file translation"
     )
+
+
+def test_sub_spell_children_translate_in_place_live_and_whole_file() -> None:
+    """A SUB_SPELL only wraps a visual effect: the cards it reveals and draws
+    land inside the enclosing block, with no block boundary of its own.
+
+    reveals_and_new_cards.log draws entities 5 and 6 inside a sub-spell in a
+    POWER block of the friendly hero (entity 10).
+    """
+    name = "reveals_and_new_cards.log"
+    whole_file = translate_packet_tree(_tree_from_fixture(name))
+    start = next(
+        i
+        for i, p in enumerate(whole_file)
+        if isinstance(p, BlockStartPacket) and p.block_type == "POWER"
+    )
+    block = whole_file[start : start + 5]
+
+    assert [(type(p).__name__, getattr(p, "entity_id")) for p in block] == [
+        ("BlockStartPacket", 10),
+        ("ShowEntityPacket", 5),
+        ("ShowEntityPacket", 6),
+        ("TagChangePacket", 6),
+        ("BlockEndPacket", 10),
+    ]
+    assert [_normalize(p) for p in _live_sequence(name)] == [
+        _normalize(p) for p in whole_file
+    ]
 
 
 def test_equivalence_preserves_create_game_structure() -> None:

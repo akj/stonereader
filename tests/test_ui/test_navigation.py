@@ -32,6 +32,7 @@ def controller(
 ) -> NavigationController:
     return NavigationController(
         lambda title: events.append(f"title:{title}"),
+        lambda heading: events.append(f"heading:{heading}"),
         Announcer(speech),
         lambda: events.append("stop"),
         lambda surface: events.append(f"activate:{surface.spec.name}"),
@@ -79,14 +80,17 @@ def test_every_landing_route_uses_same_ordered_effects() -> None:
     assert events == [
         "stop",
         "title:Cards — StoneReader",
+        "heading:Cards",
         "activate:Cards",
         "landing:Cards:0",
         "stop",
         "title:Detail — StoneReader",
+        "heading:Cards › Detail",
         "activate:Detail",
         "landing:Detail:0",
         "stop",
         "title:Cards — StoneReader",
+        "heading:Cards",
         "activate:Cards",
         "landing:Cards:0",
     ]
@@ -169,9 +173,10 @@ def test_jump_path_resets_to_exact_validated_home_rooted_path() -> None:
     navigation.jump_path(["Home", "Cards", "Detail"])
 
     assert navigation.stack == ("Home", "Cards", "Detail")
-    assert events[-4:] == [
+    assert events[-5:] == [
         "stop",
         "title:Detail — StoneReader",
+        "heading:Cards › Detail",
         "activate:Detail",
         "landing:Detail:0",
     ]
@@ -205,6 +210,55 @@ def test_display_name_controls_window_title() -> None:
     assert "title:Aggro Shaman — StoneReader" in events
 
 
+def test_heading_joins_stack_display_names_below_home_without_repeats() -> None:
+    headings: list[str] = []
+    navigation = NavigationController(
+        lambda _title: None,
+        headings.append,
+        Announcer(FakeSpeech()),
+        lambda: None,
+        lambda _surface: None,
+    )
+    deck = ["Odd Hunter"]
+    named = {
+        "Deck detail": lambda: deck[0],
+        "Deck cards": lambda: f"{deck[0]} cards",
+    }
+    for name in ["Home", "Decks", "Deck detail", "Deck cards"]:
+        navigation.register(
+            name,
+            lambda name=name: ActiveSurface(
+                SurfaceSpec(
+                    name,
+                    WidgetType.VERTICAL_MENU,
+                    options=lambda: [],
+                    display_name=named.get(name),
+                ),
+                FakeEngine(name, []),
+                CommandRegistry(),
+            ),
+        )
+
+    navigation.jump("Home")
+    navigation.jump("Decks")
+    navigation.drill_down("Deck detail")
+    navigation.drill_down("Deck cards")
+    navigation.back()
+    deck[0] = "Aggro Shaman"
+    navigation.jump_path(["Home", "Decks", "Deck detail", "Deck cards"])
+    navigation.jump("Home")
+
+    assert headings == [
+        "Home",
+        "Decks",
+        "Decks › Odd Hunter",
+        "Decks › Odd Hunter › Cards",
+        "Decks › Odd Hunter",
+        "Decks › Aggro Shaman › Cards",
+        "Home",
+    ]
+
+
 def test_back_can_queue_the_revealed_surface_landing() -> None:
     navigation = controller([], FakeSpeech())
     register_factories(navigation, [])
@@ -216,3 +270,70 @@ def test_back_can_queue_the_revealed_surface_landing() -> None:
     cards = navigation._surfaces["Cards"]
     assert isinstance(cards.engine, FakeEngine)
     assert cards.engine.continuations == [False, True]
+
+
+def test_retitle_shows_a_surface_renamed_in_place() -> None:
+    titles: list[str] = []
+    headings: list[str] = []
+    navigation = NavigationController(
+        titles.append,
+        headings.append,
+        Announcer(FakeSpeech()),
+        lambda: None,
+        lambda _surface: None,
+    )
+    subject = ["Hunter cards"]
+    for name in ["Cards", "Card Browser"]:
+        navigation.register(
+            name,
+            lambda name=name: ActiveSurface(
+                SurfaceSpec(
+                    name,
+                    WidgetType.VERTICAL_MENU,
+                    options=lambda: [],
+                    display_name=(lambda: subject[0]) if name == "Card Browser" else None,
+                ),
+                FakeEngine(name, []),
+                CommandRegistry(),
+            ),
+        )
+    navigation.jump("Cards")
+    navigation.drill_down("Card Browser")
+
+    subject[0] = "Mage cards"
+    navigation.retitle()
+
+    assert headings[-2:] == ["Cards › Hunter cards", "Cards › Mage cards"]
+    assert titles[-1] == "Mage cards — StoneReader"
+
+
+def test_a_crumb_naming_its_parent_outright_uses_its_surface_name() -> None:
+    headings: list[str] = []
+    navigation = NavigationController(
+        lambda _title: None,
+        headings.append,
+        Announcer(FakeSpeech()),
+        lambda: None,
+        lambda _surface: None,
+    )
+    named = {"Deck": "Other games", "Games": "Other games"}
+    for name in ["Decks", "Deck", "Games"]:
+        navigation.register(
+            name,
+            lambda name=name: ActiveSurface(
+                SurfaceSpec(
+                    name,
+                    WidgetType.VERTICAL_MENU,
+                    options=lambda: [],
+                    display_name=(lambda: named[name]) if name in named else None,
+                ),
+                FakeEngine(name, []),
+                CommandRegistry(),
+            ),
+        )
+
+    navigation.jump("Decks")
+    navigation.drill_down("Deck")
+    navigation.drill_down("Games")
+
+    assert headings[-1] == "Decks › Other games › Games"

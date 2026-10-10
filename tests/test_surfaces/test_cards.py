@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections import Counter
+
 import pytest
 
 from stonereader.models.card import Card, CardDatabase
@@ -162,6 +164,107 @@ def test_real_database_is_loaded_once_and_initial_results_are_mana_then_name_sor
     keys = [(value.cost, value.name.casefold(), value.dbf_id) for value in values]
     assert keys == sorted(keys)
     assert all(value.collectible for value in values)
+
+
+def class_lists(card_db: CardDatabase) -> dict[str, list[Card]]:
+    """Tab through every class filter and return each list by context label."""
+    harness = make_harness(card_db)
+    label = harness.subject_surface.spec.context_label
+    assert label is not None
+    lists: dict[str, list[Card]] = {}
+    for _ in range(13):
+        harness.press(Chord("tab"))
+        lists[label()] = list(harness.subject_surface.spec.zones[0].items())
+    return lists
+
+
+def test_class_lists_hold_only_deck_cards_and_no_hero_skins(
+    real_card_db: CardDatabase,
+) -> None:
+    lists = class_lists(real_card_db)
+
+    assert list(lists) == [
+        "Death Knight cards", "Demon Hunter cards", "Druid cards",
+        "Hunter cards", "Mage cards", "Paladin cards", "Priest cards",
+        "Rogue cards", "Shaman cards", "Warlock cards", "Warrior cards",
+        "Neutral cards", "All cards",
+    ]
+    every_card = [card for cards in lists.values() for card in cards]
+    assert [card.id for card in every_card if card.card_set == "HERO_SKINS"] == []
+    assert [card.name for card in every_card if card.name.startswith("[")] == []
+    assert {card.card_type for card in every_card} == {
+        "HERO", "LOCATION", "MINION", "SPELL", "WEAPON",
+    }
+    hunter = {card.name for card in lists["Hunter cards"]}
+    assert {"Beaststalker Tavish", "Deathstalker Rexxar", "Zul'jin"} <= hunter
+    assert "Alleria Windrunner" not in hunter
+
+
+def test_every_class_list_names_each_card_once(real_card_db: CardDatabase) -> None:
+    lists = class_lists(real_card_db)
+    duplicates = {
+        label: sorted(
+            name
+            for name, count in Counter(card.name.casefold() for card in cards).items()
+            if count > 1
+        )
+        for label, cards in lists.items()
+    }
+
+    assert duplicates == {label: [] for label in lists}
+    printings = {card.name: card for card in lists["All cards"]}
+    assert [card.id for card in lists["Mage cards"] if card.name == "Coldarra Drake"] == [
+        "AT_008"
+    ]
+    assert (printings["Leeroy Jenkins"].id, printings["Leeroy Jenkins"].cost) == (
+        "EX1_116",
+        5,
+    )
+    assert printings["Lord Jaraxxus"].id == "CORE_EX1_323"
+
+
+def test_one_printing_per_name_prefers_named_then_current_then_newest() -> None:
+    harness = make_harness(
+        database(
+            card(1, "Drake", cost=6, card_set="TGT"),
+            card(9, "Drake", cost=6, card_set="PLACEHOLDER_202204"),
+            card(2, "Leeroy", cost=5, card_set="EXPERT1"),
+            card(8, "Leeroy", cost=4, card_set="VANILLA"),
+            card(3, "Fireball", cost=4, card_set="LEGACY"),
+            card(7, "Fireball", cost=4, card_set="CORE"),
+            card(4, "Placeholder only", cost=2, card_set="PLACEHOLDER_202204"),
+        )
+    )
+
+    assert [
+        (item.name, item.card_set)
+        for item in harness.subject_surface.spec.zones[0].items()
+    ] == [
+        ("Placeholder only", "PLACEHOLDER_202204"),
+        ("Fireball", "CORE"),
+        ("Leeroy", "EXPERT1"),
+        ("Drake", "TGT"),
+    ]
+    assert harness.horizontal.items_snapshot()[2] == ["2 mana", "Spell", "Neutral", "Common"]
+    harness.press(Chord("end"))
+    assert harness.horizontal.items_snapshot()[2][-1] == "The Grand Tournament"
+
+
+def test_torch_reads_its_damage_and_set_name(real_card_db: CardDatabase) -> None:
+    harness = make_harness(real_card_db)
+
+    commit_search(harness, "Deal 8 damage to a damaged")
+
+    assert current_names(harness) == ["Torch"]
+    assert harness.horizontal.items_snapshot()[2] == [
+        "1 mana",
+        "Spell",
+        "Deal 8 damage to a damaged minion. "
+        "Return this to hand with any excess damage.",
+        "Warrior",
+        "Rare",
+        "Cataclysm",
+    ]
 
 
 def test_context_label_composes_all_spec_rows_verbatim() -> None:
@@ -330,10 +433,12 @@ def test_help_documents_both_directions_for_class_and_page_chords() -> None:
         entry.phrase for entry in screen_bindings(harness.subject_surface)
     ]
 
-    assert phrases[-5:] == [
+    assert phrases == [
         "Tab: jump to the next class",
         "Shift+Tab: jump to the previous class",
         "Ctrl+F: search for a card",
+        "0 to 8: show only cards of that mana cost",
+        "9: show only cards costing 9 or more",
         "Page Up: jump ten cards back",
         "Page Down: jump ten cards forward",
     ]
@@ -371,7 +476,7 @@ def test_detail_lines_cover_minion_weapon_spell_and_empty_text() -> None:
                 3,
                 "C Spell",
                 cost=1,
-                card_class="MAGE",
+                card_class="DEATHKNIGHT",
                 card_type="SPELL",
                 attack=8,
                 health=8,
@@ -388,7 +493,7 @@ def test_detail_lines_cover_minion_weapon_spell_and_empty_text() -> None:
         "Taunt.",
         "Mage",
         "Rare",
-        "CORE",
+        "Core",
     ]
     harness.press(Chord("right"))
     assert harness.horizontal.items_snapshot()[2] == [
@@ -398,15 +503,14 @@ def test_detail_lines_cover_minion_weapon_spell_and_empty_text() -> None:
         "Swing.",
         "Warrior",
         "Epic",
-        "EXPERT1",
+        "Classic",
     ]
     harness.press(Chord("home"))
     assert harness.horizontal.items_snapshot()[2] == [
         "1 mana",
         "Spell",
-        "Mage",
+        "Death Knight",
         "Common",
-        "TEST",
     ]
 
 

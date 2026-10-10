@@ -7,7 +7,7 @@ from hslog.packets.* into our internal _packets.* types.
 from __future__ import annotations
 
 import logging
-from typing import Any, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from hslog import LogParser
 from hslog import packets as hslog_packets
@@ -20,9 +20,11 @@ from hslog.exceptions import (
 
 from stonereader.services import _hslog_translator as translator
 from stonereader.services._exceptions import ParserError
-from stonereader.services._packets import Packet
+from stonereader.services._packets import GameMetaPacket, Packet
 
 logger = logging.getLogger(__name__)
+
+_GAME_META_MARKER = "GameState.DebugPrintGame() - "
 
 
 class Parser:
@@ -45,6 +47,11 @@ class Parser:
         # closes it only when the BLOCK_END line is later parsed. We emit the
         # matching BlockEnd on the subsequent walk where it has closed, once.
         self._emitted_block_ends: Set[int] = set()
+        # How many leading packets of each hslog packet list are finished:
+        # emitted, and closed if they are blocks. A walk resumes after them, so
+        # each line costs what changed rather than the whole game so far. The
+        # list itself is kept beside its count so a recycled id never matches.
+        self._settled: Dict[int, Tuple[Any, int]] = {}
         self._next_packet_id: int = 0
         self._missing_enums_logged: Set[Tuple[str, Any]] = set()
         # Deferred emission tracking for CreateGame: hslog appends Player rows
@@ -59,6 +66,7 @@ class Parser:
         self._hslog = LogParser()
         self._seen_ids.clear()
         self._emitted_block_ends.clear()
+        self._settled.clear()
         self._next_packet_id = 0
         self._pending_create_game_pyid = None
         # Keep _missing_enums_logged across resets — same enum drift appears
@@ -87,7 +95,30 @@ class Parser:
             logger.exception("unexpected error in hslog.read_line")
             return []
 
-        return self._collect_new_packets()
+        out = self._collect_new_packets()
+        meta = self._game_meta_packet(line)
+        if meta is not None:
+            out.append(meta)
+        return out
+
+    def _game_meta_packet(self, line: str) -> Optional[GameMetaPacket]:
+        """Emit the game type or format a ``DebugPrintGame()`` line just set.
+
+        hslog keeps these in ``game_meta`` rather than the packet tree and
+        never clears it between games, so the packet is emitted whenever the
+        line is read, even when the value matches the previous game's.
+        """
+        _, marker, data = line.partition(_GAME_META_MARKER)
+        if not marker:
+            return None
+        key = data.partition("=")[0].strip()
+        raw = self._hslog.game_meta.get(key)
+        if key not in ("GameType", "FormatType") or raw is None:
+            return None
+        value = int(raw)
+        if key == "GameType":
+            return GameMetaPacket(packet_id=self._next_id(), game_type=value)
+        return GameMetaPacket(packet_id=self._next_id(), format_type=value)
 
     def _collect_new_packets(self) -> List[Packet]:
         """Walk the in-progress packet tree and translate any unseen packets."""
@@ -124,8 +155,20 @@ class Parser:
         Returns True if the walk halted (the caller must stop too), False if it
         reached the end of this packet list.
         """
+        key = id(hslog_pkts)
+        entry = self._settled.get(key)
+        settled = entry[1] if entry is not None and entry[0] is hslog_pkts else 0
+
+        def finished(idx: int) -> None:
+            # Only a contiguous run of finished packets can be skipped later.
+            nonlocal settled
+            if idx == settled:
+                settled += 1
+                self._settled[key] = (hslog_pkts, settled)
+
         pkts_list = list(hslog_pkts)
-        for idx, hp in enumerate(pkts_list):
+        for idx in range(settled, len(pkts_list)):
+            hp = pkts_list[idx]
             pyid = id(hp)
             is_last = idx == len(pkts_list) - 1
             if pyid in self._seen_ids:
@@ -136,6 +179,16 @@ class Parser:
                         return True
                     if not self._maybe_emit_block_end(hp, pyid, out):
                         return True
+                    # Closed: every child was emitted before its BlockEnd, and
+                    # hslog appends nothing after BLOCK_END.
+                    finished(idx)
+                elif translator.is_sub_spell(hp):
+                    # hslog can leave a SubSpell open after its block ends, so
+                    # it is re-walked until the block around it settles.
+                    if self._walk(hp.packets, out):
+                        return True
+                else:
+                    finished(idx)
                 continue
             # Defer CreateGame emission until subsequent packets exist OR the
             # hslog parser state confirms we've moved past Player parsing.
@@ -164,7 +217,7 @@ class Parser:
                         hslog_packets.ChangeEntity,
                     ),
                 )
-                and self._entity_packet_still_building(hp)
+                and self._entity_packet_still_building(hp, hslog_pkts)
             ):
                 return True
             self._seen_ids.add(pyid)
@@ -177,10 +230,16 @@ class Parser:
                     return True
                 if not self._maybe_emit_block_end(hp, pyid, out):
                     return True
+                finished(idx)
+            elif translator.is_sub_spell(hp):
+                # Children only, in place: a SubSpell has no block boundary.
+                if self._walk(hp.packets, out):
+                    return True
             else:
                 translated = translator.translate_packet(hp, self._next_id)
                 if translated is not None:
                     out.append(translated)
+                finished(idx)
         return False
 
     def _maybe_emit_block_end(self, hp: Any, pyid: int, out: List[Packet]) -> bool:
@@ -207,7 +266,7 @@ class Parser:
         out.append(translator.make_block_end(hp, self._next_id()))
         return True
 
-    def _entity_packet_still_building(self, hp: Any) -> bool:
+    def _entity_packet_still_building(self, hp: Any, container: Any) -> bool:
         """True if hslog's parser is still appending tag rows to this packet.
 
         hslog tracks the currently-being-built entity packet via
@@ -215,13 +274,20 @@ class Parser:
         target, more `tag=...` rows may be appended on subsequent lines.
         Once a new packet starts (or hslog moves into a different parsing
         target), the entity packet is stable and safe to translate.
+
+        hslog never clears ``entity_packet``, so the pointer alone would keep
+        a reveal that ends a SubSpell or block "building" until the next
+        entity line. ``container`` is the packet list holding ``hp``; once
+        hslog's current block appends elsewhere, that container has closed
+        (SUB_SPELL_END or BLOCK_END) and no more tag rows will arrive.
         """
         try:
             state = self._hslog._parsing_state
             entity_packet = getattr(state, "entity_packet", None)
+            current = getattr(state.current_block, "packets", None)
         except AttributeError:
             return False
-        return entity_packet is hp
+        return entity_packet is hp and current is container
 
     def _create_game_still_building(self, hp: Any) -> bool:
         """True if hslog is still appending Player rows to this CreateGame.

@@ -5,8 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from stonereader.models.card import CARD_CLASS_NAMES, Card, CardDatabase
+from stonereader.models.card import CARD_CLASS_NAMES, Card, CardDatabase, set_name
 from stonereader.surfaces._game_audio import CardAudioIndex, open_sounds_for_card
+from stonereader.spoken import class_name
 from stonereader.surfaces.sounds_menu import SoundsMenuHolder
 from stonereader.ui.announcer import Announcer
 from stonereader.ui.builder import build_active_surface
@@ -26,11 +27,11 @@ class TextModeSink(Protocol):
 
 _CLASS_FILTERS: tuple[tuple[str, str | None], ...] = (
     *sorted(
-        (label, value)
-        for value, label in CARD_CLASS_NAMES.items()
+        (class_name(value), value)
+        for value in CARD_CLASS_NAMES
         if value != "NEUTRAL"
     ),
-    ("Neutral", "NEUTRAL"),
+    (class_name("NEUTRAL"), "NEUTRAL"),
     ("All cards", None),
 )
 
@@ -62,13 +63,13 @@ class CardsState:
             self._cache_key = key
         return self._cache
 
+    def subject_label(self) -> str:
+        """Name the class choice alone: "Hunter cards", "All cards"."""
+        subject = "All" if self.class_filter is None else class_name(self.class_filter)
+        return f"{subject} cards"
+
     def context_label(self) -> str:
-        class_name = (
-            "All"
-            if self.class_filter is None
-            else CARD_CLASS_NAMES[self.class_filter]
-        )
-        base = f"{class_name} cards"
+        base = self.subject_label()
         if self.search and self.class_filter is None and self.mana_filter is None:
             # The spec pins both comma-composed labels and this verbatim exception:
             # "Mage cards, 3 mana, matching fire" / "All cards matching fire".
@@ -151,6 +152,7 @@ def build_card_browser(
         index = values.index(state.class_filter)
         state.class_filter = values[(index + direction) % len(values)]
         state.invalidate()
+        nav.retitle()
         reland()
 
     def set_mana_filter(mana: int) -> None:
@@ -240,6 +242,7 @@ def build_card_browser(
         "Card Browser",
         WidgetType.HORIZONTAL_LIST,
         context_label=state.context_label,
+        display_name=state.subject_label,
         zones=[
             ZoneSpec(
                 "cards",
@@ -250,6 +253,7 @@ def build_card_browser(
             )
         ],
         bindings=mana_bindings,
+        help_first=[Chord("tab"), Chord("tab", shift=True), Chord("f", ctrl=True)],
         slot_fills={
             Slot.GROUP_JUMP: forward_class,
             Slot.SEARCH: Command(
@@ -301,13 +305,11 @@ def _detail_lines(card: Card) -> list[str]:
     if card.text:
         lines.append(card.text)
     if card.card_class:
-        lines.append(
-            CARD_CLASS_NAMES.get(card.card_class, _display_enum(card.card_class))
-        )
+        lines.append(class_name(card.card_class))
     if card.rarity:
         lines.append(_display_enum(card.rarity))
-    if card.card_set:
-        lines.append(card.card_set)
+    if spoken_set := set_name(card.card_set):
+        lines.append(spoken_set)
     return lines
 
 
