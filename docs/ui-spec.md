@@ -277,12 +277,16 @@ line carries what tells it apart, most important first, and omits the usual
 case (ADR-0017).
 
 **Data hygiene** (ADR-0017). Counts agree with their nouns everywhere ("1
-win", "2 losses", "1 turn", "1 file chosen"). Class keys are spoken through
-one formatter ("Death Knight", never "Deathknight"). Card text is the text
-the collection shows, with no markup: no "[x]", "@", "$", "#", "{n}"
-placeholders, or tags, numbers the card data supplies filled in, and in-play
-variants left out. Set names are the game's own names, never internal keys
-("HERO_SKINS").
+win", "2 losses", "1 turn", "1 secret", "1 file chosen",
+"Opponent deck, 1 card"). Class keys are spoken through one formatter
+("Death Knight", never "Deathknight"). Card text is the text the collection
+shows, with no markup: no "[x]", "@", "$", "#", "{n}" placeholders, or tags,
+numbers the card data supplies filled in, a slot that names a minion type
+spoken as the type ("get 2 random Naga"), and in-play variants left out. Set
+names are the game's own names, never internal keys ("HERO_SKINS"). A card's
+name is never its card id: a card missing from StoneReader's card data reads
+"Unrecognized card", with the detail line "Not in StoneReader's card data
+yet" in place of its cost, and a card the game hid stays "Unknown card".
 
 **Movement and boundaries.** Moving the cursor speaks the bare title, option, or
 detail line — no position appended. Shift+Up is the orientation key: it re-fires
@@ -330,10 +334,11 @@ games. Deck is one subject's page of records and actions. Games lists the
 games behind one record. Deck detail lists one saved deck's cards. A
 Surface's display name — its window title and heading entry — is its
 registered name unless it names its subject: a Deck page says the subject
-("Odd Hunter"), Deck detail says "{Deck name} cards", Games says its context
-label, and the Sounds menu says "{Card name} sounds" (ADR-0006, ADR-0017).
-Generated help uses each Surface's registered name ("Deck help") and widget
-type.
+("Odd Hunter"), Deck detail says "{Deck name} cards", Card Browser says the
+class choice ("Hunter cards"), Games says its context label, and the Sounds
+menu says "{Card name} sounds" (ADR-0006, ADR-0017). Help takes the display
+name of the Surface it was opened from ("Odd Hunter help", "Hunter cards
+help"); All commands lists Surfaces by registered name ("Deck commands").
 
 ## Navigation stack, window title, topology
 
@@ -355,12 +360,16 @@ type.
 heading with the stack path, the current Surface's list, and, on a horizontal
 list, the current item's detail lines in a pane beside the list. The heading
 names every Surface on the stack below Home by its display name, joined by
-" › " — "Decks › Odd Hunter › Odd Hunter cards" — and reads "Home" at Home.
-When the heading is too long for the window, its start gives way so the
-current Surface stays visible. The list shows the rows that fit, scrolled the
-least distance that keeps the current row in view, with the current row
-highlighted. A vertical menu has no detail pane. The window is render-only:
-no part of it takes keyboard focus, and speech never reads from it (ADR-0010).
+" › ", and reads "Home" at Home. A name that repeats its parent's name after
+a space or ", " drops it — "Decks › Odd Hunter › Cards",
+"Decks › Odd Hunter › Versus Mage", "Replays › Replay Viewer › Help" — while
+the window title keeps the full display name. When the heading is too long
+for the window, its start gives way so the current Surface stays visible.
+The list shows the rows that fit, scrolled the least distance that keeps the
+current row in view, with the current row highlighted, and redraws on every
+landing, so a deletion or a new subject never leaves stale rows on screen. A
+vertical menu has no detail pane. The window is render-only: no part of it
+takes keyboard focus, and speech never reads from it (ADR-0010).
 There is no status bar and no `wx.MenuBar` (ADR-0006).
 
 **System-wide hotkeys** (native OS registration, ADR-0005; rebindable in
@@ -372,7 +381,7 @@ other input route, so none can die silently (ADR-0010).
 | Ctrl+Shift+L | Jump to Live Game | Screen jump to Live Game, landing on Remaining Deck (ADR-0006); with no game in progress it lands on the waiting utterance and switches no zone (ADR-0017) |
 | Ctrl+Shift+C | Jump to Cards | Screen jump to Cards (ADR-0006) |
 | Ctrl+Shift+R | Jump to Replays | Screen jump to Replays (ADR-0006) |
-| Ctrl+Shift+D | Speak deck counts | Speak-only: "Your deck, {n} cards", or "Waiting for a game" with no game in progress — navigates nowhere (ADR-0006, ADR-0007, ADR-0017) |
+| Ctrl+Shift+D | Speak deck counts | Speak-only: "Your deck, {n} cards" ("Your deck, 1 card"), or "Waiting for a game" with no game in progress — navigates nowhere (ADR-0006, ADR-0007, ADR-0017) |
 
 (ADR-0006's table also carried Ctrl+Shift+O, jump to the live Opponent hand,
 and Ctrl+Shift+H, speak opponent hand count; *this spec's amendment* retired
@@ -843,7 +852,7 @@ computed over (ADR-0011, ADR-0012).
 on "Cards, {n}"); back pops one level to that page (ADR-0006, ADR-0017).
 
 **Window title:** `{Deck name} cards — StoneReader` (ADR-0006, ADR-0017).
-Heading: "Decks › Odd Hunter › Odd Hunter cards".
+Heading: "Decks › Odd Hunter › Cards".
 **Entry utterance:** `"{Deck name} cards, {title}, {position} of {count}"`, or
 `"{Deck name} cards: empty"` (ADR-0007, ADR-0017) — "Odd Hunter cards, Arcane
 Shot x2, 1 of 15".
@@ -890,7 +899,7 @@ left (ADR-0006, ADR-0017). Every open starts at the newest game, unarmed; back
 from the Replay Viewer finds the list as left (ADR-0017).
 
 **Window title:** `{Context label} — StoneReader` — `Odd Hunter games —
-StoneReader`. Heading: "Decks › Odd Hunter › Odd Hunter games" (ADR-0017).
+StoneReader`. Heading: "Decks › Odd Hunter › Games" (ADR-0017).
 **Context label** — names the selection (ADR-0017):
 
 | Record row | Saved deck page | All decks page | Other games page |
@@ -908,7 +917,10 @@ says `"{Context label}: empty"` — "Odd Hunter versus Warrior: empty"
 [Replays](#replays) row title, without the deck name when the list is one
 saved deck's — "Won against Warrior in 8 turns, Wednesday"; on All decks and
 Other games lists the deck name stays — "Won against Mage in 8 turns, today
-3:36 PM, Odd Hunter" (ADR-0017). There is no import option.
+3:36 PM, Odd Hunter" (ADR-0017). A Versus {Class} list already names the
+class, so its rows leave it out, and the outcome reads "Won", "Lost",
+"Tied", or "Result unknown" — "Won in 8 turns, Wednesday" (ADR-0017). There
+is no import option.
 
 **Keys**
 
@@ -1001,10 +1013,12 @@ Ctrl+Shift+C. Back goes Home. The menu keeps its cursor when revealed again.
 without case distinctions.
 
 **Which cards** (ADR-0017). Card Browser lists the cards a deck can hold:
-collectible heroes, locations, minions, spells, and weapons. Hero skins and
-other cosmetics are excluded. Each card name appears once: a printing from a
-named set beats one from an unnamed placeholder set, a current printing beats
-its Classic-format copy, and otherwise the newest printing wins.
+collectible heroes, locations, minions, spells, and weapons. Hero skins,
+other cosmetics, and internal cards whose names are bracketed tags
+("[CORE 2024] …") are excluded. Each card name appears once: a printing
+from a named set beats one from an unnamed placeholder set, a current
+printing beats its Classic-format copy, and otherwise the newest printing
+wins.
 
 **Reached and left:** Enter on a class, Neutral, or All cards in Cards. Back
 returns to Cards at the previous menu position. Tab and Shift+Tab cycle the
@@ -1012,7 +1026,10 @@ same order as the class menu. Mana and search filters persist across classes.
 Choosing a menu option or changing a filter resets the card and detail cursors.
 Abandoning search or returning from help or Sounds menu keeps the current card.
 
-**Window title:** `Card Browser — StoneReader`.
+**Window title:** the class choice, without the mana or search filter —
+`Hunter cards — StoneReader`, `All cards — StoneReader`. Heading:
+"Cards › Hunter cards". Tab and Shift+Tab retitle the window and heading in
+place (ADR-0017).
 **Entry utterance:** `"{Context label}, {title}, {position} of {count}"`, where
 the context label carries the active filter and search state (ADR-0007). Empty
 results degrade to `"{Context label}: empty"`, which dissolves a separate "No
@@ -1113,7 +1130,7 @@ ADR-0017):
 | Outcome | "Won against", "Lost to", "Tied with", or "Result unknown against", then the opponent's class and the turn count — "Lost to Death Knight in 1 turn" |
 | when | Local time: "today 3:36 PM", "yesterday 9:10 PM", the bare weekday for two to six days ago ("Wednesday"), otherwise "August 9", with the year when it is not this year ("December 31, 2025"). Omitted when the time cannot be read |
 | deck | The deck name snapshotted when the game was saved, when the game is attributed to a deck (ADR-0012) |
-| game type | Only when not Ranked: "Casual", "Practice" (against the AI), "Friendly" (a friendly challenge), "Tavern Brawl", "Arena", "Battlegrounds". Unknown values are omitted, never spoken as "Unknown" |
+| game type | Only when not Ranked, spoken by family: "Practice" (against the AI), "Friendly" (a friendly challenge), "Tavern Brawl", "Battlegrounds", "Battlegrounds Duos", "Arena", "Underground Arena", "Duels", "Heroic Duels", "Mercenaries"; any other type in title case ("Casual"). Unknown values are omitted, never spoken as "Unknown" |
 | format | Only when not Standard: "Wild", "Classic", "Twist". Unknown values are omitted |
 | imported | For a game imported rather than recorded live |
 | not counted | For a game outside the **Stats corpus**. Membership rides in the title (ADR-0017, superseding ADR-0012's detail line) |
@@ -1220,8 +1237,8 @@ event, with every other zone cursor reset. Back-reveal, from help or the
 Sounds menu, still finds the Replay Viewer as left (ADR-0017).
 
 **Window title:** `Replay Viewer — StoneReader` (ADR-0006). Heading: the path
-that opened it — "Replays › Replay Viewer", or "Decks › Odd Hunter › Odd
-Hunter games › Replay Viewer" (ADR-0017).
+that opened it — "Replays › Replay Viewer", or
+"Decks › Odd Hunter › Games › Replay Viewer" (ADR-0017).
 
 **Entry utterance:** the Replay Viewer's surface-wide context prefix is the
 turn, `"Your turn {t}"` or `"Opponent's turn {t}"`, and the context label is
@@ -1295,13 +1312,16 @@ when a creation lineage exists.
 *Your deck* — cards in printed-mana order, then name, unknown cards last.
 
 *Hero zones* — title `"{Hero name}, {Health} health"`, plus `", {Armor} armor"`
-when nonzero. Lines: hero power, weapon, secrets count.
+when nonzero. Lines: hero power, weapon, and `"{n} secrets"` ("1 secret").
 
 *Events zone* — title is the Narrator's phrase for that **Game event**
 (ADR-0010 owns the phrasing seam): "You played Boar", "Opponent drew a card",
-"Game over, won". A turn change reads `"Your turn {t}"` / `"Opponent's turn
-{t}"`, the same shape as the context prefix (ADR-0017). Lines: 1
-`"Turn {t}"`; 2 the source card's title where the event has one.
+"Game over, won". A turn change reads "Start of turn": the context prefix
+already names the side and number — "Opponent's turn 2, Events, Start of
+turn, 1 of 1" (ADR-0017). A reveal that only restates a draw or play at the
+same moment is not a separate event, and an enchantment wearing off is not
+an event. Lines: 1 `"Turn {t}"`; 2 the source card's title where the event
+has one.
 
 **Event scrubbing** (ADR-0015). The events zone is the Surface's **fine
 axis**: the selected event renders every other zone at the game just after
@@ -1320,11 +1340,11 @@ event where the focused card was played or drawn — that event's turn, and
 that event in the events cursor — and lands in the Events zone on it, prefix
 first: "Your turn 1, Events, You played Boar, 4 of 11". The landing plays the
 event's sound like any event landing. A card played or drawn more than once
-(returned to hand and replayed) goes to the event on the turn its row names.
-With no
-matching event, Enter says "No event for this card" and stays. In every other
-zone, and in an empty played or drawn zone, Enter is the announced no-op
-"Nothing to do here".
+(returned to hand and replayed) goes to the event on the turn its row names;
+twice in one turn, each row goes to its own event, the second row to the
+second play or draw. With no matching event, Enter says "No event for this
+card" and stays. In every other zone, and in an empty played or drawn zone,
+Enter is the announced no-op "Nothing to do here".
 
 **Keys**
 
@@ -1389,9 +1409,12 @@ jingle included, is always on with a Settings kill-switch (ADR-0008,
 ADR-0017).
 
 **Settings that affect it:** Replay auto-play (the kill-switch); Game audio
-volume; Hearthstone install path (ADR-0011). With no install found, the events
-zone is silent and the listen key announces that game audio is unavailable
-(ADR-0008).
+volume; Hearthstone install path (ADR-0011). Until game audio is ready, the
+events zone is silent and the listen key says why: "Game audio is still
+preparing" while its index builds, "Game audio is unavailable — no
+Hearthstone install found" with no install, and "Game audio is unavailable —
+couldn't read Hearthstone's audio files" when the install's audio cannot be
+read (ADR-0008).
 
 ---
 
@@ -1489,9 +1512,13 @@ missing key means default, unknown keys ignored, no schema versioning until a
 real migration exists. First run means no settings file means all defaults;
 there is no setup wizard (ADR-0011).
 
-**Unavailable rows explain, never hide.** With no Hearthstone install found, the
-game-audio rows stay visible and announce their reason — "Game audio volume,
-unavailable — no Hearthstone install found" (ADR-0011).
+**Unavailable rows explain, never hide.** When game audio is unavailable, the
+volume row stays visible and says why — "Game audio volume, unavailable — no
+Hearthstone install found" with no install, or "Game audio volume,
+unavailable — couldn't read Hearthstone's audio files" when the install's
+audio cannot be read — and Enter there repeats the row instead of opening
+the Picker (ADR-0011). While game audio is still preparing, the row shows
+its value and stays editable.
 
 **Deliberate exclusions from this Surface** (ADR-0011): no speech
 rate/voice/synth settings (speech exits via the User's screen reader and was
@@ -1560,22 +1587,25 @@ All commands finds help as left. F1 inside any help Surface — the Help menu,
 Universal keys, All commands, or a command reference — is an announced no-op
 ("Already in help"): help never stacks on help (ADR-0009).
 
-**Window title:** `{Surface} help — StoneReader`, using the Surface's
-registered name — `Cards help — StoneReader`, `Deck help — StoneReader` on
-any Deck page. *This spec's ruling, compositionally:* the Help menu's surface
-name is "{Surface} help" (ADR-0009) and ADR-0006's template wraps every
-surface name. Heading: the origin's path plus the help name — "Decks › Odd
-Hunter › Deck help" (ADR-0017).
+**Window title:** `{Surface} help — StoneReader`, using the display name of
+the Surface help was opened from — `Cards help — StoneReader`,
+`Odd Hunter help — StoneReader` on the Odd Hunter Deck page,
+`Hunter cards help — StoneReader` from Card Browser (ADR-0017). *This spec's
+ruling, compositionally:* the Help menu's surface name is "{Surface} help"
+(ADR-0009) and ADR-0006's template wraps every surface name. Heading: the
+origin's path plus the help name, trimmed like every crumb —
+"Decks › Odd Hunter › Help" (ADR-0017).
 **Entry utterance:** `"{Surface} help, {current option}"` — the vertical-menu
 form, with the widget-type sentence as the current option on entry (ADR-0007,
 ADR-0009, ADR-0017).
 
 **Options,** in order (ADR-0009, ADR-0017):
 
-1. **The widget-type sentence**, generated from the Surface's declared type —
-   "Card Browser is a horizontal list: Left and Right move between items, Up
-   and Down read details." or "Decks is a menu: Up and Down move between
-   options, Enter acts on the current one."
+1. **The widget-type sentence**, generated from the Surface's declared type
+   and naming only the type, since help's own name already names the
+   Surface — "Horizontal list: Left and Right move between items, Up and
+   Down read details." or "Menu: Up and Down move between options, Enter
+   acts on the current one." (ADR-0017).
 2. **Screen-specific options**, **key-first**: `"{Key}: {action phrase}"` —
    "D: jump to Remaining Deck". Enter's phrase comes first, then the Surface's
    keys in the order its keymap table above lists them; bindings that share
@@ -1662,8 +1692,11 @@ arrowing would stutter through replaced clips (ADR-0008).
 
 - Card with no clips: L announces `"{title}: no sounds"` and does **not** push
   the Surface.
-- No Hearthstone install found: L announces that game audio is unavailable and
-  does not push.
+- Game audio not ready: L says why and does not push — "Game audio is still
+  preparing" while its index builds, "Game audio is unavailable — no
+  Hearthstone install found" with no install, or "Game audio is unavailable —
+  couldn't read Hearthstone's audio files" when the install's audio cannot be
+  read.
 
 **Audio:** Enter starts a clip, replacing any clip already playing. Backing out
 of the Sounds menu is a surface transition and therefore stops it; ordinary
