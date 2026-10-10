@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Protocol
 
 from stonereader.services._replay_store import ReplayImportError
+from stonereader.surfaces._spoken import count
 from stonereader.ui.announcer import Announcer
 from stonereader.ui.builder import build_active_surface
 from stonereader.ui.chords import Chord
@@ -46,8 +47,7 @@ def build_import_replays(
     def chosen_title() -> str:
         if not chosen:
             return "Choose files, none chosen"
-        noun = "file" if len(chosen) == 1 else "files"
-        return f"Choose files, {len(chosen)} {noun} chosen"
+        return f"Choose files, {count(len(chosen), 'file')} chosen"
 
     def stats_title() -> str:
         return f"Count in stats, {'on' if count_in_stats else 'off'}"

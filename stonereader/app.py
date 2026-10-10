@@ -21,10 +21,12 @@ from stonereader.db import get_connection, init_db
 from stonereader.models.game_state import GameState
 from stonereader.services._audio_player import AudioPlayer
 from stonereader.speech_service import SpeechService
-from stonereader.surfaces._deck_data import CurrentDeck, DeckData
+from stonereader.surfaces._deck_data import CurrentDeck, CurrentGames, DeckData
 from stonereader.surfaces.cards import CardsState, build_card_browser, build_cards
 from stonereader.surfaces.deck_detail import build_deck_detail
+from stonereader.surfaces.deck_page import build_deck_page
 from stonereader.surfaces.decks import build_decks
+from stonereader.surfaces.games import build_games
 from stonereader.surfaces.help import HelpOrigin, build_help, open_help
 from stonereader.surfaces.help_all import build_help_all
 from stonereader.surfaces.help_reference import (
@@ -42,7 +44,6 @@ from stonereader.surfaces.replays import build_replays
 from stonereader.surfaces.replay_viewer import CurrentReplay, build_replay_viewer
 from stonereader.surfaces.settings import build_settings
 from stonereader.surfaces.sounds_menu import SoundsMenuHolder, build_sounds_menu
-from stonereader.surfaces.statistics import build_statistics
 from stonereader.ui import (
     ActiveSurface,
     Announcer,
@@ -311,6 +312,7 @@ class StoneReaderApp(wx.App):
         card_db = CardDatabase.load()
 
         current_deck = CurrentDeck()
+        current_games = CurrentGames()
         current_game = CurrentGame()
         current_replay = CurrentReplay()
         deck_data = DeckData(db_conn, card_db)
@@ -403,6 +405,31 @@ class StoneReaderApp(wx.App):
                 _copy_to_clipboard,
             )
 
+        def deck_page_factory() -> ActiveSurface:
+            return build_deck_page(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                db_conn,
+                deck_data,
+                current_deck,
+                current_games,
+                self._frame._sink,
+                _copy_to_clipboard,
+            )
+
+        def games_factory() -> ActiveSurface:
+            return build_games(
+                announcer,
+                self._frame.universal_bindings,
+                nav,
+                db_conn,
+                replay_store,
+                card_db,
+                current_games,
+                current_replay,
+            )
+
         cards_state = CardsState()
 
         def cards_factory() -> ActiveSurface:
@@ -463,6 +490,8 @@ class StoneReaderApp(wx.App):
                 replay_store,
                 card_db,
                 current_replay,
+                deck_data,
+                current_deck,
             )
 
         def replay_viewer_factory() -> ActiveSurface:
@@ -484,14 +513,6 @@ class StoneReaderApp(wx.App):
                 nav,
                 replay_store,
                 _choose_replay_files,
-            )
-
-        def statistics_factory() -> ActiveSurface:
-            return build_statistics(
-                announcer,
-                self._frame.universal_bindings,
-                nav,
-                db_conn,
             )
 
         def settings_factory() -> ActiveSurface:
@@ -571,12 +592,13 @@ class StoneReaderApp(wx.App):
         nav.register("Cards", cards_factory)
         nav.register("Card Browser", card_browser_factory)
         nav.register("Decks", decks_factory)
+        nav.register("Deck", deck_page_factory)
         nav.register("Deck detail", deck_detail_factory)
+        nav.register("Games", games_factory)
         nav.register("Import Deck", import_deck_factory)
         nav.register("Replays", replays_factory)
         nav.register("Replay Viewer", replay_viewer_factory)
         nav.register("Import Replays", import_replays_factory)
-        nav.register("Statistics", statistics_factory)
         nav.register("Settings", settings_factory)
         nav.register("Sounds menu", sounds_menu_factory)
         nav.register("Picker", picker_factory)

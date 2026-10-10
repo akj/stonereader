@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -7,6 +8,7 @@ from typing import cast
 import pytest
 
 from stonereader.services._replay_store import ReplayImportError, ReplayStore
+from stonereader.surfaces._deck_data import CurrentDeck, DeckData
 from stonereader.surfaces.import_replays import build_import_replays
 from stonereader.surfaces.replay_viewer import CurrentReplay
 from stonereader.surfaces.replays import build_replays
@@ -43,6 +45,7 @@ class FakeStore:
 
 
 def _harness(
+    conn: sqlite3.Connection,
     selections: list[list[str]],
     outcomes: list[bool | Exception] | None = None,
 ) -> Harness[FakeStore]:
@@ -62,6 +65,8 @@ def _harness(
             cast(ReplayStore, store),
             make_card_db(),
             CurrentReplay(),
+            DeckData(conn, make_card_db()),
+            CurrentDeck(),
         ),
     )
     harness.nav.register(
@@ -80,10 +85,8 @@ def _harness(
     return harness
 
 
-def test_choose_files_cancel_keeps_previous_selection_and_relands():
-    harness = _harness(
-        [["one.hsreplay", "two.xml"], []]
-    )
+def test_choose_files_cancel_keeps_previous_selection_and_relands(db_conn):
+    harness = _harness(db_conn, [["one.hsreplay", "two.xml"], []])
 
     harness.press(Chord("enter"))
     assert harness.vertical.options_snapshot()[0][0] == "Choose files, 2 files chosen"
@@ -97,18 +100,16 @@ def test_choose_files_cancel_keeps_previous_selection_and_relands():
     assert harness.speech.calls == before_cancel
 
 
-def test_one_selected_file_uses_singular_title():
-    harness = _harness([["one.hsreplay"]])
+def test_one_selected_file_uses_singular_title(db_conn):
+    harness = _harness(db_conn, [["one.hsreplay"]])
 
     harness.press(Chord("enter"))
 
     assert harness.vertical.options_snapshot()[0][0] == "Choose files, 1 file chosen"
 
 
-def test_toggle_announces_dynamic_title_and_applies_to_every_file():
-    harness = _harness(
-        [["one.hsreplay", "two.xml"]], [True, True]
-    )
+def test_toggle_announces_dynamic_title_and_applies_to_every_file(db_conn):
+    harness = _harness(db_conn, [["one.hsreplay", "two.xml"]], [True, True])
     harness.press(Chord("enter"))
     harness.press(Chord("down"))
 
@@ -124,8 +125,8 @@ def test_toggle_announces_dynamic_title_and_applies_to_every_file():
     ]
 
 
-def test_empty_import_is_refused_and_stays_on_form():
-    harness = _harness([])
+def test_empty_import_is_refused_and_stays_on_form(db_conn):
+    harness = _harness(db_conn, [])
     harness.press(Chord("end"))
 
     harness.press(Chord("enter"))
@@ -150,9 +151,11 @@ def test_empty_import_is_refused_and_stays_on_form():
         ),
     ],
 )
-def test_summary_composition_and_continuing_back_to_replays(outcomes, expected):
+def test_summary_composition_and_continuing_back_to_replays(
+    db_conn, outcomes, expected
+):
     files = [f"replay-{index}.xml" for index in range(len(outcomes))]
-    harness = _harness([files], outcomes)
+    harness = _harness(db_conn, [files], outcomes)
     harness.press(Chord("enter"))
     harness.press(Chord("end"))
 
@@ -161,15 +164,15 @@ def test_summary_composition_and_continuing_back_to_replays(outcomes, expected):
     assert harness.nav.stack == ("Home", "Replays")
     assert harness.speech.calls[-2:] == [
         (expected, True),
-        ("Replays, Import replays…, 1 of 1", False),
+        ("Replays, Import replays…", False),
     ]
     assert harness.menu("Import Replays").options_snapshot()[0][0] == (
         "Choose files, none chosen"
     )
 
 
-def test_delete_and_space_are_unbound():
-    harness = _harness([])
+def test_delete_and_space_are_unbound(db_conn):
+    harness = _harness(db_conn, [])
 
     assert harness.press(Chord("delete")) is False
     assert harness.press(Chord("space")) is False
