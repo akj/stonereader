@@ -54,6 +54,9 @@ class SurfaceSpec:
     slot_reverse_fills: dict[Slot, Command] = field(default_factory=dict)
     slot_noops: dict[Slot, str] = field(default_factory=dict)
     display_name: Callable[[], str] | None = None
+    # Chords whose help options follow Enter's, in this order, where the
+    # Surface's spec lists keys out of registration order (ADR-0017).
+    help_first: list[Chord] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if not self.name:

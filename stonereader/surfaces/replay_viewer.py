@@ -330,6 +330,7 @@ def build_replay_viewer(
         context_label=context_label,
         zones=zones,
         bindings=bindings,
+        help_first=[Chord("pageup"), Chord("pagedown"), Chord("f5"), Chord("f6")],
         slot_reverse_fills={Slot.COARSE_AXIS: reverse_turn},
         slot_fills={
             Slot.COARSE_AXIS: forward_turn,

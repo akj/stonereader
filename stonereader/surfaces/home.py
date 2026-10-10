@@ -61,6 +61,7 @@ def build_home(
         WidgetType.VERTICAL_MENU,
         options=lambda: options,
         bindings=bindings,
+        help_first=[Chord("l")],
         slot_fills={
             Slot.ENTER: Command(
                 "home.open",
