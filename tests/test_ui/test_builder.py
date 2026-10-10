@@ -16,6 +16,7 @@ from tests.support import FakeSpeech
 def navigation(announcer: Announcer) -> NavigationController:
     return NavigationController(
         lambda _title: None,
+        lambda _heading: None,
         announcer,
         lambda: None,
         lambda _surface: None,

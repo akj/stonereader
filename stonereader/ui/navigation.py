@@ -32,12 +32,14 @@ class NavigationController:
     def __init__(
         self,
         set_title: Callable[[str], None],
+        set_heading: Callable[[str], None],
         announcer: Announcer,
         stop_audio: Callable[[], None],
         activate: Callable[[ActiveSurface], None],
         home: str = "Home",
     ) -> None:
         self._set_title = set_title
+        self._set_heading = set_heading
         self._announcer = announcer
         self._stop_audio = stop_audio
         self._activate = activate
@@ -80,7 +82,7 @@ class NavigationController:
         """Screen jump to a target, resetting the stack through Home."""
         surface = self._get_surface(name)
         self._stack = [self._home] if name == self._home else [self._home, name]
-        self._land(name, surface)
+        self._land(surface)
         if then is not None:
             # ADR-0006: compound hotkeys equal landing and then pressing a zone key.
             then(surface)
@@ -91,7 +93,7 @@ class NavigationController:
             raise ValueError(f"Surface is already on the stack: {name}")
         surface = self._get_surface(name)
         self._stack.append(name)
-        self._land(name, surface)
+        self._land(surface)
 
     def jump_path(self, names: list[str]) -> None:
         """Reset to an exact Home-rooted path and land on its final Surface."""
@@ -104,10 +106,9 @@ class NavigationController:
         unknown = [name for name in names[1:] if name not in self._factories]
         if unknown:
             raise KeyError(f"Unknown Surface: {unknown[0]}")
-        name = names[-1]
-        surface = self._get_surface(name)
+        surface = self._get_surface(names[-1])
         self._stack = list(names)
-        self._land(name, surface)
+        self._land(surface)
 
     def back(self, continues: bool = False) -> None:
         """Pop one Drill-down, or announce the root no-op.
@@ -120,8 +121,7 @@ class NavigationController:
             self._announcer.already_home(self._home)
             return
         self._stack.pop()
-        name = self._stack[-1]
-        self._land(name, self._get_surface(name), continues=continues)
+        self._land(self._get_surface(self._stack[-1]), continues=continues)
 
     def install_back(self, registry: CommandRegistry) -> None:
         """Centrally install Escape and Backspace on an activated registry."""
@@ -138,20 +138,16 @@ class NavigationController:
         self._surfaces[name] = surface
         return surface
 
-    def _land(
-        self,
-        name: str,
-        surface: ActiveSurface,
-        *,
-        continues: bool = False,
-    ) -> None:
+    def _display_name(self, name: str) -> str:
+        spec = self._get_surface(name).spec
+        return spec.display_name() if spec.display_name is not None else name
+
+    def _land(self, surface: ActiveSurface, *, continues: bool = False) -> None:
         # A single landing path makes route invariance structural (ADR-0010).
         self._stop_audio()
-        display_name = (
-            surface.spec.display_name()
-            if surface.spec.display_name is not None
-            else name
-        )
-        self._set_title(f"{display_name} — StoneReader")
+        # ADR-0017: the heading leaves out the Home root every deeper path shares.
+        path = [self._display_name(name) for name in self._stack[1:] or self._stack]
+        self._set_title(f"{path[-1]} — StoneReader")
+        self._set_heading(" › ".join(path))
         self._activate(surface)
         surface.engine.on_landing(continues=continues)
