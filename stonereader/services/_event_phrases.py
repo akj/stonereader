@@ -46,8 +46,8 @@ def phrase(event: GameEvent, state: GameState) -> str | None:
         }.get(playstate.upper(), "tied")
         return f"Game over, {result}"
     if isinstance(event, TurnChanged):
-        side = "yours" if event.active_player_id == 1 else "opponent's"
-        return f"Turn {event.turn}, {side}"
+        side = "Your" if event.active_player_id == 1 else "Opponent's"
+        return f"{side} turn {event.turn}"
     if isinstance(event, MulliganDone):
         return "Mulligan complete"
     if isinstance(event, CardDrawn):

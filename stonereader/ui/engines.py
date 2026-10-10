@@ -90,13 +90,9 @@ class VerticalMenuEngine:
         """
         options = self._options()
         if not options:
-            self._announcer.context_empty(self._spec.name, continues=continues)
+            self._announcer.context_empty(self._label(), continues=continues)
             return
-        label = (
-            self._spec.context_label()
-            if self._spec.context_label is not None
-            else self._spec.name
-        )
+        label = self._label()
         self._announcer.context_entry_menu(
             label,
             options[self._cursor].title(),
@@ -132,7 +128,7 @@ class VerticalMenuEngine:
     def _move(self, delta: int) -> None:
         options = self._options()
         if not options:
-            self._announcer.context_empty(self._spec.name)
+            self._announcer.context_empty(self._label())
             return
         target = min(max(self._cursor + delta, 0), len(options) - 1)
         title = options[target].title()
@@ -149,14 +145,14 @@ class VerticalMenuEngine:
     def _last(self) -> None:
         options = self._options()
         if not options:
-            self._announcer.context_empty(self._spec.name)
+            self._announcer.context_empty(self._label())
             return
         self._move_to(len(options) - 1)
 
     def _move_to(self, target: int) -> None:
         options = self._options()
         if not options:
-            self._announcer.context_empty(self._spec.name)
+            self._announcer.context_empty(self._label())
             return
         changed = target != self._cursor
         self._cursor = target
@@ -166,6 +162,11 @@ class VerticalMenuEngine:
 
     def _reread(self) -> None:
         self.on_landing()
+
+    def _label(self) -> str:
+        if self._spec.context_label is not None:
+            return self._spec.context_label()
+        return self._spec.name
 
     def _notify(self) -> None:
         for subscriber in tuple(self._subscribers):

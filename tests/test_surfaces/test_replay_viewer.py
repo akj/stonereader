@@ -290,7 +290,7 @@ def test_turn_prefix_leads_landings_rereads_and_turn_steps_but_not_zone_switches
     )
 
     harness.press(Chord("f6"))
-    assert harness.speech.calls[-1] == ("Turn 1, yours", True)
+    assert harness.speech.calls[-1] == ("Your turn 1", True)
     harness.press(Chord("g"))
     assert harness.speech.calls[-1] == ("Opponent board, Enemy, 1 of 1", True)
     harness.press(Chord("up", shift=True))
@@ -398,7 +398,7 @@ def test_card_hidden_status_hero_and_event_rows_follow_the_spec() -> None:
     harness.press(Chord("y"))
     titles = harness.horizontal.items_snapshot()[0]
     assert "Game started, Mage versus Warrior" in titles
-    assert "Turn 1, yours" in titles
+    assert "Your turn 1" in titles
     assert "Mulligan complete" in titles
     assert not any("damage" in title.lower() for title in titles)
     played_index = titles.index("You played Boar")
@@ -410,7 +410,7 @@ def test_event_scrubbing_renders_the_selected_moment_and_end_restores_turn_final
     harness = _harness()
     harness.press(Chord("y"))
     titles = harness.horizontal.items_snapshot()[0]
-    harness.horizontal.jump_to_position(titles.index("Turn 1, yours") + 1)
+    harness.horizontal.jump_to_position(titles.index("Your turn 1") + 1)
 
     harness.press(Chord("b"))
     assert harness.horizontal.items_snapshot()[2][1] == "1 attack, 3 health"
@@ -437,7 +437,7 @@ def test_event_steps_from_board_speak_move_world_and_preserve_board_position() -
 
     harness.press(Chord("f6"))
 
-    assert harness.speech.calls[-1] == ("Turn 1, yours", True)
+    assert harness.speech.calls[-1] == ("Your turn 1", True)
     assert [your_board.title(item) for item in your_board.items()] == ["Boar", "Yeti"]
     assert rendered_titles[-1] == ["Boar", "Yeti"]
     assert harness.horizontal.current_zone().zone_id == "your_board"
@@ -903,7 +903,7 @@ def test_enter_in_played_and_drawn_zones_follows_the_fact_to_its_event() -> None
         assert harness.speech.calls[-1][1] is True
         harness.press(Chord("pagedown"))
         assert harness.speech.calls[-1] == (
-            "Opponent's turn 2, Events, Turn 2, opponent's, 1 of 1",
+            "Opponent's turn 2, Events, Opponent's turn 2, 1 of 1",
             True,
         )
 
@@ -930,7 +930,7 @@ def test_enter_elsewhere_stays_the_announced_noop() -> None:
     # Events, a board, and an empty played zone have no fact to follow.
     assert harness.speech.calls == [
         ("Nothing to do here", True),
-        ("Turn 1, yours", True),
+        ("Your turn 1", True),
         ("Your board, Boar, 1 of 2", True),
         ("Nothing to do here", True),
         ("Game started, Mage versus Warrior", True),

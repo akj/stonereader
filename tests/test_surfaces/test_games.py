@@ -138,7 +138,7 @@ def test_shift_delete_is_immediate_and_an_emptied_list_says_so(
     assert len(harness.context.store.all_replays()) == 2
     assert harness.speech.calls == [
         ("Replay deleted", True),
-        ("Games: empty", False),
+        ("Odd Hunter versus Warrior: empty", False),
     ]
 
 

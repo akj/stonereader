@@ -374,6 +374,7 @@ def build_live_game(
 
     # Enter and the turn keys are constant no-ops during a game, but they are
     # filled rather than declared no-ops so that with no game they can wait.
+    # Their "noop." ids keep them out of help like any other announced no-op.
     spec = SurfaceSpec(
         "Live Game",
         WidgetType.HORIZONTAL_LIST,
@@ -381,12 +382,12 @@ def build_live_game(
         bindings=bindings,
         slot_fills={
             Slot.ENTER: Command(
-                "live.enter",
+                "noop.enter",
                 "Enter: nothing to do here",
                 during_game(lambda: announcer.slot_noop(Slot.ENTER)),
             ),
             Slot.COARSE_AXIS: Command(
-                "live.no_turns",
+                "noop.coarse_axis",
                 "Page Up and Page Down: no turns to step in a live game",
                 during_game(
                     lambda: announcer.noop("No turns to step in a live game")
