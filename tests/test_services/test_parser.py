@@ -88,6 +88,7 @@ def test_live_stream_packet_order_matches_whole_tree(power_log_fixture):
     from hslog import LogParser as HslogLogParser
 
     from stonereader.services._hslog_translator import translate_packet_tree
+    from stonereader.services._packets import GameMetaPacket
     from stonereader.services._parser import Parser
 
     lines = power_log_fixture("game_end.log").read_text(encoding="utf-8").splitlines()
@@ -96,6 +97,8 @@ def test_live_stream_packet_order_matches_whole_tree(power_log_fixture):
     live: list = []
     for line in lines:
         live.extend(parser.feed_line(line))
+    # Game meta comes from DebugPrintGame() lines, outside the packet tree.
+    live = [p for p in live if not isinstance(p, GameMetaPacket)]
 
     hp = HslogLogParser()
     hp._current_date = datetime.now(timezone.utc)
@@ -106,6 +109,40 @@ def test_live_stream_packet_order_matches_whole_tree(power_log_fixture):
         whole.extend(translate_packet_tree(tree))
 
     assert [type(p).__name__ for p in live] == [type(p).__name__ for p in whole]
+
+
+def test_game_type_and_format_lines_emit_game_meta_every_game():
+    """hslog keeps game type and format outside the packet tree and never
+    clears them between games, so each line emits a packet even when the value
+    repeats the previous game's: the engine resets both at CREATE_GAME.
+    """
+    from stonereader.services._packets import GameMetaPacket
+    from stonereader.services._parser import Parser
+
+    def create_game(ts: str) -> list[str]:
+        prefix = f"D {ts} GameState.DebugPrintPower() - "
+        return [
+            prefix + "CREATE_GAME",
+            prefix + "    GameEntity EntityID=1",
+            prefix + "    Player EntityID=2 PlayerID=1 GameAccountId=[hi=1 lo=1]",
+            prefix + "    Player EntityID=3 PlayerID=2 GameAccountId=[hi=2 lo=2]",
+        ]
+
+    parser = Parser()
+    lines = [
+        *create_game("13:00:00.0000000"),
+        "D 13:00:00.0000000 GameState.DebugPrintGame() - BuildNumber=1",
+        "D 13:00:00.0000000 GameState.DebugPrintGame() - GameType=GT_RANKED",
+        "D 13:00:00.0000000 GameState.DebugPrintGame() - FormatType=FT_WILD",
+        "D 13:00:00.0000000 GameState.DebugPrintGame() - ScenarioID=2",
+        *create_game("13:10:00.0000000"),
+        "D 13:10:00.0000000 GameState.DebugPrintGame() - GameType=GT_RANKED",
+    ]
+    emitted = [p for line in lines for p in parser.feed_line(line)]
+
+    assert [
+        (p.game_type, p.format_type) for p in emitted if isinstance(p, GameMetaPacket)
+    ] == [(7, None), (None, 1), (7, None)]
 
 
 def test_no_such_enum_logged_only_once(monkeypatch, caplog):

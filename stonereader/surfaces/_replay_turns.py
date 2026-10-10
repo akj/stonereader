@@ -55,7 +55,9 @@ def turns(replay: ReplayState) -> list[TurnView]:
     return [
         TurnView(
             number=number,
-            is_friendly=state.active_player_id == replay.friendly_player_id,
+            # active_player_id is 1 for the friendly side, whichever server
+            # PlayerID the friendly player had (services/_events.py).
+            is_friendly=state.active_player_id == 1,
             state=state,
             events=tuple(events),
         )

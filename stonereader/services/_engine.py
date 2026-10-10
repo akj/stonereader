@@ -29,6 +29,7 @@ from stonereader.services._packets import (
     ChangeEntityPacket,
     CreateGamePacket,
     FullEntityPacket,
+    GameMetaPacket,
     HideEntityPacket,
     Packet,
     ShowEntityPacket,
@@ -112,6 +113,7 @@ class GameEngine:
         # the final GameState.
         self._friendly_player_id: int = 1
         self._friendly_player_resolved: bool = False
+        self._game_entity_id: int = 1
 
     @property
     def current_state(self) -> Optional[GameState]:
@@ -165,6 +167,8 @@ class GameEngine:
                 self._on_create_game(packet)
             elif isinstance(packet, TagChangePacket):
                 self._on_tag_change(packet)
+            elif isinstance(packet, GameMetaPacket):
+                self._on_game_meta(packet)
             elif isinstance(packet, BlockStartPacket):
                 self._on_block_start(packet)
             elif isinstance(packet, BlockEndPacket):
@@ -188,6 +192,28 @@ class GameEngine:
 
     def _current_turn(self) -> int:
         return self._current_state.turn if self._current_state is not None else 0
+
+    def _side(self, player_id: Any) -> int:
+        """Publish a server PlayerID as 1 (friendly) or 2 (opponent).
+
+        Bookkeeping keeps the raw CONTROLLER / PLAYER_ID values; every
+        published ``controller`` and ``active_player_id`` uses this contract
+        (services/_events.py), so it holds when the local player is Player 2.
+        """
+        return 1 if player_id == self._friendly_player_id else 2
+
+    def _active_side(self) -> Optional[int]:
+        """The published side of the player whose CURRENT_PLAYER is set."""
+        for ent in self._entities.values():
+            if ent.get("CURRENT_PLAYER") == 1 and ent.get("PLAYER_ID") is not None:
+                return self._side(ent["PLAYER_ID"])
+        return None
+
+    def _published_rows(self, rows: List[PlayedCard]) -> tuple[PlayedCard, ...]:
+        return tuple(
+            dataclasses.replace(row, controller=self._side(row.controller))
+            for row in rows
+        )
 
     def _record_entity(self, eid: int, card_id: str, tags: Dict[str, int]) -> None:
         ent = self._entities.setdefault(eid, {})
@@ -410,6 +436,12 @@ class GameEngine:
         # sides from authoritative state so any pre-resolution RESOURCES /
         # RESOURCES_USED updates that wrote to the wrong side are corrected.
         self._reapply_mana_from_entities()
+        # The published active side is relative to the friendly player too.
+        active = self._active_side()
+        if active is not None and self._current_state is not None:
+            self._current_state = dataclasses.replace(
+                self._current_state, active_player_id=active
+            )
 
         self._refresh_state()
 
@@ -457,6 +489,7 @@ class GameEngine:
                 "CREATE_GAME received while game already in progress — resetting"
             )
         self.reset()
+        self._game_entity_id = p.game_entity_id
         # Initialize entities for the GameEntity and Players
         self._record_entity(p.game_entity_id, "", p.initial_tags)
         for entity_id, player_id, name, _hi, _lo in p.players:
@@ -474,10 +507,7 @@ class GameEngine:
             hero_power="",
             hero_class="",
         )
-        game_type_name = self._enum_name(GameType, p.initial_tags.get("GAME_TYPE", 0))
-        format_type_name = self._enum_name(
-            FormatType, p.initial_tags.get("FORMAT_TYPE", 0)
-        )
+        # Game type and format arrive later as a GameMetaPacket.
         self._current_state = GameState(
             turn=0,
             active_player_id=1,
@@ -487,8 +517,6 @@ class GameEngine:
             opponent_hand=(),
             player_hero=empty_hero,
             opponent_hero=empty_hero,
-            game_type=game_type_name,
-            format_type=format_type_name,
         )
         # gap-closure 03-07 (WR-03): defensive — handles the rare case where
         # a hero entity was recorded into _entities during the loop above
@@ -505,15 +533,22 @@ class GameEngine:
         prev = ent.get(p.tag)
         ent[p.tag] = p.value
 
-        if p.tag == "TURN" and self._current_state is not None:
-            self._current_state = dataclasses.replace(self._current_state, turn=p.value)
-        elif (
-            p.tag == "CURRENT_PLAYER"
-            and p.value == 1
+        if (
+            p.tag == "TURN"
+            and p.entity_id == self._game_entity_id
             and self._current_state is not None
         ):
+            # Only the game entity's TURN is the game turn; each player entity
+            # counts its own turns under the same tag. Hearthstone flips
+            # CURRENT_PLAYER just before advancing TURN, so the active side is
+            # published here: no snapshot pairs a turn with the next player.
+            active = self._active_side()
             self._current_state = dataclasses.replace(
-                self._current_state, active_player_id=p.entity_id
+                self._current_state,
+                turn=p.value,
+                active_player_id=(
+                    self._current_state.active_player_id if active is None else active
+                ),
             )
         elif p.tag == "ZONE":
             self._handle_zone_change(p.entity_id, prev, p.value)
@@ -572,6 +607,16 @@ class GameEngine:
                 # so its health (max - DAMAGE) and armor track a hero's
                 # DAMAGE/HEALTH/ARMOR change the replay viewer speaks.
                 self._resolve_heroes()
+
+    def _on_game_meta(self, p: GameMetaPacket) -> None:
+        if self._current_state is None:
+            return
+        replacements: Dict[str, Any] = {}
+        if p.game_type is not None:
+            replacements["game_type"] = self._enum_name(GameType, p.game_type)
+        if p.format_type is not None:
+            replacements["format_type"] = self._enum_name(FormatType, p.format_type)
+        self._current_state = dataclasses.replace(self._current_state, **replacements)
 
     def _handle_zone_change(self, eid: int, prev: Any, new_zone: int) -> None:
         ent = self._entities.get(eid, {})
@@ -661,7 +706,7 @@ class GameEngine:
                     attack_in_progress=AttackInProgress(
                         attacker_entity_id=p.entity_id,
                         defender_entity_id=defender_entity_id,
-                        attacker_controller=attacker_controller,
+                        attacker_controller=self._side(attacker_controller),
                     ),
                 )
 
@@ -731,7 +776,7 @@ class GameEngine:
             card_type=base.card_type if base else "",
             zone=zone_name,
             zone_position=ent.get("ZONE_POSITION", 0) or 0,
-            controller=controller_int,
+            controller=self._side(controller_int),
             drawn_turn=drawn_turn,
             tags=tags,
             creation_lineage=ent.get("creation_lineage", "") or "",
@@ -851,10 +896,10 @@ class GameEngine:
             opponent_secrets=tuple(opponent_secrets),
             player_weapon=player_weapons[0] if player_weapons else None,
             opponent_weapon=opponent_weapons[0] if opponent_weapons else None,
-            player_played=tuple(self._player_played),
-            opponent_played=tuple(self._opponent_played),
-            player_drawn=tuple(self._player_drawn),
-            opponent_drawn=tuple(self._opponent_drawn),
+            player_played=self._published_rows(self._player_played),
+            opponent_played=self._published_rows(self._opponent_played),
+            player_drawn=self._published_rows(self._player_drawn),
+            opponent_drawn=self._published_rows(self._opponent_drawn),
             player_deck=tuple(player_deck_entities),
             player_deck_count=player_deck_count,
             opponent_deck_count=opponent_deck_count,

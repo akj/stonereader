@@ -20,6 +20,7 @@ from stonereader.services._packets import (
     BlockStartPacket,
     CreateGamePacket,
     FullEntityPacket,
+    GameMetaPacket,
     TagChangePacket,
 )
 from stonereader.services._parser import Parser
@@ -58,15 +59,13 @@ def test_emits_frozen_gamestate_snapshots():
         raise AssertionError("GameState must be frozen")
 
 
-def test_drawn_card_controller_reflects_log_controller():
-    """state.opponent_drawn[i].controller is the raw CONTROLLER tag.
+def test_published_controller_is_the_side_not_the_server_player_id():
+    """Published controllers are 1 = friendly, 2 = opponent (services/_events.py).
 
-    WR-02: _friendly_player_id defaults to 1, so when the local player is
-    assigned CONTROLLER=2 by the server (coin-flip), the entity buckets
-    into opponent_drawn with the raw CONTROLLER tag (2). This test
-    documents the existing behaviour so any future fix to
-    _friendly_player_id can verify it doesn't regress raw-controller
-    pass-through.
+    WR-02: _friendly_player_id defaults to 1, so a CONTROLLER=2 card drawn
+    before resolution is the opponent's. Once the local player resolves as the
+    server's Player 2, that same card is the friendly side's and publishes as 1;
+    phrasing and narration read controller 1 as "you".
     """
     engine = GameEngine()
     engine.apply(
@@ -96,9 +95,72 @@ def test_drawn_card_controller_reflects_log_controller():
     assert len(drawn_for_eid) == 1, (
         f"Expected one row for entity 10 in opponent_drawn; got {state.opponent_drawn}"
     )
-    assert drawn_for_eid[0].controller == 2, (
-        f"controller should be 2 (raw CONTROLLER tag), got {drawn_for_eid[0].controller}"
+    assert drawn_for_eid[0].controller == 2
+    assert [e.controller for e in state.opponent_hand if e is not None] == [2]
+
+    engine.force_friendly_player(2)
+    state = engine.current_state
+    assert state is not None
+    assert [(pc.entity_id, pc.controller) for pc in state.player_drawn] == [(10, 1)]
+    assert state.opponent_drawn == ()
+    assert [(e.entity_id, e.controller) for e in state.player_hand] == [(10, 1)]
+
+
+def test_turn_comes_from_the_game_entity_with_the_new_active_side():
+    """Each player entity also counts its own turns under the TURN tag, and
+    Hearthstone flips CURRENT_PLAYER just before the game's TURN advances.
+
+    Only the game entity's TURN is the game turn, and the active side is
+    published with it, so no snapshot pairs a turn with the next player.
+    """
+    engine = GameEngine()
+    engine.apply(
+        CreateGamePacket(
+            packet_id=0,
+            game_entity_id=1,
+            players=((2, 1, "Opponent", 1, 1), (3, 2, "Friendly", 1, 2)),
+        )
     )
+    engine.force_friendly_player(2)
+    log = [
+        (3, "CURRENT_PLAYER", 1),
+        (1, "TURN", 1),
+        (3, "TURN", 1),
+        (3, "CURRENT_PLAYER", 0),
+        (2, "CURRENT_PLAYER", 1),
+        (1, "TURN", 2),
+        (2, "TURN", 1),
+    ]
+    published = []
+    for packet_id, (entity_id, tag, value) in enumerate(log, start=1):
+        engine.apply(
+            TagChangePacket(
+                packet_id=packet_id, entity_id=entity_id, tag=tag, value=value
+            )
+        )
+        state = engine.current_state
+        assert state is not None
+        published.append((state.turn, state.active_player_id))
+
+    assert published == [(0, 1), (1, 1), (1, 1), (1, 1), (1, 1), (2, 2), (2, 2)]
+
+
+def test_game_meta_sets_type_and_format():
+    """Game type and format come from the log's game metadata, not tags."""
+    engine = GameEngine()
+    engine.apply(
+        CreateGamePacket(
+            packet_id=0,
+            game_entity_id=1,
+            players=((2, 1, "P1", 1, 1), (3, 2, "P2", 2, 2)),
+        )
+    )
+    engine.apply(GameMetaPacket(packet_id=1, game_type=7))
+    engine.apply(GameMetaPacket(packet_id=2, format_type=1))
+
+    state = engine.current_state
+    assert state is not None
+    assert (state.game_type, state.format_type) == ("RANKED", "WILD")
 
 
 def test_terminal_zone_entity_projected_to_graveyard():

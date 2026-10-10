@@ -23,6 +23,8 @@ class CreateGamePacket(Packet):
     """The ``GameState.DebugPrintPower() - CREATE_GAME`` boundary.
 
     players is a tuple of (entity_id, player_id, name, hi, lo) per player.
+    game_entity_id is the entity whose TURN tag is the game turn; each player
+    entity carries its own TURN counter as well.
     Both entity_id and player_id are retained (WR-02 / D-18): the engine's
     FriendlyPlayerExporter heuristic needs player_id distinctly from
     entity_id. hi/lo come from the Player's GameAccountId (lo == 0 marks
@@ -32,6 +34,19 @@ class CreateGamePacket(Packet):
     game_entity_id: int
     players: Tuple[Tuple[int, int, str, int, int], ...] = ()
     initial_tags: Dict[str, int] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class GameMetaPacket(Packet):
+    """The game's type and format, which Hearthstone logs as game metadata.
+
+    They arrive as ``GameState.DebugPrintGame()`` lines after CREATE_GAME (an
+    HSReplay file keeps them on its ``<Game>`` element), never as tags. Values
+    are raw ``GameType`` / ``FormatType`` ints; ``None`` leaves a field as is.
+    """
+
+    game_type: Optional[int] = None
+    format_type: Optional[int] = None
 
 
 @dataclass(frozen=True)
