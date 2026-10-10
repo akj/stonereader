@@ -140,6 +140,7 @@ _SET_NAME_KEYS = {
     "THE_LOST_CITY": "GLOBAL_CARD_SET_TLC",
     "TIME_TRAVEL": "GLOBAL_CARD_SET_TIME",
     "CATACLYSM": "GLOBAL_CARD_SET_CATA",
+    "ESCAPEFROM_VIOLET_HOLD": "GLOBAL_CARD_SET_JAIL",
 }
 
 
@@ -148,6 +149,9 @@ def set_name(card_set: str) -> str:
 
     CORE is "Core"; HERO_SKINS and the internal placeholder sets have no name.
     """
+    if card_set.startswith("PLACEHOLDER_") or card_set.endswith("_HIDDEN"):
+        # Hidden Core reprints; the game data names their set "Core (Invalid)".
+        return ""
     key = _SET_NAME_KEYS.get(card_set)
     if key is None and card_set in CardSet.__members__:
         key = CardSet[card_set].name_global

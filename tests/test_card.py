@@ -136,7 +136,9 @@ def test_no_card_in_the_database_speaks_markup(card_db: CardDatabase) -> None:
         ("TITANS", "Titans"),
         ("LOOTAPALOOZA", "Kobolds & Catacombs"),
         ("HERO_SKINS", ""),
+        ("ESCAPEFROM_VIOLET_HOLD", "Escape from Violet Hold"),
         ("PLACEHOLDER_202204", ""),
+        ("CORE_HIDDEN", ""),
         ("TEST", ""),
     ],
 )
@@ -148,9 +150,7 @@ def test_every_deck_card_set_line_is_a_spoken_name(card_db: CardDatabase) -> Non
     deck_cards = [card for card in card_db.collectible_cards if card.deckable]
     names = {card.card_set: set_name(card.card_set) for card in deck_cards}
 
-    assert sorted(key for key, name in names.items() if not name) == [
-        "PLACEHOLDER_202204"
-    ]
+    assert sorted(key for key, name in names.items() if not name) == ["CORE_HIDDEN"]
     assert [
         name for name in names.values() if "_" in name or name.isupper()
     ] == []
