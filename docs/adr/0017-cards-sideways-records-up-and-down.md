@@ -2,7 +2,11 @@
 
 ## Status
 
-Accepted (design contract, 2026-10-10). Amends ADR-0004 (which Surfaces are
+Accepted (design contract, 2026-10-10; revised the same day to match the
+implementation — Deck's delete, Games' labels and fresh opens, Replays'
+weekday and game-type names, Enter's no-event reply, Live Game's waiting
+keys, the turn-change phrase, help order, card and set hygiene, and the
+window). Amends ADR-0004 (which Surfaces are
 horizontal lists), ADR-0006 (where Statistics and the import actions live),
 ADR-0007 (empty zones, and what a zone switch repeats), ADR-0009 (help
 ordering and key ranges), ADR-0012 (the Statistics surface), ADR-0013 (Live
@@ -66,9 +70,10 @@ non-deck option those keys announce their existing no-ops.
 
 Vertical menu, a Drill-down from Decks or from Replays' D. Window title and
 context label are the subject's name ("Odd Hunter", "All decks", "Other
-games"). Options:
+games"). Every open starts at the first option. Options:
 
-- `"Cards, {n}"` — saved decks only; opens Deck detail.
+- `"Cards, {n}"` — saved decks only; opens Deck detail, whose window title and
+  context label are `"{name} cards"` ("Odd Hunter cards").
 - `"Games, {record}, {p} percent"` (percent only when any game was decided;
   `"Games, none yet"` with no games) — opens the Games Surface for exactly
   the games that record counts. With no games, Enter announces `"No games
@@ -78,8 +83,9 @@ games"). Options:
   each opens the Games Surface for those games.
 - `"Copy deck code"` and `"Delete deck"` — saved decks only. Delete deck
   arms on Enter ("Press Enter again to delete {name}") and deletes on the
-  second Enter, then pops to Decks with `"{name} deleted"` followed by the
-  Decks landing. Delete/Shift+Delete and C also work anywhere on the page.
+  second Enter, then pops one level — to Decks, or to Replays when the page
+  was opened with D — with `"{name} deleted"` followed by that Surface's
+  landing. Delete/Shift+Delete and C also work anywhere on the page.
 
 **Every record row opens the games behind it** — the follow-the-fact rule.
 The Statistics Surface is retired; its facts live on Deck pages.
@@ -88,21 +94,26 @@ The Statistics Surface is retired; its facts live on Deck pages.
 
 Vertical menu, a Drill-down from a Deck page record row. Context label names
 the selection: `"{name} games"`, `"{name} versus {Class}"`,
-`"{name}, last 20 games"`, with `"All games"` / `"Other games"` standing in
-for the name on those subjects. Rows are Replays rows, without the deck name
-when the list is one saved deck's. Enter opens the replay; Delete and
-Shift+Delete delete it. No stats toggle (a toggle here would remove the row
-from under the cursor) and no import row.
+`"{name}, last 20 games"`. On the All decks and Other games pages,
+`"All games"` / `"Other games"` stand in for the name, and the full list is
+just `"All games"` / `"Other games"`. Every open starts at the newest game.
+Rows are Replays rows, without the deck name when the list is one saved
+deck's. Enter opens the replay; Delete and Shift+Delete delete it, and a list
+emptied that way says `"{context label}: empty"` ("Odd Hunter versus Warrior:
+empty"). No stats toggle (a toggle here would remove the row from under the
+cursor) and no import row.
 
 ### Replays
 
 Vertical menu, newest first, then `"Import replays…"`. Row Title line:
 `"{Outcome} {Class} in {n} turns, {when}[, {deck}][, {game type}][, {format}][, imported][, not counted]"`
 — outcome is "Won against", "Lost to", "Tied with", or "Result unknown
-against"; `when` is "today 3:36 PM", "yesterday 9:10 PM", a weekday within
-the last week, otherwise "August 16" (with the year when not this year);
-game type is said only when it is not Ranked, format only when not Standard,
-and unknown values are omitted rather than spoken as "Unknown". Enter opens
+against"; `when` is "today 3:36 PM", "yesterday 9:10 PM", the bare weekday
+("Wednesday") within the last week, otherwise "August 16" (with the year when
+not this year); game type is said only when it is not Ranked ("Practice" for
+a game against the AI, "Friendly" for a friendly challenge), format only when
+not Standard, and unknown values are omitted rather than spoken as "Unknown".
+Enter opens
 the replay; Space toggles stats membership; Delete/Shift+Delete delete;
 **D opens the Deck page of the deck the game was played with**, or announces
 `"No saved deck for this game"`.
@@ -110,9 +121,10 @@ the replay; Space toggles stats membership; Delete/Shift+Delete delete;
 ### Enter follows the fact in the Replay Viewer
 
 In the played and drawn zones, Enter moves the replay position to the event
-where that card was played or drawn and lands in the Events zone on it.
-Elsewhere in the Replay Viewer, and on Card Browser, Deck detail, and Live
-Game, Enter stays an announced no-op.
+where that card was played or drawn and lands in the Events zone on it; with
+no matching event it says `"No event for this card"`. Elsewhere in the Replay
+Viewer, and on Card Browser, Deck detail, and Live Game, Enter stays an
+announced no-op.
 
 ### Opening a replay starts at the beginning
 
@@ -133,13 +145,16 @@ turn: `"Your turn {t}"` / `"Opponent's turn {t}"`). The prefix is spoken on
 landing, orientation reread, and in-place rebuilds that change it (turn
 step, event jump); a zone switch and empty-zone repeats omit it. Full form:
 `"Opponent's turn 3, Events, Threads of Despair revealed, 2 of 20"`; zone
-switch: `"Your board, Bloodmage Thalnos, 1 of 3"`.
+switch: `"Your board, Bloodmage Thalnos, 1 of 3"`. The turn-change event in
+the Events zone reads the same way: `"Your turn {t}"` / `"Opponent's turn
+{t}"`.
 
 ### Live Game says its state
 
 With no game in progress, landing on Live Game speaks
 `"Live Game, waiting for a game"`, and every zone letter, query, and
-navigation key there speaks `"Waiting for a game"`. Home's option reads
+navigation key there speaks `"Waiting for a game"`; L, Tab, and Ctrl+F keep
+their usual responses, and Shift+Up rereads the landing. Home's option reads
 `"Live Game, waiting for a game"` or `"Live Game, turn {t} versus {Class}"`
 during a game. During a game, entry is unchanged (zone utterance, no turn
 prefix — ADR-0013).
@@ -147,16 +162,19 @@ prefix — ADR-0013).
 ### Help
 
 F1 always opens a Help menu on its widget-type sentence. Bindings that share
-one help phrase (digits) are one option. Enter's phrase comes first, then the
-Surface's keys in the order its spec lists them, then Universal keys and All
-commands.
+one help phrase (digits) are one option; Enter on it says "Press one of these
+keys to use this". Enter's phrase comes first, then the Surface's keys in the
+order its spec lists them, then Universal keys and All commands. Where a
+Surface registers its keys in a different order, its declaration names the
+keys that follow Enter. Slot no-ops are not options.
 
 ### Copy and data hygiene
 
 Counts agree with their nouns everywhere. Class keys are spoken through one
 formatter ("Death Knight", never "Deathknight"). Card text carries no
 markup ("[x]", "@", "$", "#", tags), set names are spoken names (never
-"HERO_SKINS"), and Card Browser lists cards that can go in a deck — hero
+"HERO_SKINS"; all-capital names such as "TITANS" in title case), and Card
+Browser lists cards that can go in a deck, one printing per name — hero
 skins and other cosmetics are excluded.
 
 ### Signature sound
@@ -168,8 +186,11 @@ sound beyond the event clips themselves.
 ### The window
 
 The window shows where the User is: a heading with the stack path
-("Decks › Odd Hunter › Cards"), the list, and the current item's detail
-lines beside the list rather than below it.
+("Decks › Odd Hunter › Odd Hunter cards"), a list that scrolls to keep the
+current row in view, and, on a horizontal list, a detail pane with the
+current item's detail lines beside the list rather than below it. The
+navigation controller sets the heading on every landing, as it sets the
+window title.
 
 ## Alternatives considered and rejected
 

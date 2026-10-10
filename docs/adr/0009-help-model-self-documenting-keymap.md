@@ -7,6 +7,12 @@ established (F1 universal, pushes a help surface, first line states the
 widget type). Implementation lands via PRDs opened against the final UI spec
 (wayfinder map #17); nothing here ships code by itself. Decided in ticket #23.
 
+Amended 2026-10-10 by ADR-0017: F1 always opens the Help menu on its
+widget-type sentence with no search. Enter's phrase comes first, then the
+surface's keys in the ui-spec's order; bindings that share one phrase (the
+digits) are one option. The "No {zone} on this screen" no-op is retired —
+an empty zone is a place.
+
 ## Context
 
 ADR-0004 fixed F1's shell and deferred its content. HSA ships F1 contextual
