@@ -87,6 +87,11 @@ def card_db() -> CardDatabase:
             id="hero-power-attack-and-armor-markers",
         ),
         pytest.param(
+            "BG24_Reward_134",
+            "At the start of each turn, get 2 random Naga.",
+            id="noun-slot-is-a-minion-type-not-a-count",
+        ),
+        pytest.param(
             "CS2_089",
             "Restore 8 Health to your hero.",
             id="healing-marker",

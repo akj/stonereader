@@ -5,7 +5,7 @@ from string import capwords
 from typing import Any, Dict, List, Optional, Sequence
 
 from hearthstone.cardxml import load
-from hearthstone.enums import CardSet, GameTag
+from hearthstone.enums import CardSet, GameTag, Race
 from hearthstone.stringsfile import load_txt
 from hearthstone_data import get_strings_file
 
@@ -42,6 +42,9 @@ _VARIANT_BREAK = re.compile(r"(?:(?<=[.!?)_\"])|(?<=</[bi]>))\s*@")
 # "(Gain 3 Armor to upgrade.)", is part of the collection text.
 _NOTE = re.compile(r"\s*<i>\([^@{}]*\)</i>\s*")
 _SLOT = re.compile(r"\{(\d+)\}")
+# A slot an article or "random" introduces, ending its clause, names a thing
+# (a minion type such as Naga), never a count.
+_NOUN_SLOT = re.compile(r"\b(random |an? )\{(\d+)\}(?=\s*(?:[.,!;:]|$))")
 _PLURAL = re.compile(r"\|4\s*\(([^,)]*),([^)]*)\)")
 _STANDALONE_NUMBER = re.compile(r"(?<![\d/])\d+(?![\d/])")
 # Script data this large names a card by DBF ID rather than counting anything.
@@ -65,6 +68,18 @@ def _card_text(template: str, script_data: Sequence[Optional[int]]) -> str:
         text = next((v for v in reversed(variants) if not _SLOT.search(v)), text)
     elif len(variants) == 2 and _NOTE.fullmatch(variants[1]):
         text = f"{text} {variants[1]}"
+
+    def race_name(index: int) -> str:
+        value = script_data[index] if index < len(script_data) else None
+        try:
+            race = Race(value) if value is not None else None
+        except ValueError:
+            race = None
+        return _global_strings().get(f"GLOBAL_RACE_{race.name}", "") if race else ""
+
+    text = _NOUN_SLOT.sub(
+        lambda match: match.group(1) + race_name(int(match.group(2))), text
+    )
 
     def script_number(index: int) -> Optional[int]:
         value = script_data[index] if index < len(script_data) else None
