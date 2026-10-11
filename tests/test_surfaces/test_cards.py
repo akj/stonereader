@@ -360,6 +360,27 @@ def test_tab_cycles_both_directions_with_wraparound() -> None:
     assert label() == "All cards"
 
 
+def test_mana_filter_persists_across_class_switch_and_cursor_resets() -> None:
+    harness = make_harness(
+        database(
+            card(1, "Knight Three A", cost=3, card_class="DEATHKNIGHT"),
+            card(2, "Knight Three B", cost=3, card_class="DEATHKNIGHT"),
+            card(3, "Knight Four", cost=4, card_class="DEATHKNIGHT"),
+            card(4, "Neutral Three", cost=3),
+        )
+    )
+
+    harness.press(Chord("3"))
+    harness.press(Chord("right"))
+    harness.press(Chord("tab"))
+
+    assert current_names(harness) == ["Knight Three A", "Knight Three B"]
+    assert harness.speech.calls[-1] == (
+        "Death Knight cards, 3 mana, Knight Three A, 1 of 2",
+        True,
+    )
+
+
 def test_search_commit_abandon_and_empty_commit_clear() -> None:
     harness = make_harness(
         database(
