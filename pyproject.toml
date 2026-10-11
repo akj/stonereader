@@ -13,6 +13,7 @@ dependencies = [
     "hsreplay>=1.16.2",
     "pip",
     "psutil>=7.0,<8",
+    # hsreplay imports pkg_resources, which setuptools 82 removed.
     "setuptools>=80.9.0,<81",
     "unitypy>=1.25.3",
     "wxpython>=4.2.5",

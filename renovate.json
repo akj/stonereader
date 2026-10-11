@@ -17,6 +17,11 @@
       "schedule": ["at any time"],
       "automerge": true,
       "prPriority": 10
+    },
+    {
+      "description": "hsreplay (latest 1.16.2) imports pkg_resources unconditionally, and setuptools 82 removed pkg_resources. Hold setuptools at the pyproject pin until hsreplay stops importing it",
+      "matchPackageNames": ["setuptools"],
+      "allowedVersions": "<81"
     }
   ]
 }
